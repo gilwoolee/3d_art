@@ -10,6 +10,8 @@ robot collision checks, timing, and partial-build playback exist. Integrated
 build-order search and a verified complete build are still outstanding. Pen,
 material, tool dimensions, and physical robot variant remain uncalibrated.
 
+Continuing on Blondie: read the [handoff](docs/HANDOFF.md) first.
+
 ## Work on Blondie
 
 The private source repository is [gilwoolee/3d_art](https://github.com/gilwoolee/3d_art).
