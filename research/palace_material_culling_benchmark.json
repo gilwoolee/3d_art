@@ -1,0 +1,18 @@
+{
+  "segments": 15749,
+  "poses": 3,
+  "stroke": "draw-0013",
+  "results": {
+    "full": {
+      "seconds": 0.21778645901940763,
+      "queries_returned": 24,
+      "contacts": []
+    },
+    "culled": {
+      "seconds": 0.01204454101389274,
+      "queries_returned": 1,
+      "contacts": []
+    }
+  },
+  "scope": "Three saved Palace drawing poses; static material clearance check only, not whole-planner or physical speedup"
+}

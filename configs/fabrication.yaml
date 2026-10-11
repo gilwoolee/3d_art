@@ -1,0 +1,41 @@
+schema_version: 1
+# Development parameters only; the pen/mount have not been measured.
+simulation_only: true
+graph:
+  strand_diameter_m: 0.001
+  junction_tolerance_m: 0.00075
+  flatten_tolerance_m: 0.00005
+  sampling_chord_m: 0.003
+  minimum_crossing_angle_deg: 15
+  ground_tolerance_m: 0.0005
+  maximum_connector_m: 0.035
+  maximum_brace_m: 0.05
+  maximum_braces: 12
+structure:
+  calibrated: false
+  material_label: unmeasured development material
+  young_modulus_pa: 1000000000
+  poisson_ratio: 0.35
+  density_kg_m3: 1240
+  yield_stress_pa: 15000000
+  joint_model: rigid_unverified
+  element_length_m: 0.008
+  maximum_displacement_m: 0.001
+  maximum_linear_deflection_ratio: 0.1
+process:
+  calibrated: false
+  pen_model: null
+  calibration_data: null
+  # Unknown capabilities are not automatic failures. Populate from pen tests.
+  minimum_stroke_m: null
+  maximum_free_tip_length_m: null
+  maximum_horizontal_reach_m: null
+  maximum_downward_motion_m: null
+  minimum_curvature_radius_m: null
+  cooled_anchor_age_s: null
+  # Timing assumptions only, not measurements or pen specifications.
+  nominal_speed_m_s: 0.003
+  join_s: 1.0
+  stop_lag_s: 0.5
+  start_lag_s: 0.5
+  strand_diameter_m: 0.001

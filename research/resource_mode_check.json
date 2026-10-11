@@ -1,0 +1,13 @@
+{
+  "scope": "Resource selection and preservation of existing result; not one-arm trajectory acceptance",
+  "single_allocation_actions": 64,
+  "single_active_arms": [
+    "arm_1"
+  ],
+  "mode_switch_rejected_before_modifying_existing_run": true,
+  "original_artifact_hashes": {
+    "run.json": "6d43ab4113e4f4f6c8adc2eb6232e4c215ade54f5b5418d7138d2095b997f480",
+    "allocation_motions.json": "e5fa7eea6698b7984e1768672a9f779b437b5333e320fd49f2e5f6954e461104",
+    "cell_pipeline_result.json": "754dc331f56ba630e79ab6770969151afa22208b26a0f5243440070483501d6d"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "status": "INTENTIONAL_COMPUTE_RESTART",
+  "allocation_sha256": "b478837a50984cdf4ff6b1c81f951eca2c98f696b2e515c67304df2a60c1ed5b",
+  "prepared_strokes": 18,
+  "reason": "Intentional restart to apply conservative material-envelope culling; same geometry and allocation",
+  "benchmark": "palace_material_culling_benchmark.json"
+}

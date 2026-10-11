@@ -1,0 +1,26 @@
+{
+  "source_plan_sha256": "722740dfb3bb2db1307b20c20ca57533a2b353544928167febc39bc1ab3487d0",
+  "scope": "One actual Palace motion; offset changed, collision replay repeated; not full-build validation",
+  "runs": [
+    {
+      "status": "CERTIFIED_PREFIX_REPLAY",
+      "checked_actions": 1,
+      "checked_edges": 155,
+      "reused_path_checks": 0,
+      "checked_intervals": 155,
+      "completed_strokes": 1,
+      "start_delay_s": 0.0,
+      "wall_seconds": 1.7759592090151273
+    },
+    {
+      "status": "CERTIFIED_PREFIX_REPLAY",
+      "checked_actions": 1,
+      "checked_edges": 155,
+      "reused_path_checks": 1,
+      "checked_intervals": 156,
+      "completed_strokes": 1,
+      "start_delay_s": 1.0,
+      "wall_seconds": 1.130668916972354
+    }
+  ]
+}

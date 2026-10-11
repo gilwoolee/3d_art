@@ -1,0 +1,23 @@
+{
+  "recorded_at": "2026-10-11T08:53:31.317043+00:00",
+  "kind": "right_angle_lean_continuation",
+  "run": "runs/palace_15cm_right_angle_lean_cell",
+  "simulation_only": true,
+  "executable": false,
+  "changed_profile_fields": [
+    "drawing_pen_tilt_deg",
+    "setup_description"
+  ],
+  "source_identity": {
+    "pen_strokes.json": true,
+    "stroke_graph.json": true,
+    "construction_plan.json": true,
+    "geometry.glb": true,
+    "normalized.glb": true
+  },
+  "nozzle_lean_deg": 10.0,
+  "base_tool_and_clearance_unchanged": true,
+  "diagnostic": "research/palace_right_angle_material_lean_probe.json",
+  "status": "GENERATING_FIXED_CATALOGUE",
+  "scope": "One fixed orientation per arm/action; all original Palace geometry retained. Static diagnostic does not certify new drawing paths or full replay."
+}

@@ -1,0 +1,39 @@
+{
+  "active_mode": "arm_1/draw-0032/anchor-0-reverse-0-roll-0-branch-0",
+  "segments": 38536,
+  "queries": [
+    {
+      "pose": "draw_start",
+      "body": "link6:0",
+      "box_distance_m": 0.1230177777945843,
+      "box_query_s": 9.000010322779417e-06,
+      "actual": {
+        "name": "arm_1/draw-0020/290/3",
+        "distance_m": 0.1776521344210332
+      },
+      "actual_query_s": 0.04077949997736141
+    },
+    {
+      "pose": "draw_mid",
+      "body": "link6:0",
+      "box_distance_m": 0.15039984918345675,
+      "box_query_s": 6.165995728224516e-06,
+      "actual": {
+        "name": "arm_1/draw-0020/290/3",
+        "distance_m": 0.20507021509438625
+      },
+      "actual_query_s": 0.031567958008963615
+    },
+    {
+      "pose": "draw_end",
+      "body": "link6:0",
+      "box_distance_m": 0.12323131310313477,
+      "box_query_s": 6.874965038150549e-06,
+      "actual": {
+        "name": "arm_1/draw-0020/290/3",
+        "distance_m": 0.17877313374992027
+      },
+      "actual_query_s": 0.03034754196414724
+    }
+  ]
+}

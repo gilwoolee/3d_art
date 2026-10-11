@@ -1,0 +1,13 @@
+schema_version: 1
+method: mesh
+resolution: 384
+azimuth_deg: [0, 45, 90, 135, 180, 225, 270, 315]
+elevation_deg: [10]
+normal_smoothing_m: 0.0015
+minimum_length_m: 0.025
+minimum_visible_fraction: 0.35
+visibility_tolerance_m: 0.002
+sample_spacing_m: 0.0005
+smoothing_m: 0.001
+maximum_shift_m: 0.001
+fit_tolerance_m: 0.0004

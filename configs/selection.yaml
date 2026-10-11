@@ -1,0 +1,9 @@
+schema_version: 1
+# Leave a provisional allowance for travel, joins and cooling. This is not a
+# measured guarantee; the complete timed schedule must later meet 1800 s.
+overhead_reserve_s: 360
+maximum_seconds: 120
+minimum_marginal_gain: 0.0001
+# Selection views differ from the comparison views used to evaluate its output.
+azimuth_deg: [0, 90, 180, 270]
+elevation_deg: [25, 55]

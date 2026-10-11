@@ -1,0 +1,20 @@
+name: Palace Reflections
+source: Meshy_AI_Palace_Reflections_1011014238_texture.glb
+run_dir: runs/palace
+source_up: y
+max_extent_m: 0.15
+seed: 42
+geometry_faces: 80000
+geometric_candidates:
+  sections_per_axis: 9
+  min_length_m: 0.012
+  max_curves: 64
+  fit_tolerance_m: 0.0007
+wir3d:
+  repository: external/wir3d
+  revision: 35171dfca522272eb113882acfaaf6de746a78ce
+  budgets: [20, 40, 60]
+  geometry_iterations: 10000
+  semantic_iterations: 10000
+  keypoints: 15
+

@@ -1,0 +1,600 @@
+{
+  "schema_version": 1,
+  "kind": "curves",
+  "frame": "build",
+  "units": "m",
+  "method": "explicit_reference_fixture",
+  "curves": [
+    {
+      "id": "draw-0000",
+      "role": "artistic",
+      "parent_curve": "rim0-0",
+      "start": "n000",
+      "end": "n001",
+      "closed": false,
+      "segments": [
+        [
+          [
+            -0.04,
+            -0.04,
+            0.0
+          ],
+          [
+            -0.013333333333333332,
+            -0.04,
+            0.0
+          ],
+          [
+            0.013333333333333336,
+            -0.04,
+            0.0
+          ],
+          [
+            0.04,
+            -0.04,
+            0.0
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim0-0-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n000",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n001",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0001",
+      "role": "artistic",
+      "parent_curve": "rim1-0",
+      "start": "n002",
+      "end": "n003",
+      "closed": false,
+      "segments": [
+        [
+          [
+            -0.04,
+            -0.04,
+            0.08
+          ],
+          [
+            -0.013333333333333332,
+            -0.04,
+            0.08
+          ],
+          [
+            0.013333333333333336,
+            -0.04,
+            0.08
+          ],
+          [
+            0.04,
+            -0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim1-0-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n002",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n003",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0002",
+      "role": "artistic",
+      "parent_curve": "upright0",
+      "start": "n000",
+      "end": "n002",
+      "closed": false,
+      "segments": [
+        [
+          [
+            -0.04,
+            -0.04,
+            0.0
+          ],
+          [
+            -0.04,
+            -0.04,
+            0.02666666666666667
+          ],
+          [
+            -0.04,
+            -0.04,
+            0.05333333333333334
+          ],
+          [
+            -0.04,
+            -0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08,
+      "diameter_m": 0.001,
+      "members": [
+        "upright0-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n000",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n002",
+          "distance_m": 0.08,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0003",
+      "role": "artistic",
+      "parent_curve": "rim0-1",
+      "start": "n001",
+      "end": "n004",
+      "closed": false,
+      "segments": [
+        [
+          [
+            0.04,
+            -0.04,
+            0.0
+          ],
+          [
+            0.04,
+            -0.013333333333333332,
+            0.0
+          ],
+          [
+            0.04,
+            0.013333333333333336,
+            0.0
+          ],
+          [
+            0.04,
+            0.04,
+            0.0
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim0-1-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n001",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n004",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0004",
+      "role": "artistic",
+      "parent_curve": "rim1-1",
+      "start": "n003",
+      "end": "n005",
+      "closed": false,
+      "segments": [
+        [
+          [
+            0.04,
+            -0.04,
+            0.08
+          ],
+          [
+            0.04,
+            -0.013333333333333332,
+            0.08
+          ],
+          [
+            0.04,
+            0.013333333333333336,
+            0.08
+          ],
+          [
+            0.04,
+            0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim1-1-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n003",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n005",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0005",
+      "role": "artistic",
+      "parent_curve": "upright1",
+      "start": "n001",
+      "end": "n003",
+      "closed": false,
+      "segments": [
+        [
+          [
+            0.04,
+            -0.04,
+            0.0
+          ],
+          [
+            0.04,
+            -0.04,
+            0.02666666666666667
+          ],
+          [
+            0.04,
+            -0.04,
+            0.05333333333333334
+          ],
+          [
+            0.04,
+            -0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08,
+      "diameter_m": 0.001,
+      "members": [
+        "upright1-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n001",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n003",
+          "distance_m": 0.08,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0006",
+      "role": "artistic",
+      "parent_curve": "rim0-2",
+      "start": "n004",
+      "end": "n006",
+      "closed": false,
+      "segments": [
+        [
+          [
+            0.04,
+            0.04,
+            0.0
+          ],
+          [
+            0.013333333333333332,
+            0.04,
+            0.0
+          ],
+          [
+            -0.013333333333333336,
+            0.04,
+            0.0
+          ],
+          [
+            -0.04,
+            0.04,
+            0.0
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim0-2-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n004",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n006",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0007",
+      "role": "artistic",
+      "parent_curve": "rim1-2",
+      "start": "n005",
+      "end": "n007",
+      "closed": false,
+      "segments": [
+        [
+          [
+            0.04,
+            0.04,
+            0.08
+          ],
+          [
+            0.013333333333333332,
+            0.04,
+            0.08
+          ],
+          [
+            -0.013333333333333336,
+            0.04,
+            0.08
+          ],
+          [
+            -0.04,
+            0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim1-2-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n005",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n007",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0008",
+      "role": "artistic",
+      "parent_curve": "upright2",
+      "start": "n004",
+      "end": "n005",
+      "closed": false,
+      "segments": [
+        [
+          [
+            0.04,
+            0.04,
+            0.0
+          ],
+          [
+            0.04,
+            0.04,
+            0.02666666666666667
+          ],
+          [
+            0.04,
+            0.04,
+            0.05333333333333334
+          ],
+          [
+            0.04,
+            0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08,
+      "diameter_m": 0.001,
+      "members": [
+        "upright2-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n004",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n005",
+          "distance_m": 0.08,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0009",
+      "role": "artistic",
+      "parent_curve": "rim0-3",
+      "start": "n006",
+      "end": "n000",
+      "closed": false,
+      "segments": [
+        [
+          [
+            -0.04,
+            0.04,
+            0.0
+          ],
+          [
+            -0.04,
+            0.013333333333333332,
+            0.0
+          ],
+          [
+            -0.04,
+            -0.013333333333333336,
+            0.0
+          ],
+          [
+            -0.04,
+            -0.04,
+            0.0
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim0-3-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n006",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n000",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0010",
+      "role": "artistic",
+      "parent_curve": "rim1-3",
+      "start": "n007",
+      "end": "n002",
+      "closed": false,
+      "segments": [
+        [
+          [
+            -0.04,
+            0.04,
+            0.08
+          ],
+          [
+            -0.04,
+            0.013333333333333332,
+            0.08
+          ],
+          [
+            -0.04,
+            -0.013333333333333336,
+            0.08
+          ],
+          [
+            -0.04,
+            -0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08000000000000002,
+      "diameter_m": 0.001,
+      "members": [
+        "rim1-3-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n007",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n002",
+          "distance_m": 0.08000000000000002,
+          "segment_boundary": 1
+        }
+      ]
+    },
+    {
+      "id": "draw-0011",
+      "role": "artistic",
+      "parent_curve": "upright3",
+      "start": "n006",
+      "end": "n007",
+      "closed": false,
+      "segments": [
+        [
+          [
+            -0.04,
+            0.04,
+            0.0
+          ],
+          [
+            -0.04,
+            0.04,
+            0.02666666666666667
+          ],
+          [
+            -0.04,
+            0.04,
+            0.05333333333333334
+          ],
+          [
+            -0.04,
+            0.04,
+            0.08
+          ]
+        ]
+      ],
+      "length_m": 0.08,
+      "diameter_m": 0.001,
+      "members": [
+        "upright3-0"
+      ],
+      "junction_visits": [
+        {
+          "node": "n006",
+          "distance_m": 0.0,
+          "segment_boundary": 0
+        },
+        {
+          "node": "n007",
+          "distance_m": 0.08,
+          "segment_boundary": 1
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Hand-specified reference topology; not automatic mesh abstraction"
+  ]
+}

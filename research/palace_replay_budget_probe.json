@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "kind": "dual_arm_validation",
+  "status": "REPLAY_TIME_BUDGET",
+  "phase": "PATH_CHECKS",
+  "simulation_only": true,
+  "executable": false,
+  "source_plan_sha256": "ddbed60e814d23f03004a861ec6eb00718116449ea9b4535ec98180a27a8332c",
+  "inputs": {
+    "offline_dual_arm_plan.json": "ddbed60e814d23f03004a861ec6eb00718116449ea9b4535ec98180a27a8332c"
+  },
+  "horizon_s": 2034.935,
+  "requested_strokes": 64,
+  "completed_strokes": 0,
+  "checked_intervals": 0,
+  "checked_actions": 1,
+  "requested_actions": 66,
+  "checked_edges": 372,
+  "requested_edges": 31937,
+  "failures": [
+    {
+      "status": "TIME_BUDGET",
+      "phase": "PATH_CHECKS"
+    }
+  ],
+  "scope": [
+    "Saved joint paths and clocks, joint limits, velocity and acceleration",
+    "Both arms, static obstacles and growing material on the shared clock",
+    "Start-anchor readiness and final return for a complete plan"
+  ],
+  "limitations": [
+    "Transfer durations are estimates until selected motions are constructed",
+    "No inter-arm or growing-material feasibility is implied by allocation",
+    "Anchor/cooling readiness is encoded; intermediate stiffness is not certified",
+    "Pen and Flexiv process parameters remain uncalibrated",
+    "Cartesian reference tracking uses the planner's preparation audit; it is not recomputed here"
+  ],
+  "active_action": {
+    "arm": "arm_1",
+    "stroke_id": "backbone-base-001"
+  }
+}

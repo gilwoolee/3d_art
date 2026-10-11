@@ -1,0 +1,26 @@
+{
+  "scope": "Exact failed source interval; not a full-motion or schedule certificate",
+  "arm": "arm_2",
+  "stroke": "draw-0010",
+  "original_interval": 637,
+  "rows": [
+    {
+      "subdivisions": 2,
+      "intervals": 2,
+      "maximum_position_bound_m": 0.0005121701094794088,
+      "status": "BOUND_EXCEEDS_TOLERANCE"
+    },
+    {
+      "subdivisions": 4,
+      "intervals": 4,
+      "maximum_position_bound_m": 0.0002555381249506846,
+      "status": "BOUNDED"
+    },
+    {
+      "subdivisions": 8,
+      "intervals": 8,
+      "maximum_position_bound_m": 0.00023994055273681886,
+      "status": "BOUNDED"
+    }
+  ]
+}

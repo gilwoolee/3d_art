@@ -1,0 +1,15 @@
+{
+  "source_run": "runs/torus_integrated_cell",
+  "arm": "arm_1",
+  "stroke": "draw-0014",
+  "edge_index": 13,
+  "tip_speed_limit_m_s": 0.003,
+  "prior_upper_bound_m_s": 0.0030051327304130896,
+  "refined_upper_bound_m_s": 0.0029999930325059544,
+  "prior_maximum_bisection_depth": 10,
+  "new_maximum_bisection_depth": 16,
+  "tolerance_m_s": 1e-08,
+  "geometry_and_timing_changed": false,
+  "scope": "One previously unresolved interval; full shared-clock replay remains a separate check",
+  "regression": "tests/test_timing.py checks endpoint maximum and rejects a 1 percent faster clock"
+}

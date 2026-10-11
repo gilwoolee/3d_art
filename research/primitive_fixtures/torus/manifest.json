@@ -1,0 +1,32 @@
+{
+  "name": "torus",
+  "source": "model_mm.stl",
+  "source_units": "mm",
+  "source_up": "z",
+  "max_extent_m": 0.12,
+  "bounds_m": [
+    [
+      -0.06,
+      -0.06,
+      0.0
+    ],
+    [
+      0.06,
+      0.06,
+      0.03
+    ]
+  ],
+  "stl_sha256": "432634b5ef1e89e35f0e66708ad28f1021d03dc66b967c5411c2fbe303a8e295",
+  "graph_sha256": "6be66878755d23abea0695848c7263aec13595ec90734389ce4357925ba71236",
+  "vertices": 16,
+  "material_members": 32,
+  "reference_curves": 8,
+  "total_length_m": 1.508105744663161,
+  "preflight_status": "READY_FOR_ORDER_SEARCH",
+  "max_displacement_m": 5.792932193232696e-05,
+  "mesh_watertight": true,
+  "importer_roundtrip_verified": true,
+  "automatic_abstraction": false,
+  "robot_feasible": null,
+  "pen_feasible": null
+}

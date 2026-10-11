@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "kind": "cell_pipeline_result",
+  "status": "PLANNING_INTERRUPTED",
+  "simulation_only": true,
+  "executable": false,
+  "started_at": "2026-10-11T07:51:16.382600+00:00",
+  "source_run": "/Users/gilwoolee/Workspace/3d_art/runs/palace_15cm_two_pen_selection",
+  "maximum_seconds": 3600.0,
+  "catalogue_seconds": 600.0,
+  "allocation_repairs": [
+    {
+      "constraint": {
+        "mode_id": "arm_2/draw-0010/anchor-0-reverse-0-roll-0-branch-0",
+        "predecessor_mode": "arm_2/draw-0043/anchor-0-reverse-0-roll-0-branch-0",
+        "completed_tasks": [
+          "backbone-base-000",
+          "backbone-base-001",
+          "backbone-base-002",
+          "backbone-base-003",
+          "backbone-base-004",
+          "backbone-post-000",
+          "backbone-post-001",
+          "backbone-post-002",
+          "backbone-post-003",
+          "backbone-post-004",
+          "draw-0001",
+          "draw-0003",
+          "draw-0005",
+          "draw-0009",
+          "draw-0013",
+          "draw-0014",
+          "draw-0016",
+          "draw-0017",
+          "draw-0019",
+          "draw-0020",
+          "draw-0023",
+          "draw-0024",
+          "draw-0028",
+          "draw-0029",
+          "draw-0031",
+          "draw-0034",
+          "draw-0037",
+          "draw-0038",
+          "draw-0039",
+          "draw-0042",
+          "draw-0043",
+          "draw-0044",
+          "draw-0046",
+          "draw-0047",
+          "draw-0048",
+          "draw-0049",
+          "draw-0050",
+          "draw-0051",
+          "draw-0052",
+          "draw-0053"
+        ]
+      },
+      "evidence": [
+        {
+          "stroke_id": "draw-0010",
+          "arm": "arm_2",
+          "phase": "TRACKING",
+          "status": "BOUND_EXCEEDS_TOLERANCE",
+          "position_error_bound_m": 0.0005121701094794088,
+          "orientation_error_bound_rad": 0.0006456136879949097,
+          "witness": {
+            "parameter": 0.375,
+            "positions": [
+              0.3934705392644623,
+              -0.411205079672626,
+              -0.3740550267192731,
+              2.2819910131073815,
+              0.5726577907196988,
+              1.6010872768755255,
+              -0.5271565398136456
+            ],
+            "actual_m": [
+              0.6556138040488749,
+              -0.1442120411251082,
+              0.20088079099643524
+            ],
+            "reference_m": [
+              0.6558029876251003,
+              -0.14399096531565006,
+              0.20079872865338433
+            ],
+            "position_error_m": 0.0003023229518048142,
+            "orientation_error_rad": 0.00024289926006880482
+          }
+        }
+      ],
+      "prior_estimated_seconds": 1874.192
+    }
+  ],
+  "limitations": [
+    "Geometry and pen calibration remain separate from simulated planning",
+    "One fixed drawing mode per eligible arm/action; no catalogue expansion",
+    "Hardware execution and physical validation are not performed"
+  ],
+  "updated_at": "2026-10-11T08:12:22.638026+00:00",
+  "elapsed_s": 1236.8520002079895,
+  "inputs": {
+    "cell_manifest.json": "a0e3b347b4047ff4c1dc9777ae778bed15ee258486573add39342bcea9b609c6",
+    "cell_drawing_variants.json": "71e67348612bfad7715f30aa57bbd9297b6fa0c49103354cf10cdffb32d4e901",
+    "cell_allocation.json": "64dc2fb1571c3036b9d4fc5b87fa6f2c20a07ea0d9c3888331c5dc11cd66e7f6",
+    "allocation_motions.json": "995df58bc00fb0d2bf73208170a8919c92ecef39676e01dfdd73693b72cebada"
+  },
+  "detail": "Stopped offline worker to refine a demonstrated tracking interpolation error; saved motions retained",
+  "checkpoint_scope": "Saved before loading bounded interpolation refinement; earlier tracking failure and first allocation repair retained",
+  "motion_checkpoint": {
+    "status": "PLANNING_INTERRUPTED",
+    "prepared_strokes": 11,
+    "requested_strokes": 64,
+    "inputs": {
+      "cell_allocation.json": "64dc2fb1571c3036b9d4fc5b87fa6f2c20a07ea0d9c3888331c5dc11cd66e7f6",
+      "allocation_problem.json": "3de561a3b02beb69f999b3ca90685298b3f8f47e19cb921052bf25c4b4e7f433"
+    }
+  }
+}

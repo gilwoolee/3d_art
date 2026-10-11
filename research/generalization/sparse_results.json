@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "kind": "multi_mesh_demonstration",
+  "settings": "configs/model.yaml; configs/fabrication.yaml",
+  "per_object_tuning": false,
+  "cases": [
+    {
+      "schema_version": 1,
+      "kind": "mesh_pipeline_result",
+      "source": "torus.glb",
+      "curve_method": "budgeted_selection",
+      "inputs": {
+        "input_config.yaml": "e3fa608576df61a0d6999c918fa92f12f923251f841d58439f5f54ec82882bc4",
+        "geometric_candidates.json": "f91f31d90f2f4b8935c9c72c585f9f1811f7abf8bcd4af2df35e007b0f5c2fc8",
+        "fabrication_config.json": "819b401e261ad302f7930c0c0672006de8d2ef7bb85aaee867ffd61ed6a61f05",
+        "selected_candidates.json": "4fffbf60272229a345f23b259801f69bd3ea260adca13edf63fcfa77b9d62297"
+      },
+      "elapsed_s": 4.1743605000083335,
+      "original_contours": 46,
+      "selected_contours": 10,
+      "complete_actions": 19,
+      "added_support_length_m": 0,
+      "graph_connection_length_m": 0.3409296082591709,
+      "total_drawing_length_m": 3.345054992105175,
+      "bounds_m": [
+        [
+          -0.075,
+          -0.075,
+          0.0
+        ],
+        [
+          0.075,
+          0.075,
+          0.03805970261286295
+        ]
+      ],
+      "intact_contour_order": true,
+      "cold_structure_status": "MODELED_LIMIT_EXCEEDED",
+      "robot_motion_status": "NOT_PLANNED",
+      "physical_status": "UNVERIFIED",
+      "limitations": [
+        "Geometric contours have no texture-aware recognition optimization",
+        "Single mesh/material group input; atlas baking not implemented",
+        "Order is checked at completed stroke boundaries, not along hot extrusion",
+        "Arm regions are proposals, not collision-checked trajectories"
+      ],
+      "timing_assessment": {
+        "scope": "connected drawing plus feed delays; excludes travel, joins, cooling",
+        "assumed_speed_m_s": 0.003,
+        "partial_seconds": 1134.018330701725,
+        "target_seconds": 1800,
+        "remaining_seconds": 665.9816692982749,
+        "fits_with_reserved_overhead": true,
+        "complete_schedule": false
+      },
+      "status": "STAGES_RECORDED"
+    },
+    {
+      "schema_version": 1,
+      "kind": "mesh_pipeline_result",
+      "source": "vase.glb",
+      "curve_method": "budgeted_selection",
+      "inputs": {
+        "input_config.yaml": "723e66d558a6fda8fb1535f7cf3b6b986a4dbeef4b256034c23d1442d1798771",
+        "geometric_candidates.json": "00c88223b6ff502a3bbc07a9e530ef72a4e9305dcf2f1e3cabbd1ad33cd6fca0",
+        "fabrication_config.json": "819b401e261ad302f7930c0c0672006de8d2ef7bb85aaee867ffd61ed6a61f05",
+        "selected_candidates.json": "6c215ba2eefcfbcc4ca5b9604fe3c97dec65bd3e245ba0326ebad37d59faf5fe"
+      },
+      "elapsed_s": 2.20941925002262,
+      "original_contours": 52,
+      "selected_contours": 10,
+      "complete_actions": 13,
+      "added_support_length_m": 0,
+      "graph_connection_length_m": 0.12803300858899105,
+      "total_drawing_length_m": 3.029197192768133,
+      "bounds_m": [
+        [
+          -0.052499999441206466,
+          -0.052499999441206466,
+          0.0
+        ],
+        [
+          0.052499999441206466,
+          0.052499999441206466,
+          0.15
+        ]
+      ],
+      "intact_contour_order": true,
+      "cold_structure_status": "MODELED_LIMIT_EXCEEDED",
+      "robot_motion_status": "NOT_PLANNED",
+      "physical_status": "UNVERIFIED",
+      "limitations": [
+        "Geometric contours have no texture-aware recognition optimization",
+        "Single mesh/material group input; atlas baking not implemented",
+        "Order is checked at completed stroke boundaries, not along hot extrusion",
+        "Arm regions are proposals, not collision-checked trajectories"
+      ],
+      "timing_assessment": {
+        "scope": "connected drawing plus feed delays; excludes travel, joins, cooling",
+        "assumed_speed_m_s": 0.003,
+        "partial_seconds": 1022.7323975893776,
+        "target_seconds": 1800,
+        "remaining_seconds": 777.2676024106224,
+        "fits_with_reserved_overhead": true,
+        "complete_schedule": false
+      },
+      "status": "STAGES_RECORDED"
+    },
+    {
+      "schema_version": 1,
+      "kind": "mesh_pipeline_result",
+      "source": "branching.glb",
+      "curve_method": "budgeted_selection",
+      "inputs": {
+        "input_config.yaml": "d71d21f40567da0ffe7a95cbe4b234b69eeefc937a732999e0bd6d1285ff9cc1",
+        "geometric_candidates.json": "918ab7dde45a5508e8b710a4f298a75bb52a0ff6ad4b5d288647a8eee0ef8f34",
+        "fabrication_config.json": "819b401e261ad302f7930c0c0672006de8d2ef7bb85aaee867ffd61ed6a61f05",
+        "selected_candidates.json": "bff31b421efd658fc3765f812d3e50310417659a9d06eb593234d35be1fb62e5"
+      },
+      "elapsed_s": 1.8328835000284016,
+      "original_contours": 50,
+      "selected_contours": 24,
+      "complete_actions": 28,
+      "added_support_length_m": 0,
+      "graph_connection_length_m": 0.055366016595137346,
+      "total_drawing_length_m": 2.553874231785117,
+      "bounds_m": [
+        [
+          -0.05262871229110998,
+          -0.0456789763678504,
+          0.0
+        ],
+        [
+          0.05262871229110998,
+          0.045678976367850406,
+          0.15
+        ]
+      ],
+      "intact_contour_order": true,
+      "cold_structure_status": "MODELED_LIMIT_EXCEEDED",
+      "robot_motion_status": "NOT_PLANNED",
+      "physical_status": "UNVERIFIED",
+      "limitations": [
+        "Geometric contours have no texture-aware recognition optimization",
+        "Single mesh/material group input; atlas baking not implemented",
+        "Order is checked at completed stroke boundaries, not along hot extrusion",
+        "Arm regions are proposals, not collision-checked trajectories"
+      ],
+      "timing_assessment": {
+        "scope": "connected drawing plus feed delays; excludes travel, joins, cooling",
+        "assumed_speed_m_s": 0.003,
+        "partial_seconds": 879.2914105950389,
+        "target_seconds": 1800,
+        "remaining_seconds": 920.7085894049611,
+        "fits_with_reserved_overhead": true,
+        "complete_schedule": false
+      },
+      "status": "STAGES_RECORDED"
+    }
+  ],
+  "limitations": [
+    "Procedural geometry examples, not a real-object recognition benchmark",
+    "Geometric abstraction only; robot and physical validation remain open"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "palace_15cm_tilted_cell": {
+    "status": "PLANNING_INTERRUPTED",
+    "prepared_strokes": 33,
+    "allocation_sha256": "64dc2fb1571c3036b9d4fc5b87fa6f2c20a07ea0d9c3888331c5dc11cd66e7f6",
+    "saved_modes_preserved": true
+  },
+  "palace_15cm_tilted_single_cell": {
+    "status": "PLANNING_INTERRUPTED",
+    "prepared_strokes": 21,
+    "allocation_sha256": "4f7f53e679f8c35cead0ca4d61a3f5a64530faeff2fd93db63e70930d3daef9a",
+    "saved_modes_preserved": true
+  }
+}

@@ -1,0 +1,18 @@
+schema_version: 1
+simulation_only: true
+# Assumed dynamics for developing the scheduler, not measured Flexiv limits.
+joint_acceleration_rad_s2: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+velocity_fraction: 0.5
+travel_speed_m_s: 0.03
+# Display/export samples supplement the exact spline and path-clock coefficients.
+sample_period_s: 0.2
+target_seconds: 1800
+# Unknown durations are reported as missing, never as measured zero overhead.
+startup_s: null
+cooling_s: null
+shutdown_s: null
+temperature_c: null
+feed_setting: null
+calibrated: false
+calibration_id: null
+

@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "kind": "build_order_preflight",
+  "created_at": "2026-10-11T18:19:54.235633+00:00",
+  "status": "READY_FOR_ORDER_SEARCH",
+  "inputs": {
+    "stroke_graph.json": "fe5bcb5e7bb86a108b6857af6dccff4692eed1e2eb3b545c28dc3c8e6293dec4",
+    "fabrication_config.json": "819b401e261ad302f7930c0c0672006de8d2ef7bb85aaee867ffd61ed6a61f05"
+  },
+  "graph_file": "stroke_graph.json",
+  "element_count": 28,
+  "ground_node_count": 4,
+  "final_structure": {
+    "schema_version": 1,
+    "kind": "structural_screen",
+    "model": "linear_3d_frame",
+    "calibrated": false,
+    "physical_status": "unverified",
+    "boundary_condition": "clamped_print_bed",
+    "limitations": [
+      "Cooled material only",
+      "Rigid welds assumed",
+      "No nozzle forces or thermal distortion",
+      "Linear small deflections"
+    ],
+    "settings": {
+      "calibrated": false,
+      "material_label": "unmeasured development material",
+      "young_modulus_pa": 1000000000,
+      "poisson_ratio": 0.35,
+      "density_kg_m3": 1240,
+      "yield_stress_pa": 15000000,
+      "joint_model": "rigid_unverified",
+      "element_length_m": 0.008,
+      "maximum_displacement_m": 0.001,
+      "maximum_linear_deflection_ratio": 0.1
+    },
+    "point_translation_constraints": [],
+    "modeled_pass": true,
+    "maximum_displacement_m": 1.7329977794459972e-06,
+    "maximum_stress_pa": 18084.250131437606,
+    "linear_model_valid": true,
+    "relative_residual": 3.920821623689359e-12,
+    "resting_com_inside_contacts": true,
+    "mass_kg": 0.000932640296131773,
+    "center_of_mass_m": [
+      -6.52021254528477e-19,
+      -1.312646806765799e-18,
+      0.06085477151245438
+    ]
+  },
+  "largest_nodal_displacements": [
+    {
+      "id": "n007",
+      "displacement_m": [
+        5.0628314069904123e-17,
+        -6.828126966721113e-07,
+        -1.4838017765326102e-07
+      ]
+    },
+    {
+      "id": "n006",
+      "displacement_m": [
+        -6.828126965017015e-07,
+        -2.8462469157760183e-16,
+        -1.4838017765333177e-07
+      ]
+    },
+    {
+      "id": "n004",
+      "displacement_m": [
+        6.828126964374955e-07,
+        -1.2078274500128487e-16,
+        -1.483801776532268e-07
+      ]
+    },
+    {
+      "id": "n005",
+      "displacement_m": [
+        -1.1293521686572663e-16,
+        6.828126962694027e-07,
+        -1.4838017765325822e-07
+      ]
+    },
+    {
+      "id": "n013",
+      "displacement_m": [
+        -7.276540965919718e-17,
+        5.529050651835545e-11,
+        -5.827959963221916e-07
+      ]
+    }
+  ],
+  "smallest_members": [
+    {
+      "id": "ring2-0",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring2-2",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring2-3",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring3-0",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring3-2",
+      "length_m": 0.018851321808289516
+    }
+  ],
+  "actions": [],
+  "robot_feasible": null,
+  "pen_feasible": null,
+  "simulation_only": true,
+  "interpretation": "Fixed final graph passes the configured cooled-frame model; search must still check every construction prefix, extrusion and pen-off transit."
+}

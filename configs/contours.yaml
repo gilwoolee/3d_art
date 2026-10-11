@@ -1,0 +1,12 @@
+schema_version: 1
+resolution: 384
+azimuth_deg: [0, 45, 90, 135, 180, 225, 270, 315]
+elevation_deg: [10]
+mask_smoothing_m: 0.0005
+surface_sample_radius_m: 0.0012
+maximum_depth_jump_m: 0.004
+minimum_length_m: 0.012
+sample_spacing_m: 0.0005
+smoothing_m: 0.001
+maximum_shift_m: 0.001
+fit_tolerance_m: 0.0004

@@ -1,0 +1,197 @@
+{
+  "segments": 25261,
+  "incremental_update_s": 0.006127291009761393,
+  "queries": [
+    {
+      "probe": "withdrawn_tip",
+      "bulk": {
+        "seconds": [
+          5.879101809114218e-05,
+          1.2791948392987251e-05,
+          9.458046406507492e-06
+        ],
+        "narrowphase_calls": 24,
+        "distance_m": 0.025686154845501505,
+        "name": "arm_1/backbone-post-002/143/7"
+      },
+      "incremental": {
+        "seconds": [
+          1.0791991371661425e-05,
+          8.874980267137289e-06,
+          8.917006198316813e-06
+        ],
+        "narrowphase_calls": 24,
+        "distance_m": 0.025686154845501505,
+        "name": "arm_1/backbone-post-002/143/7"
+      }
+    },
+    {
+      "probe": "tip_0",
+      "bulk": {
+        "seconds": [
+          6.312498589977622e-05,
+          3.987498348578811e-05,
+          4.033301956951618e-05
+        ],
+        "narrowphase_calls": 129,
+        "distance_m": 0.004984353251554807,
+        "name": "arm_1/draw-0029/933/0"
+      },
+      "incremental": {
+        "seconds": [
+          4.179199459031224e-05,
+          3.891601227223873e-05,
+          3.966700751334429e-05
+        ],
+        "narrowphase_calls": 129,
+        "distance_m": 0.004984353251554807,
+        "name": "arm_1/draw-0029/933/0"
+      }
+    },
+    {
+      "probe": "tip_1",
+      "bulk": {
+        "seconds": [
+          6.70839799568057e-05,
+          0.00010533299064263701,
+          4.68750367872417e-05
+        ],
+        "narrowphase_calls": 124,
+        "distance_m": 0.01859304442372949,
+        "name": "arm_1/draw-0029/933/0"
+      },
+      "incremental": {
+        "seconds": [
+          4.533398896455765e-05,
+          4.012498538941145e-05,
+          3.995798761025071e-05
+        ],
+        "narrowphase_calls": 124,
+        "distance_m": 0.01859304442372949,
+        "name": "arm_1/draw-0029/933/0"
+      }
+    },
+    {
+      "probe": "tip_2",
+      "bulk": {
+        "seconds": [
+          1.854199217632413e-05,
+          1.6042031347751617e-05,
+          1.5833997167646885e-05
+        ],
+        "narrowphase_calls": 48,
+        "distance_m": 0.006310612011948109,
+        "name": "arm_1/draw-0029/3170/1"
+      },
+      "incremental": {
+        "seconds": [
+          1.629104372113943e-05,
+          1.587503356859088e-05,
+          1.5791039913892746e-05
+        ],
+        "narrowphase_calls": 48,
+        "distance_m": 0.006310612011948109,
+        "name": "arm_1/draw-0029/3170/1"
+      }
+    },
+    {
+      "probe": "tip_3",
+      "bulk": {
+        "seconds": [
+          2.9582995921373367e-05,
+          1.8832972273230553e-05,
+          1.8499966245144606e-05
+        ],
+        "narrowphase_calls": 60,
+        "distance_m": 0.010414467373693148,
+        "name": "arm_1/draw-0013/488/0"
+      },
+      "incremental": {
+        "seconds": [
+          2.0250037778168917e-05,
+          1.791701652109623e-05,
+          1.7833022866398096e-05
+        ],
+        "narrowphase_calls": 60,
+        "distance_m": 0.010414467373693148,
+        "name": "arm_1/draw-0013/488/0"
+      }
+    },
+    {
+      "probe": "tip_4",
+      "bulk": {
+        "seconds": [
+          2.0915991626679897e-05,
+          1.3291952200233936e-05,
+          1.3042008504271507e-05
+        ],
+        "narrowphase_calls": 30,
+        "distance_m": 0.0081318737498946,
+        "name": "arm_1/draw-0029/1521/1"
+      },
+      "incremental": {
+        "seconds": [
+          1.633301144465804e-05,
+          1.3083044905215502e-05,
+          1.2749980669468641e-05
+        ],
+        "narrowphase_calls": 30,
+        "distance_m": 0.0081318737498946,
+        "name": "arm_1/draw-0029/1521/1"
+      }
+    },
+    {
+      "probe": "tip_5",
+      "bulk": {
+        "seconds": [
+          0.00012391700875014067,
+          1.9665982108563185e-05,
+          1.833401620388031e-05
+        ],
+        "narrowphase_calls": 58,
+        "distance_m": 0.01253169771996141,
+        "name": "arm_1/draw-0029/3049/0"
+      },
+      "incremental": {
+        "seconds": [
+          1.8665974494069815e-05,
+          1.6542035154998302e-05,
+          1.650000922381878e-05
+        ],
+        "narrowphase_calls": 58,
+        "distance_m": 0.01253169771996141,
+        "name": "arm_1/draw-0029/3049/0"
+      }
+    },
+    {
+      "probe": "tip_6",
+      "bulk": {
+        "seconds": [
+          3.8041966035962105e-05,
+          1.225003506988287e-05,
+          7.459020707756281e-06
+        ],
+        "narrowphase_calls": 22,
+        "distance_m": 0.03483511021943833,
+        "name": "arm_1/backbone-post-001/127/7"
+      },
+      "incremental": {
+        "seconds": [
+          9.000010322779417e-06,
+          7.0420210249722e-06,
+          6.958027370274067e-06
+        ],
+        "narrowphase_calls": 22,
+        "distance_m": 0.03483511021943833,
+        "name": "arm_1/backbone-post-001/127/7"
+      }
+    }
+  ],
+  "assessment": {
+    "distance_equal_all_probes": true,
+    "narrowphase_calls_equal_all_probes": true,
+    "incremental_median_query_s": 1.641651033423841e-05,
+    "bulk_median_query_s": 1.924947719089687e-05,
+    "decision": "Keep existing incremental tree. No demonstrated query improvement from bulk rebuild on this saved Palace prefix."
+  }
+}

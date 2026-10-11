@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "kind": "stroke_graph",
+  "frame": "build",
+  "units": "m",
+  "source_method": "synthetic_structural_check",
+  "simulation_only": true,
+  "nodes": [
+    {
+      "id": "junction-00000",
+      "position": [
+        -0.04,
+        0.0,
+        0.0
+      ],
+      "ground": true,
+      "join_status": "proposed"
+    },
+    {
+      "id": "junction-00001",
+      "position": [
+        0.04,
+        0.0,
+        0.0
+      ],
+      "ground": true,
+      "join_status": "proposed"
+    }
+  ],
+  "edges": [
+    {
+      "id": "arch:part-0000",
+      "parent_curve": "arch",
+      "source_interval": [
+        0.0,
+        1.0
+      ],
+      "start": "junction-00000",
+      "end": "junction-00001",
+      "role": "artistic",
+      "origin": "synthetic_structural_example",
+      "required": false,
+      "diameter_m": 0.001,
+      "segments": [
+        [
+          [
+            -0.04,
+            0.0,
+            0.0
+          ],
+          [
+            -0.04,
+            0.0,
+            0.1
+          ],
+          [
+            0.04,
+            0.0,
+            0.1
+          ],
+          [
+            0.04,
+            0.0,
+            0.0
+          ]
+        ]
+      ],
+      "closed": false,
+      "process_status": "not_checked",
+      "length_m": 0.18620056052494038,
+      "work_zone": "seam",
+      "allocation_group": "structural-unit-000",
+      "allowed_arms": [
+        "arm_1",
+        "arm_2"
+      ]
+    },
+    {
+      "id": "base-0000",
+      "start": "junction-00000",
+      "end": "junction-00001",
+      "role": "base",
+      "origin": "automatic_connection",
+      "required": true,
+      "diameter_m": 0.001,
+      "segments": [
+        [
+          [
+            -0.04,
+            0.0,
+            0.0
+          ],
+          [
+            -0.013333333333333332,
+            0.0,
+            0.0
+          ],
+          [
+            0.013333333333333336,
+            0.0,
+            0.0
+          ],
+          [
+            0.04,
+            0.0,
+            0.0
+          ]
+        ]
+      ],
+      "length_m": 0.08,
+      "process_status": "not_checked",
+      "work_zone": "seam",
+      "allocation_group": "structural-unit-000",
+      "allowed_arms": [
+        "arm_1",
+        "arm_2"
+      ]
+    }
+  ],
+  "physical_connections": "proposed_welds",
+  "candidate_to_build": [
+    [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "settings": {
+    "strand_diameter_m": 0.001,
+    "junction_tolerance_m": 0.00075,
+    "flatten_tolerance_m": 5e-05,
+    "sampling_chord_m": 0.003,
+    "minimum_crossing_angle_deg": 15,
+    "ground_tolerance_m": 0.0005,
+    "maximum_connector_m": 0.035,
+    "maximum_brace_m": 0.05,
+    "maximum_braces": 12
+  },
+  "metrics": {
+    "input_curves": 1,
+    "material_members": 2,
+    "junctions": 2,
+    "input_components": 1,
+    "material_components": 1,
+    "ground_contacts": 2,
+    "detected_contacts": 0,
+    "maximum_snap_m": 0.0,
+    "total_length_m": 0.2662005605249404,
+    "added_length_m": 0.08
+  },
+  "diagnostics": [],
+  "checks": {
+    "material_connected": true,
+    "has_ground_contacts": true,
+    "process_feasible": null,
+    "structure_feasible": null,
+    "robot_feasible": null
+  },
+  "partition": {
+    "normal_build": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "center_build": [
+      -0.00093719482421875,
+      0.0,
+      0.05
+    ],
+    "seam_width_m": 0.02,
+    "join_nodes": [],
+    "split_method": "whole contours and structural groups; weighted-median region boundary",
+    "preserve_structural_units": true,
+    "structural_units": [
+      {
+        "id": "structural-unit-000",
+        "members": [
+          "arch:part-0000",
+          "base-0000"
+        ],
+        "work_zone": "seam",
+        "length_m": 0.2662005605249404
+      }
+    ],
+    "cycle_blocks_preserved": 1,
+    "potential_level_band_pairs": [],
+    "policy": "Whole side units may overlap; shared units reserve both arms; no new cuts"
+  }
+}

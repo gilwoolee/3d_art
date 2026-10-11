@@ -1,0 +1,1278 @@
+{
+  "schema_version": 1,
+  "kind": "stroke_graph",
+  "frame": "build",
+  "units": "m",
+  "nodes": [
+    {
+      "id": "n000",
+      "position": [
+        0.025,
+        0.0,
+        0.0
+      ],
+      "ground": true
+    },
+    {
+      "id": "n001",
+      "position": [
+        0.0,
+        0.025,
+        0.0
+      ],
+      "ground": true
+    },
+    {
+      "id": "n002",
+      "position": [
+        -0.025,
+        0.0,
+        0.0
+      ],
+      "ground": true
+    },
+    {
+      "id": "n003",
+      "position": [
+        0.0,
+        -0.025,
+        0.0
+      ],
+      "ground": true
+    },
+    {
+      "id": "n004",
+      "position": [
+        0.025,
+        0.0,
+        0.075
+      ],
+      "ground": false
+    },
+    {
+      "id": "n005",
+      "position": [
+        0.0,
+        0.025,
+        0.075
+      ],
+      "ground": false
+    },
+    {
+      "id": "n006",
+      "position": [
+        -0.025,
+        0.0,
+        0.075
+      ],
+      "ground": false
+    },
+    {
+      "id": "n007",
+      "position": [
+        0.0,
+        -0.025,
+        0.075
+      ],
+      "ground": false
+    },
+    {
+      "id": "n008",
+      "position": [
+        0.012,
+        0.0,
+        0.1
+      ],
+      "ground": false
+    },
+    {
+      "id": "n009",
+      "position": [
+        0.0,
+        0.012,
+        0.1
+      ],
+      "ground": false
+    },
+    {
+      "id": "n010",
+      "position": [
+        -0.012,
+        0.0,
+        0.1
+      ],
+      "ground": false
+    },
+    {
+      "id": "n011",
+      "position": [
+        0.0,
+        -0.012,
+        0.1
+      ],
+      "ground": false
+    },
+    {
+      "id": "n012",
+      "position": [
+        0.012,
+        0.0,
+        0.12
+      ],
+      "ground": false
+    },
+    {
+      "id": "n013",
+      "position": [
+        0.0,
+        0.012,
+        0.12
+      ],
+      "ground": false
+    },
+    {
+      "id": "n014",
+      "position": [
+        -0.012,
+        0.0,
+        0.12
+      ],
+      "ground": false
+    },
+    {
+      "id": "n015",
+      "position": [
+        0.0,
+        -0.012,
+        0.12
+      ],
+      "ground": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "ring0-0",
+      "start": "n000",
+      "end": "n001",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring0",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            0.025,
+            0.0,
+            0.0
+          ],
+          [
+            0.025,
+            0.013807118745769837,
+            0.0
+          ],
+          [
+            0.013807118745769838,
+            0.025,
+            0.0
+          ],
+          [
+            0.0,
+            0.025,
+            0.0
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring0-1",
+      "start": "n001",
+      "end": "n002",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring0",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            0.025,
+            0.0
+          ],
+          [
+            -0.013807118745769835,
+            0.025,
+            0.0
+          ],
+          [
+            -0.025,
+            0.01380711874576984,
+            0.0
+          ],
+          [
+            -0.025,
+            0.0,
+            0.0
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring0-2",
+      "start": "n002",
+      "end": "n003",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring0",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            -0.025,
+            0.0,
+            0.0
+          ],
+          [
+            -0.025,
+            -0.013807118745769833,
+            0.0
+          ],
+          [
+            -0.013807118745769842,
+            -0.024999999999999998,
+            0.0
+          ],
+          [
+            0.0,
+            -0.025,
+            0.0
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring0-3",
+      "start": "n003",
+      "end": "n000",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring0",
+      "source_interval": [
+        3,
+        4
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            -0.025,
+            0.0
+          ],
+          [
+            0.013807118745769831,
+            -0.025000000000000005,
+            0.0
+          ],
+          [
+            0.024999999999999998,
+            -0.013807118745769844,
+            0.0
+          ],
+          [
+            0.025,
+            0.0,
+            0.0
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring1-0",
+      "start": "n004",
+      "end": "n005",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring1",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            0.025,
+            0.0,
+            0.075
+          ],
+          [
+            0.025,
+            0.013807118745769837,
+            0.075
+          ],
+          [
+            0.013807118745769838,
+            0.025,
+            0.075
+          ],
+          [
+            0.0,
+            0.025,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring1-1",
+      "start": "n005",
+      "end": "n006",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring1",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            0.025,
+            0.075
+          ],
+          [
+            -0.013807118745769835,
+            0.025,
+            0.075
+          ],
+          [
+            -0.025,
+            0.01380711874576984,
+            0.075
+          ],
+          [
+            -0.025,
+            0.0,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring1-2",
+      "start": "n006",
+      "end": "n007",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring1",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            -0.025,
+            0.0,
+            0.075
+          ],
+          [
+            -0.025,
+            -0.013807118745769833,
+            0.075
+          ],
+          [
+            -0.013807118745769842,
+            -0.024999999999999998,
+            0.075
+          ],
+          [
+            0.0,
+            -0.025,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring1-3",
+      "start": "n007",
+      "end": "n004",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring1",
+      "source_interval": [
+        3,
+        4
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            -0.025,
+            0.075
+          ],
+          [
+            0.013807118745769831,
+            -0.025000000000000005,
+            0.075
+          ],
+          [
+            0.024999999999999998,
+            -0.013807118745769844,
+            0.075
+          ],
+          [
+            0.025,
+            0.0,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.039273587100603156
+    },
+    {
+      "id": "ring2-0",
+      "start": "n008",
+      "end": "n009",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring2",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            0.012,
+            0.0,
+            0.1
+          ],
+          [
+            0.012,
+            0.006627416997969522,
+            0.1
+          ],
+          [
+            0.006627416997969523,
+            0.012,
+            0.1
+          ],
+          [
+            0.0,
+            0.012,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring2-1",
+      "start": "n009",
+      "end": "n010",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring2",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            0.012,
+            0.1
+          ],
+          [
+            -0.006627416997969521,
+            0.012,
+            0.1
+          ],
+          [
+            -0.012,
+            0.0066274169979695235,
+            0.1
+          ],
+          [
+            -0.012,
+            0.0,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.01885132180828952
+    },
+    {
+      "id": "ring2-2",
+      "start": "n010",
+      "end": "n011",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring2",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            -0.012,
+            0.0,
+            0.1
+          ],
+          [
+            -0.012,
+            -0.00662741699796952,
+            0.1
+          ],
+          [
+            -0.006627416997969524,
+            -0.011999999999999999,
+            0.1
+          ],
+          [
+            0.0,
+            -0.012,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring2-3",
+      "start": "n011",
+      "end": "n008",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring2",
+      "source_interval": [
+        3,
+        4
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            -0.012,
+            0.1
+          ],
+          [
+            0.006627416997969519,
+            -0.012000000000000002,
+            0.1
+          ],
+          [
+            0.011999999999999999,
+            -0.006627416997969524,
+            0.1
+          ],
+          [
+            0.012,
+            0.0,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring3-0",
+      "start": "n012",
+      "end": "n013",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring3",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            0.012,
+            0.0,
+            0.12
+          ],
+          [
+            0.012,
+            0.006627416997969522,
+            0.12
+          ],
+          [
+            0.006627416997969523,
+            0.012,
+            0.12
+          ],
+          [
+            0.0,
+            0.012,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring3-1",
+      "start": "n013",
+      "end": "n014",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring3",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            0.012,
+            0.12
+          ],
+          [
+            -0.006627416997969521,
+            0.012,
+            0.12
+          ],
+          [
+            -0.012,
+            0.0066274169979695235,
+            0.12
+          ],
+          [
+            -0.012,
+            0.0,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.01885132180828952
+    },
+    {
+      "id": "ring3-2",
+      "start": "n014",
+      "end": "n015",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring3",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            -0.012,
+            0.0,
+            0.12
+          ],
+          [
+            -0.012,
+            -0.00662741699796952,
+            0.12
+          ],
+          [
+            -0.006627416997969524,
+            -0.011999999999999999,
+            0.12
+          ],
+          [
+            0.0,
+            -0.012,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "ring3-3",
+      "start": "n015",
+      "end": "n012",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "ring3",
+      "source_interval": [
+        3,
+        4
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            -0.012,
+            0.12
+          ],
+          [
+            0.006627416997969519,
+            -0.012000000000000002,
+            0.12
+          ],
+          [
+            0.011999999999999999,
+            -0.006627416997969524,
+            0.12
+          ],
+          [
+            0.012,
+            0.0,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.018851321808289516
+    },
+    {
+      "id": "rib0-0",
+      "start": "n000",
+      "end": "n004",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib0",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            0.025,
+            0.0,
+            0.0
+          ],
+          [
+            0.025,
+            0.0,
+            0.024999999999999998
+          ],
+          [
+            0.025,
+            0.0,
+            0.049999999999999996
+          ],
+          [
+            0.025,
+            0.0,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.075
+    },
+    {
+      "id": "rib0-1",
+      "start": "n004",
+      "end": "n008",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib0",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            0.025,
+            0.0,
+            0.075
+          ],
+          [
+            0.020666666666666667,
+            0.0,
+            0.08333333333333333
+          ],
+          [
+            0.01633333333333333,
+            0.0,
+            0.09166666666666667
+          ],
+          [
+            0.012,
+            0.0,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.028178005607210746
+    },
+    {
+      "id": "rib0-2",
+      "start": "n008",
+      "end": "n012",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib0",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            0.012,
+            0.0,
+            0.1
+          ],
+          [
+            0.012,
+            0.0,
+            0.10666666666666667
+          ],
+          [
+            0.012,
+            0.0,
+            0.11333333333333333
+          ],
+          [
+            0.012,
+            0.0,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.01999999999999999
+    },
+    {
+      "id": "rib1-0",
+      "start": "n001",
+      "end": "n005",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib1",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            0.025,
+            0.0
+          ],
+          [
+            1.5308084989341916e-18,
+            0.025,
+            0.024999999999999998
+          ],
+          [
+            1.5308084989341916e-18,
+            0.025,
+            0.049999999999999996
+          ],
+          [
+            0.0,
+            0.025,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.075
+    },
+    {
+      "id": "rib1-1",
+      "start": "n005",
+      "end": "n009",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib1",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            0.025,
+            0.075
+          ],
+          [
+            1.2654683591189317e-18,
+            0.020666666666666667,
+            0.08333333333333333
+          ],
+          [
+            1.0001282193036718e-18,
+            0.01633333333333333,
+            0.09166666666666667
+          ],
+          [
+            0.0,
+            0.012,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.028178005607210746
+    },
+    {
+      "id": "rib1-2",
+      "start": "n009",
+      "end": "n013",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib1",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            0.012,
+            0.1
+          ],
+          [
+            7.347880794884119e-19,
+            0.012,
+            0.10666666666666667
+          ],
+          [
+            7.347880794884119e-19,
+            0.012,
+            0.11333333333333333
+          ],
+          [
+            0.0,
+            0.012,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.01999999999999999
+    },
+    {
+      "id": "rib2-0",
+      "start": "n002",
+      "end": "n006",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib2",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            -0.025,
+            0.0,
+            0.0
+          ],
+          [
+            -0.025,
+            3.061616997868383e-18,
+            0.024999999999999998
+          ],
+          [
+            -0.025,
+            3.061616997868383e-18,
+            0.049999999999999996
+          ],
+          [
+            -0.025,
+            0.0,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.075
+    },
+    {
+      "id": "rib2-1",
+      "start": "n006",
+      "end": "n010",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib2",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            -0.025,
+            0.0,
+            0.075
+          ],
+          [
+            -0.020666666666666667,
+            2.5309367182378633e-18,
+            0.08333333333333333
+          ],
+          [
+            -0.01633333333333333,
+            2.0002564386073435e-18,
+            0.09166666666666667
+          ],
+          [
+            -0.012,
+            0.0,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.028178005607210746
+    },
+    {
+      "id": "rib2-2",
+      "start": "n010",
+      "end": "n014",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib2",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            -0.012,
+            0.0,
+            0.1
+          ],
+          [
+            -0.012,
+            1.4695761589768239e-18,
+            0.10666666666666667
+          ],
+          [
+            -0.012,
+            1.4695761589768239e-18,
+            0.11333333333333333
+          ],
+          [
+            -0.012,
+            0.0,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.01999999999999999
+    },
+    {
+      "id": "rib3-0",
+      "start": "n003",
+      "end": "n007",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib3",
+      "source_interval": [
+        0,
+        1
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            -0.025,
+            0.0
+          ],
+          [
+            -4.592425496802574e-18,
+            -0.025,
+            0.024999999999999998
+          ],
+          [
+            -4.592425496802574e-18,
+            -0.025,
+            0.049999999999999996
+          ],
+          [
+            0.0,
+            -0.025,
+            0.075
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.075
+    },
+    {
+      "id": "rib3-1",
+      "start": "n007",
+      "end": "n011",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib3",
+      "source_interval": [
+        1,
+        2
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            -0.025,
+            0.075
+          ],
+          [
+            -3.796405077356795e-18,
+            -0.020666666666666667,
+            0.08333333333333333
+          ],
+          [
+            -3.000384657911015e-18,
+            -0.01633333333333333,
+            0.09166666666666667
+          ],
+          [
+            0.0,
+            -0.012,
+            0.1
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.028178005607210746
+    },
+    {
+      "id": "rib3-2",
+      "start": "n011",
+      "end": "n015",
+      "role": "artistic",
+      "origin": "reference_fixture",
+      "required": true,
+      "diameter_m": 0.001,
+      "parent_curve": "rib3",
+      "source_interval": [
+        2,
+        3
+      ],
+      "segments": [
+        [
+          [
+            0.0,
+            -0.012,
+            0.1
+          ],
+          [
+            -2.2043642384652355e-18,
+            -0.012,
+            0.10666666666666667
+          ],
+          [
+            -2.2043642384652355e-18,
+            -0.012,
+            0.11333333333333333
+          ],
+          [
+            0.0,
+            -0.012,
+            0.12
+          ]
+        ]
+      ],
+      "process_status": "not_checked",
+      "length_m": 0.01999999999999999
+    }
+  ],
+  "method": "explicit_reference_fixture",
+  "limitations": [
+    "Hand-specified reference topology; not automatic mesh abstraction"
+  ]
+}

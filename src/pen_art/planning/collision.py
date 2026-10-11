@@ -1,0 +1,335 @@
+"""FCL checks for the robot's URDF collision meshes and static work surfaces.
+
+The mounted pen and growing material must be added before this can serve as a
+whole-tool collision model. Configuration checks alone do not cover motions.
+"""
+
+from dataclasses import dataclass
+from time import monotonic
+
+import fcl
+import numpy as np
+import trimesh
+
+from ..robot import origin_matrix
+
+
+@dataclass
+class Body:
+    name: str
+    link: str
+    origin: np.ndarray
+    geometry: object
+    radius: float
+    # None uses URDF adjacency. An attached tool lists the links it is allowed
+    # to touch explicitly, so forearm contacts are not silently excluded.
+    touch_links: tuple[str, ...] | None = None
+
+
+def collision_geometry(element):
+    mesh = element.find("mesh")
+    if mesh is not None:
+        loaded = trimesh.load_mesh(mesh.get("filename"), process=False)
+        if not isinstance(loaded, trimesh.Trimesh):
+            raise ValueError("Collision mesh must contain one triangle mesh")
+        vertices = loaded.vertices * np.fromstring(mesh.get("scale", "1 1 1"), sep=" ")
+        # A triangle BVH tests surface intersection and can miss a body wholly
+        # contained inside another. Filled per-link convex hulls are conservative
+        # for concave source meshes and also detect containment via solid GJK.
+        hull = trimesh.convex.convex_hull(vertices)
+        faces = np.column_stack([np.full(len(hull.faces), 3), hull.faces]).ravel()
+        model = fcl.Convex(np.asarray(hull.vertices, dtype=np.float64), len(hull.faces), faces)
+        return model, float(np.max(np.linalg.norm(hull.vertices, axis=1)))
+    box = element.find("box")
+    if box is not None:
+        size = np.fromstring(box.get("size"), sep=" ")
+        return fcl.Box(*size), float(np.linalg.norm(size) / 2)
+    cylinder = element.find("cylinder")
+    if cylinder is not None:
+        radius, length = float(cylinder.get("radius")), float(cylinder.get("length"))
+        return fcl.Cylinder(radius, length), float(np.hypot(radius, length / 2))
+    sphere = element.find("sphere")
+    if sphere is not None:
+        radius = float(sphere.get("radius"))
+        return fcl.Sphere(radius), radius
+    raise ValueError("Unsupported URDF collision geometry")
+
+
+def placed(geometry, matrix):
+    return fcl.CollisionObject(geometry, fcl.Transform(matrix[:3, :3], matrix[:3, 3]))
+
+
+class RobotCollisionModel:
+    def __init__(self, robot, extra_bodies=()):
+        self.robot = robot
+        self.bodies = []
+        for link in robot.xml.findall("link"):
+            name = link.get("name")
+            for index, element in enumerate(link.findall("collision")):
+                geometry, radius = collision_geometry(element.find("geometry"))
+                self.bodies.append(
+                    Body(
+                        f"{name}:{index}",
+                        name,
+                        origin_matrix(element.find("origin")),
+                        geometry,
+                        radius,
+                    )
+                )
+        self.bodies.extend(extra_bodies)
+        self.adjacent = {frozenset((joint["parent"], joint["child"])) for joint in robot.joint_data}
+        if not self.bodies:
+            raise ValueError("Robot URDF has no collision bodies")
+        # A fixed world-to-base joint is part of the mounting assembly. Exclude
+        # only those links from the table check, never a moving link.
+        self.mount_links = {robot.root}
+        for joint in robot.joint_data:
+            if joint["index"] is not None:
+                break
+            self.mount_links.add(joint["child"])
+        self.motion_radii = {}
+        for body in self.bodies:
+            radii = np.zeros(len(robot.names))
+            ancestors = []
+            for joint in robot.joint_data:
+                if body.link == robot.root:
+                    break
+                ancestors.append(joint)
+                if joint["child"] == body.link:
+                    break
+            if body.link not in {robot.root, *(joint["child"] for joint in robot.joint_data)}:
+                raise ValueError(f"Collision body outside the serial chain: {body.link}")
+            reach = np.linalg.norm(body.origin[:3, 3]) + body.radius
+            for joint in reversed(ancestors):
+                if joint["index"] is not None:
+                    radii[joint["index"]] = reach
+                reach += np.linalg.norm(joint["origin"][:3, 3])
+            self.motion_radii[body.name] = radii
+
+    def pairs(self, positions, obstacles=None):
+        frames = self.robot.frames(positions)
+        objects = [
+            (body, placed(body.geometry, frames[body.link] @ body.origin)) for body in self.bodies
+        ]
+        for index, (body, obj) in enumerate(objects):
+            for other, other_obj in objects[index + 1 :]:
+                if body.link == other.link:
+                    continue
+                if body.touch_links is not None or other.touch_links is not None:
+                    if (body.touch_links is not None and other.link in body.touch_links) or (
+                        other.touch_links is not None and body.link in other.touch_links
+                    ):
+                        continue
+                elif frozenset((body.link, other.link)) in self.adjacent:
+                    continue
+                yield body.name, other.name, obj, other_obj
+            for name, obstacle in (obstacles or {}).items():
+                if name == "table" and body.link in self.mount_links:
+                    continue
+                yield body.name, name, obj, obstacle
+
+    def material_distances(self, positions, material, clearance_bounds=None):
+        frames = self.robot.frames(positions)
+        for body in self.bodies:
+            transform = frames[body.link] @ body.origin
+            if clearance_bounds is not None and not material.possibly_near(
+                transform[:3, 3], body.radius, clearance_bounds[body.name]
+            ):
+                continue
+            obj = placed(body.geometry, transform)
+            if clearance_bounds is not None and not material.possibly_near_body(
+                obj, clearance_bounds[body.name]
+            ):
+                continue
+            nearest = material.nearest(obj)
+            if nearest:
+                yield body.name, nearest["name"], nearest["distance_m"]
+
+    def check(self, positions, obstacles=None, margin_m=0.0, material=None):
+        if margin_m < 0:
+            raise ValueError("Collision margin must be nonnegative")
+        overlaps = []
+
+        def near(first, second, name1, name2):
+            result = fcl.CollisionResult()
+            count = fcl.collide(first, second, fcl.CollisionRequest(), result)
+            if count:
+                overlaps.append({"first": name1, "second": name2, "kind": "overlap"})
+            elif margin_m:
+                distance = fcl.distance(first, second, fcl.DistanceRequest(), fcl.DistanceResult())
+                if distance < margin_m:
+                    overlaps.append(
+                        {
+                            "first": name1,
+                            "second": name2,
+                            "kind": "clearance",
+                            "distance_m": float(distance),
+                        }
+                    )
+
+        for name1, name2, first, second in self.pairs(positions, obstacles):
+            near(first, second, name1, name2)
+        if material is not None:
+            bounds = dict.fromkeys((body.name for body in self.bodies), margin_m)
+            for name1, name2, distance in self.material_distances(positions, material, bounds):
+                if distance <= margin_m:
+                    overlaps.append(
+                        {
+                            "first": name1,
+                            "second": name2,
+                            "kind": "overlap" if distance <= 0 else "clearance",
+                            "distance_m": distance,
+                        }
+                    )
+        return overlaps
+
+    def check_edge(
+        self,
+        q0,
+        q1,
+        obstacles=None,
+        margin_m=0.001,
+        maximum_depth=12,
+        material=None,
+        deadline=float("inf"),
+    ):
+        """Bound all modeled point motion over a linearly interpolated joint edge.
+
+        At each interval midpoint, pair clearance must exceed the sum of both
+        bodies' maximum possible displacement plus the requested margin. A
+        joint's displacement bound is |delta angle| times an upper bound on
+        reach to every body point. Triangle inequality combines joint bounds.
+        Intervals without that certificate subdivide; a depth limit is reported
+        as unresolved, never passed. FCL distances have a 1 um numerical reserve.
+        This certifies only the supplied rigid geometry and interpolation.
+        """
+        q0, q1 = np.asarray(q0), np.asarray(q1)
+        return self.check_bounded_path(
+            lambda t: q0 * (1 - t) + q1 * t,
+            lambda start, end: np.abs(q1 - q0) * (end - start) / 2,
+            obstacles,
+            margin_m,
+            maximum_depth,
+            material,
+            deadline,
+        )
+
+    def check_bounded_path(
+        self,
+        position,
+        deviation,
+        obstacles=None,
+        margin_m=0.001,
+        maximum_depth=12,
+        material=None,
+        deadline=float("inf"),
+    ):
+        """Check a continuous path on [0, 1] with a supplied joint envelope.
+
+        ``deviation(a, b)`` must bound each joint's absolute displacement from
+        ``position((a+b)/2)`` throughout [a,b]. Unlike an endpoint chord this
+        bound must include excursions and reversals inside curved paths.
+        """
+        if not np.isfinite(margin_m) or margin_m < 0 or maximum_depth < 0:
+            raise ValueError("Invalid edge clearance settings")
+        # Also validate endpoints and their joint limits before interpolation.
+        self.robot.frames(position(0))
+        self.robot.frames(position(1))
+        evaluations, greatest_depth = 0, 0
+
+        def visit(start, end, depth):
+            nonlocal evaluations, greatest_depth
+            if monotonic() >= deadline:
+                return {"status": "TIME_BUDGET"}
+            evaluations += 1
+            greatest_depth = max(greatest_depth, depth)
+            alpha = (start + end) / 2
+            q = position(alpha)
+            half_delta = np.asarray(deviation(start, end), float)
+            if (
+                half_delta.shape != (len(self.robot.names),)
+                or not np.isfinite(half_delta).all()
+                or np.any(half_delta < 0)
+            ):
+                raise ValueError("Path deviation must be finite and nonnegative for each joint")
+            uncertain = []
+            for name1, name2, first, second in self.pairs(q, obstacles):
+                contact = fcl.collide(first, second, fcl.CollisionRequest(), fcl.CollisionResult())
+                if contact:
+                    return {
+                        "status": "COLLISION",
+                        "alpha": alpha,
+                        "positions": q.tolist(),
+                        "pairs": [{"first": name1, "second": name2}],
+                    }
+                distance = fcl.distance(first, second, fcl.DistanceRequest(), fcl.DistanceResult())
+                if not np.isfinite(distance) or distance < 0:
+                    raise ValueError(f"Invalid collision distance for {name1} and {name2}")
+                radius = self.motion_radii[name1] + self.motion_radii.get(name2, 0)
+                bound = float(radius @ half_delta)
+                if distance <= bound + margin_m + 1e-6:
+                    uncertain.append(
+                        {
+                            "first": name1,
+                            "second": name2,
+                            "distance_m": float(distance),
+                            "motion_bound_m": bound,
+                        }
+                    )
+            if material is not None:
+                bounds = {
+                    body.name: float(self.motion_radii[body.name] @ half_delta) + margin_m + 1e-6
+                    for body in self.bodies
+                }
+                for name1, name2, distance in self.material_distances(q, material, bounds):
+                    if distance <= 0:
+                        return {
+                            "status": "COLLISION",
+                            "alpha": alpha,
+                            "positions": q.tolist(),
+                            "pairs": [{"first": name1, "second": name2}],
+                        }
+                    bound = float(self.motion_radii[name1] @ half_delta)
+                    if distance <= bound + margin_m + 1e-6:
+                        uncertain.append(
+                            {
+                                "first": name1,
+                                "second": name2,
+                                "distance_m": distance,
+                                "motion_bound_m": bound,
+                            }
+                        )
+            if not uncertain:
+                return {"status": "CERTIFIED_MODELED_EDGE"}
+            if depth >= maximum_depth:
+                return {
+                    "status": "CLEARANCE_UNRESOLVED",
+                    "alpha": alpha,
+                    "positions": q.tolist(),
+                    "pairs": uncertain,
+                }
+            first = visit(start, alpha, depth + 1)
+            return (
+                visit(alpha, end, depth + 1)
+                if first["status"] == "CERTIFIED_MODELED_EDGE"
+                else first
+            )
+
+        result = visit(0.0, 1.0, 0)
+        return {**result, "evaluations": evaluations, "maximum_depth": greatest_depth}
+
+
+def work_surfaces(center_xy, height, width, depth, table_z=0.0, table_size=(4.0, 4.0, 0.1)):
+    if height < 0 or min(width, depth, *table_size) <= 0:
+        raise ValueError("Invalid work-surface dimensions")
+    transform = np.eye(4)
+    # At zero height the top stays on the table, rather than floating 3 mm above it.
+    thickness = max(height, 0.006)
+    transform[:3, 3] = [*center_xy, table_z + height - thickness / 2]
+    platform = placed(fcl.Box(width, depth, thickness), transform)
+    transform = np.eye(4)
+    transform[2, 3] = table_z - table_size[2] / 2
+    # FCL 0.7's mesh/halfspace distance query can crash. A finite, explicitly
+    # sized table uses supported mesh/box distance queries instead.
+    table = placed(fcl.Box(*table_size), transform)
+    return {"table": table, "platform": platform}

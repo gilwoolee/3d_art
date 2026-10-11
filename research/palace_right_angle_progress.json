@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "kind": "planning_progress",
+  "recorded_at": "2026-10-11T08:38:41.463239+00:00",
+  "simulation_only": true,
+  "runs": [
+    {
+      "run": "palace_15cm_right_angle_cell",
+      "status": "GENERATING_FIXED_CATALOGUE",
+      "cell_drawing_variants.json": {
+        "sha256": "43d607ee4278f2d16d79bb11b04b7b66b76f394283a1632d4738b0c8e55e58f9",
+        "status": "RUNNING",
+        "requested_groups": 128,
+        "checked_groups": 64
+      }
+    },
+    {
+      "run": "palace_15cm_tilted_cell",
+      "status": "REALIZING_SELECTED_MOTIONS",
+      "cell_drawing_variants.json": {
+        "sha256": "71e67348612bfad7715f30aa57bbd9297b6fa0c49103354cf10cdffb32d4e901",
+        "status": "BOUNDED_CANDIDATES",
+        "requested_groups": 128,
+        "checked_groups": 128
+      },
+      "allocation_motions.json": {
+        "sha256": "1e530258d27bbd194553103f10ff2173b49d561e07505b81762656dd97f41e67",
+        "status": "PREPARING_SELECTED_MOTIONS",
+        "prepared_strokes": 53,
+        "requested_strokes": 64,
+        "active_motion": {
+          "mode_id": "arm_1/draw-0021/anchor-0-reverse-0-roll-0-branch-0",
+          "arm": "arm_1",
+          "stroke_id": "draw-0021",
+          "started_at": "2026-10-11T08:38:30.962243+00:00"
+        }
+      }
+    },
+    {
+      "run": "palace_15cm_tilted_single_cell",
+      "status": "REALIZING_SELECTED_MOTIONS",
+      "cell_drawing_variants.json": {
+        "sha256": "71e67348612bfad7715f30aa57bbd9297b6fa0c49103354cf10cdffb32d4e901",
+        "status": "BOUNDED_CANDIDATES",
+        "requested_groups": 128,
+        "checked_groups": 128
+      },
+      "allocation_motions.json": {
+        "sha256": "ec7aa166399be036ba547fc3875c44ef2a34b5db22557b846b6e25e3d18b5ec9",
+        "status": "PREPARING_SELECTED_MOTIONS",
+        "prepared_strokes": 51,
+        "requested_strokes": 64
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "scope": "Completed fixed drawing catalogue only; full selected trajectories and replay are separate",
+  "catalogue_sha256": "71e67348612bfad7715f30aa57bbd9297b6fa0c49103354cf10cdffb32d4e901",
+  "catalogue_status": "BOUNDED_CANDIDATES",
+  "checked_groups": 128,
+  "requested_groups": 128,
+  "variant_count": 128,
+  "construction_actions": 64,
+  "per_arm_action_coverage": {
+    "arm_1": 64,
+    "arm_2": 64
+  },
+  "all_tilts_30_deg": true,
+  "maximum_sampled_tracking_error_m": 1.622639950200945e-05,
+  "same_sculpture_inputs": true,
+  "source_files": [
+    {
+      "file": "asset_manifest.json",
+      "sha256": "b9bbec40438f3c40cd86a4942f69176bc726dd63b1a3c091f86efb2b3e498c44",
+      "matches": true
+    },
+    {
+      "file": "geometry.glb",
+      "sha256": "98073274f7d46a1003b0ac8fe87eb409d8dc7af1d3be404d0fa327da159dd976",
+      "matches": true
+    },
+    {
+      "file": "construction_plan.json",
+      "sha256": "559492426bbcd8c9b8747cffc1751644253882e191c55448a991604899a5ae1e",
+      "matches": true
+    },
+    {
+      "file": "stroke_graph.json",
+      "sha256": "4080513424ffaf5860b7134d36182ce7b19e6bfcaedcdaa778de9193a500d928",
+      "matches": true
+    },
+    {
+      "file": "pen_strokes.json",
+      "sha256": "8249f25a10b78da047f0a55099b1050bbdcf99166e3745563ae93f32184a5f8e",
+      "matches": true
+    }
+  ]
+}

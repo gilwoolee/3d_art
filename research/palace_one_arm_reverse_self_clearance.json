@@ -1,0 +1,238 @@
+{
+  "scope": "Isolated drawing against its own deposited material and static obstacles; no prior strokes, approaches or transfers",
+  "stroke": "draw-0029",
+  "maximum_subdivision_depth": 20,
+  "checked_segments": 34,
+  "total_segments": 1620,
+  "result": {
+    "status": "CLEARANCE_UNRESOLVED",
+    "alpha": 0.3393244743347168,
+    "positions": [
+      -0.17706437134134814,
+      -0.7609271086345261,
+      0.06375337994364161,
+      2.238844386228418,
+      -0.14354995551933233,
+      3.16312663505815,
+      -0.06682610315235787
+    ],
+    "pairs": [
+      {
+        "first": "tool/nozzle_shank",
+        "second": "prospective/arm_1/draw-0029/25/0",
+        "distance_m": 0.001001001213007725,
+        "motion_bound_m": 1.4862416686182467e-09
+      }
+    ],
+    "evaluations": 145,
+    "maximum_depth": 20
+  },
+  "sampled_shank_clearance": [
+    {
+      "fraction": 0.0,
+      "distance_m": 0.0011099091079153753,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.025,
+      "distance_m": 0.0011116682084157698,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.05,
+      "distance_m": 0.001106110668192547,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.07500000000000001,
+      "distance_m": 0.0010996332601639531,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.1,
+      "distance_m": 0.0010924477358935567,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.125,
+      "distance_m": 0.0010848343505628997,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.15000000000000002,
+      "distance_m": 0.0010769473125529546,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.17500000000000002,
+      "distance_m": 0.001068876089998711,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.2,
+      "distance_m": 0.00106067878699343,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.225,
+      "distance_m": 0.0010523973197363494,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.25,
+      "distance_m": 0.001044064596611556,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.275,
+      "distance_m": 0.0010357081485201718,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.30000000000000004,
+      "distance_m": 0.0010264181012087426,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.325,
+      "distance_m": 0.0010061663164341803,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.35000000000000003,
+      "distance_m": 0.0010103892165759698,
+      "material": "prospective/arm_1/draw-0029/24/3"
+    },
+    {
+      "fraction": 0.375,
+      "distance_m": 0.0009927534051227828,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.4,
+      "distance_m": 0.0009880690067374375,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.42500000000000004,
+      "distance_m": 0.0009813497840622017,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.45,
+      "distance_m": 0.0009737037902557046,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.47500000000000003,
+      "distance_m": 0.0009656857081074101,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.5,
+      "distance_m": 0.0009575336381234976,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.525,
+      "distance_m": 0.0009493667322353445,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.55,
+      "distance_m": 0.0009412543157307342,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.5750000000000001,
+      "distance_m": 0.0009278692825368753,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.6000000000000001,
+      "distance_m": 0.0009209333221268098,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.625,
+      "distance_m": 0.0009147066893430494,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.65,
+      "distance_m": 0.0009073511147242119,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.675,
+      "distance_m": 0.0009052514966468612,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.7000000000000001,
+      "distance_m": 0.0008986267513158274,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.7250000000000001,
+      "distance_m": 0.000888497630634036,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.75,
+      "distance_m": 0.0008825998402694764,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.775,
+      "distance_m": 0.0008771128053513245,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.8,
+      "distance_m": 0.0008719713535536921,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.8250000000000001,
+      "distance_m": 0.0008671669649237284,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.8500000000000001,
+      "distance_m": 0.0008627068318385389,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.875,
+      "distance_m": 0.0008585601313631527,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.9,
+      "distance_m": 0.0008550626001953785,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.925,
+      "distance_m": 0.0008516047449659395,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.9500000000000001,
+      "distance_m": 0.0008485428069081685,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 0.9750000000000001,
+      "distance_m": 0.0008442721870176834,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    },
+    {
+      "fraction": 1.0,
+      "distance_m": 0.0008420517898958105,
+      "material": "prospective/arm_1/draw-0029/25/0"
+    }
+  ],
+  "minimum_sampled_clearance_m": 0.0008420517898958105
+}

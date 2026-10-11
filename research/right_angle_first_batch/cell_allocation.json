@@ -1,0 +1,913 @@
+{
+  "schema_version": 1,
+  "kind": "cell_allocation",
+  "status": "ALLOCATION_ONLY",
+  "executable": false,
+  "simulation_only": true,
+  "inputs": {
+    "allocation_problem.json": "b88ce6c099de823460d6fdcd21529a9417f3403e83c75a2ca284ae7f71e348b9"
+  },
+  "fixed_mode_count": 127,
+  "requested_strokes": 64,
+  "results": {
+    "dual": {
+      "solver": "OR-Tools CP-SAT",
+      "status": "FEASIBLE",
+      "wall_time_s": 15.010102000000002,
+      "enabled_arms": [
+        "arm_1",
+        "arm_2"
+      ],
+      "bound_scope": "Fixed catalogue, supplied duration estimates and encoded constraints only",
+      "actions": [
+        {
+          "mode_id": "arm_1/backbone-base-002/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-base-002",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "backbone-foot-001",
+          "predecessor_mode": null,
+          "support_modes": [],
+          "start_s": 0.0,
+          "end_s": 18.431,
+          "drawing_s": 5.007758747096276
+        },
+        {
+          "mode_id": "arm_2/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-base-001",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00313",
+          "predecessor_mode": null,
+          "support_modes": [],
+          "start_s": 0.0,
+          "end_s": 37.179,
+          "drawing_s": 19.20017335605905
+        },
+        {
+          "mode_id": "arm_1/backbone-post-001/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-post-001",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "backbone-foot-001",
+          "predecessor_mode": "arm_1/backbone-base-002/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 18.431,
+          "end_s": 25.104,
+          "drawing_s": 3.752259032726021
+        },
+        {
+          "mode_id": "arm_1/backbone-base-003/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-base-003",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00314",
+          "predecessor_mode": "arm_1/backbone-post-001/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 25.104,
+          "end_s": 43.084,
+          "drawing_s": 11.786711952320351
+        },
+        {
+          "mode_id": "arm_2/backbone-post-002/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-post-002",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "backbone-foot-002",
+          "predecessor_mode": "arm_2/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 37.179,
+          "end_s": 45.393,
+          "drawing_s": 5.293256998862476
+        },
+        {
+          "mode_id": "arm_1/backbone-post-003/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-post-003",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "backbone-foot-003",
+          "predecessor_mode": "arm_1/backbone-base-003/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 43.084,
+          "end_s": 55.341,
+          "drawing_s": 10.255139856518264
+        },
+        {
+          "mode_id": "arm_2/backbone-base-000/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-base-000",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00314",
+          "predecessor_mode": "arm_2/backbone-post-002/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 45.393,
+          "end_s": 73.349,
+          "drawing_s": 20.81480879724403
+        },
+        {
+          "mode_id": "arm_1/backbone-base-004/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-base-004",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "backbone-foot-003",
+          "predecessor_mode": "arm_1/backbone-post-003/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 55.341,
+          "end_s": 63.508,
+          "drawing_s": 4.284538485226408
+        },
+        {
+          "mode_id": "arm_1/backbone-post-004/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-post-004",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "backbone-foot-004",
+          "predecessor_mode": "arm_1/backbone-base-004/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 63.508,
+          "end_s": 75.396,
+          "drawing_s": 9.886027597189445
+        },
+        {
+          "mode_id": "arm_2/backbone-post-000/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "backbone-post-000",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "backbone-foot-000",
+          "predecessor_mode": "arm_2/backbone-base-000/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 73.349,
+          "end_s": 76.03,
+          "drawing_s": 0.6797453106181436
+        },
+        {
+          "mode_id": "arm_1/draw-0029/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0029",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00037",
+          "predecessor_mode": "arm_1/backbone-post-004/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/backbone-post-004/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 78.03,
+          "end_s": 491.607,
+          "drawing_s": 410.0299208391867
+        },
+        {
+          "mode_id": "arm_2/draw-0046/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0046",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00002",
+          "predecessor_mode": "arm_2/backbone-post-000/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/backbone-post-000/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 78.03,
+          "end_s": 86.368,
+          "drawing_s": 4.989252151665254
+        },
+        {
+          "mode_id": "arm_2/draw-0047/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0047",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00003",
+          "predecessor_mode": "arm_2/draw-0046/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0046/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 88.368,
+          "end_s": 96.61,
+          "drawing_s": 5.182978909261758
+        },
+        {
+          "mode_id": "arm_2/draw-0033/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0033",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00312",
+          "predecessor_mode": "arm_2/draw-0047/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 96.61,
+          "end_s": 103.101,
+          "drawing_s": 0.35613195933395775
+        },
+        {
+          "mode_id": "arm_2/draw-0037/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0037",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00312",
+          "predecessor_mode": "arm_2/draw-0033/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 103.101,
+          "end_s": 146.814,
+          "drawing_s": 39.953576099852114
+        },
+        {
+          "mode_id": "arm_2/draw-0034/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0034",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00313",
+          "predecessor_mode": "arm_2/draw-0037/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 146.814,
+          "end_s": 150.905,
+          "drawing_s": 0.3537407446488342
+        },
+        {
+          "mode_id": "arm_2/draw-0026/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0026",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00179",
+          "predecessor_mode": "arm_2/draw-0034/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0034/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 152.905,
+          "end_s": 412.224,
+          "drawing_s": 256.37841906259473
+        },
+        {
+          "mode_id": "arm_2/draw-0043/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0043",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00039",
+          "predecessor_mode": "arm_2/draw-0026/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0047/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 412.224,
+          "end_s": 426.333,
+          "drawing_s": 4.852262191639946
+        },
+        {
+          "mode_id": "arm_2/draw-0020/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0020",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00026",
+          "predecessor_mode": "arm_2/draw-0043/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/backbone-post-002/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 426.333,
+          "end_s": 495.195,
+          "drawing_s": 62.34280351676955
+        },
+        {
+          "mode_id": "arm_1/draw-0000/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0000",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00001",
+          "predecessor_mode": "arm_1/draw-0029/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0043/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 491.607,
+          "end_s": 693.079,
+          "drawing_s": 196.2021182135568
+        },
+        {
+          "mode_id": "arm_2/draw-0050/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0050",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00269",
+          "predecessor_mode": "arm_2/draw-0020/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/draw-0029/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 495.195,
+          "end_s": 507.738,
+          "drawing_s": 6.450172550740051
+        },
+        {
+          "mode_id": "arm_2/draw-0048/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0048",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00014",
+          "predecessor_mode": "arm_2/draw-0050/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0050/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 509.738,
+          "end_s": 518.237,
+          "drawing_s": 5.354603524077246
+        },
+        {
+          "mode_id": "arm_2/draw-0031/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0031",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00150",
+          "predecessor_mode": "arm_2/draw-0048/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0020/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 518.237,
+          "end_s": 673.039,
+          "drawing_s": 148.57204549022924
+        },
+        {
+          "mode_id": "arm_2/draw-0044/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0044",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00022",
+          "predecessor_mode": "arm_2/draw-0031/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0048/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 673.039,
+          "end_s": 684.182,
+          "drawing_s": 4.913891238897656
+        },
+        {
+          "mode_id": "arm_2/draw-0002/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0002",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00003",
+          "predecessor_mode": "arm_2/draw-0044/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0047/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 684.182,
+          "end_s": 710.803,
+          "drawing_s": 19.371426103372528
+        },
+        {
+          "mode_id": "arm_1/draw-0011/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0011",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00014",
+          "predecessor_mode": "arm_1/draw-0000/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0048/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 693.079,
+          "end_s": 714.79,
+          "drawing_s": 17.81106310672321
+        },
+        {
+          "mode_id": "arm_2/draw-0016/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0016",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00021",
+          "predecessor_mode": "arm_2/draw-0002/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0031/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 710.803,
+          "end_s": 737.783,
+          "drawing_s": 19.136870386877668
+        },
+        {
+          "mode_id": "arm_1/draw-0019/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0019",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00128",
+          "predecessor_mode": "arm_1/draw-0011/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0031/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 714.79,
+          "end_s": 732.356,
+          "drawing_s": 12.243493969673423
+        },
+        {
+          "mode_id": "arm_1/draw-0032/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0032",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00111",
+          "predecessor_mode": "arm_1/draw-0019/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/draw-0029/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 732.356,
+          "end_s": 868.064,
+          "drawing_s": 132.16779372004453
+        },
+        {
+          "mode_id": "arm_2/draw-0049/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0049",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00063",
+          "predecessor_mode": "arm_2/draw-0016/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/draw-0029/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 737.783,
+          "end_s": 749.53,
+          "drawing_s": 5.713446538978616
+        },
+        {
+          "mode_id": "arm_2/draw-0039/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0039",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00040",
+          "predecessor_mode": "arm_2/draw-0049/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0031/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 749.53,
+          "end_s": 755.353,
+          "drawing_s": 1.6071369612455642
+        },
+        {
+          "mode_id": "arm_2/draw-0040/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0040",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00008",
+          "predecessor_mode": "arm_2/draw-0039/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0044/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 755.353,
+          "end_s": 764.408,
+          "drawing_s": 1.7523091095880345
+        },
+        {
+          "mode_id": "arm_2/draw-0017/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0017",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00022",
+          "predecessor_mode": "arm_2/draw-0040/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0048/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 764.408,
+          "end_s": 779.29,
+          "drawing_s": 11.05579813608191
+        },
+        {
+          "mode_id": "arm_2/draw-0045/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0045",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00039",
+          "predecessor_mode": "arm_2/draw-0017/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0043/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 779.29,
+          "end_s": 791.246,
+          "drawing_s": 4.986102570488333
+        },
+        {
+          "mode_id": "arm_2/draw-0023/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0023",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00030",
+          "predecessor_mode": "arm_2/draw-0045/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/backbone-post-003/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 791.246,
+          "end_s": 916.41,
+          "drawing_s": 119.70151434848383
+        },
+        {
+          "mode_id": "arm_1/draw-0053/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0053",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00024",
+          "predecessor_mode": "arm_1/draw-0032/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/draw-0019/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 868.064,
+          "end_s": 880.786,
+          "drawing_s": 9.152772857377926
+        },
+        {
+          "mode_id": "arm_1/draw-0014/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0014",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00018",
+          "predecessor_mode": "arm_1/draw-0053/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/backbone-post-001/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 880.786,
+          "end_s": 1047.386,
+          "drawing_s": 160.4186016536338
+        },
+        {
+          "mode_id": "arm_2/draw-0028/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0028",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00036",
+          "predecessor_mode": "arm_2/draw-0023/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0039/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 916.41,
+          "end_s": 933.151,
+          "drawing_s": 12.2728166457962
+        },
+        {
+          "mode_id": "arm_2/draw-0004/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0004",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00005",
+          "predecessor_mode": "arm_2/draw-0028/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0045/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 933.151,
+          "end_s": 951.93,
+          "drawing_s": 12.552318848662473
+        },
+        {
+          "mode_id": "arm_2/draw-0013/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0013",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00046",
+          "predecessor_mode": "arm_2/draw-0004/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/draw-0029/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 951.93,
+          "end_s": 1317.685,
+          "drawing_s": 358.7591512209216
+        },
+        {
+          "mode_id": "arm_1/draw-0003/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0003",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00004",
+          "predecessor_mode": "arm_1/draw-0014/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0049/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1047.386,
+          "end_s": 1081.441,
+          "drawing_s": 29.4850712430411
+        },
+        {
+          "mode_id": "arm_1/draw-0005/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0005",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00055",
+          "predecessor_mode": "arm_1/draw-0003/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0031/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1081.441,
+          "end_s": 1111.045,
+          "drawing_s": 25.18297706441726
+        },
+        {
+          "mode_id": "arm_1/draw-0030/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0030",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00039",
+          "predecessor_mode": "arm_1/draw-0005/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0043/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1111.045,
+          "end_s": 1134.938,
+          "drawing_s": 18.551797660914197
+        },
+        {
+          "mode_id": "arm_1/draw-0001/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0001",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00002",
+          "predecessor_mode": "arm_1/draw-0030/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/backbone-post-000/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1134.938,
+          "end_s": 1164.303,
+          "drawing_s": 25.586341551826443
+        },
+        {
+          "mode_id": "arm_1/draw-0024/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0024",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00030",
+          "predecessor_mode": "arm_1/draw-0001/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0023/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1164.303,
+          "end_s": 1320.701,
+          "drawing_s": 151.15272495916042
+        },
+        {
+          "mode_id": "arm_2/draw-0018/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0018",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00023",
+          "predecessor_mode": "arm_2/draw-0013/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0040/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1317.685,
+          "end_s": 1357.498,
+          "drawing_s": 35.59598097229216
+        },
+        {
+          "mode_id": "arm_1/draw-0010/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0010",
+          "arm": "arm_1",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00013",
+          "predecessor_mode": "arm_1/draw-0024/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0013/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1320.701,
+          "end_s": 1709.484,
+          "drawing_s": 383.3398068642575
+        },
+        {
+          "mode_id": "arm_2/draw-0008/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0008",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00011",
+          "predecessor_mode": "arm_2/draw-0018/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0013/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1357.498,
+          "end_s": 1382.658,
+          "drawing_s": 20.73912743560895
+        },
+        {
+          "mode_id": "arm_2/draw-0042/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0042",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00011",
+          "predecessor_mode": "arm_2/draw-0008/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0013/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1382.658,
+          "end_s": 1389.667,
+          "drawing_s": 3.8689392366847706
+        },
+        {
+          "mode_id": "arm_2/draw-0036/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0036",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00312",
+          "predecessor_mode": "arm_2/draw-0042/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 1389.667,
+          "end_s": 1438.243,
+          "drawing_s": 44.42877976561321
+        },
+        {
+          "mode_id": "arm_2/draw-0006/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0006",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00007",
+          "predecessor_mode": "arm_2/draw-0036/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0042/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1438.243,
+          "end_s": 1457.725,
+          "drawing_s": 10.679459667570102
+        },
+        {
+          "mode_id": "arm_2/draw-0027/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0027",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00059",
+          "predecessor_mode": "arm_2/draw-0006/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0023/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1457.725,
+          "end_s": 1477.379,
+          "drawing_s": 12.847896300868753
+        },
+        {
+          "mode_id": "arm_2/draw-0022/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0022",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00282",
+          "predecessor_mode": "arm_2/draw-0027/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0013/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1477.379,
+          "end_s": 1498.094,
+          "drawing_s": 16.557470178444365
+        },
+        {
+          "mode_id": "arm_2/draw-0041/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0041",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00214",
+          "predecessor_mode": "arm_2/draw-0022/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0026/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1498.094,
+          "end_s": 1507.932,
+          "drawing_s": 3.429769041402459
+        },
+        {
+          "mode_id": "arm_2/draw-0021/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0021",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00204",
+          "predecessor_mode": "arm_2/draw-0041/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0026/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1507.932,
+          "end_s": 1532.53,
+          "drawing_s": 17.736996988769736
+        },
+        {
+          "mode_id": "arm_2/draw-0052/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0052",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00246",
+          "predecessor_mode": "arm_2/draw-0021/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0026/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1532.53,
+          "end_s": 1543.591,
+          "drawing_s": 6.999263148550211
+        },
+        {
+          "mode_id": "arm_2/draw-0051/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0051",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00019",
+          "predecessor_mode": "arm_2/draw-0052/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0052/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1545.591,
+          "end_s": 1555.22,
+          "drawing_s": 6.45677228093807
+        },
+        {
+          "mode_id": "arm_2/draw-0007/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0007",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00008",
+          "predecessor_mode": "arm_2/draw-0051/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0040/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1555.22,
+          "end_s": 1577.423,
+          "drawing_s": 17.846524817040457
+        },
+        {
+          "mode_id": "arm_2/draw-0012/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0012",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00015",
+          "predecessor_mode": "arm_2/draw-0007/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0051/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1577.423,
+          "end_s": 1606.808,
+          "drawing_s": 25.009608075448092
+        },
+        {
+          "mode_id": "arm_2/draw-0038/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0038",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00313",
+          "predecessor_mode": "arm_2/draw-0012/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 1606.808,
+          "end_s": 1652.009,
+          "drawing_s": 41.32627354224102
+        },
+        {
+          "mode_id": "arm_2/draw-0025/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0025",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00032",
+          "predecessor_mode": "arm_2/draw-0038/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0041/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1652.009,
+          "end_s": 1665.358,
+          "drawing_s": 10.28255708295164
+        },
+        {
+          "mode_id": "arm_2/draw-0035/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0035",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "base-junction-00314",
+          "predecessor_mode": "arm_2/draw-0025/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [],
+          "start_s": 1665.358,
+          "end_s": 1668.96,
+          "drawing_s": 0.36125874172600114
+        },
+        {
+          "mode_id": "arm_2/draw-0015/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0015",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00019",
+          "predecessor_mode": "arm_2/draw-0035/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_2/draw-0051/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1668.96,
+          "end_s": 1687.858,
+          "drawing_s": 10.652166373908495
+        },
+        {
+          "mode_id": "arm_2/draw-0009/anchor-0-reverse-0-roll-0-branch-0",
+          "stroke_id": "draw-0009",
+          "arm": "arm_2",
+          "variant": "anchor-0-reverse-0-roll-0-branch-0",
+          "start_anchor": "junction-00012",
+          "predecessor_mode": "arm_2/draw-0015/anchor-0-reverse-0-roll-0-branch-0",
+          "support_modes": [
+            "arm_1/draw-0053/anchor-0-reverse-0-roll-0-branch-0"
+          ],
+          "start_s": 1687.858,
+          "end_s": 1707.1,
+          "drawing_s": 13.151822942662331
+        }
+      ],
+      "makespan_s": 1719.822,
+      "objective_bound_s": 800.482
+    },
+    "single": {
+      "status": "NO_ELIGIBLE_MOTION_MODE",
+      "enabled_arms": [
+        "arm_1"
+      ],
+      "missing_strokes": [
+        "draw-0039"
+      ],
+      "actions": [],
+      "makespan_s": null,
+      "objective_bound_s": null,
+      "wall_time_s": 0.0
+    }
+  },
+  "estimated_speedup": null,
+  "comparison_scope": "Same catalogue and estimated transfer costs; not a physical speedup",
+  "limitations": [
+    "Transfer durations are estimates until selected motions are constructed",
+    "No inter-arm or growing-material feasibility is implied by allocation",
+    "Anchor/cooling readiness is encoded; intermediate stiffness is not certified",
+    "Pen and Flexiv process parameters remain uncalibrated"
+  ]
+}

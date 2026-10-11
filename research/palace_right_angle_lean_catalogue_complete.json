@@ -1,0 +1,22 @@
+{
+  "kind": "lean_catalogue_verification",
+  "status": "BOUNDED_CANDIDATES",
+  "simulation_only": true,
+  "executable": false,
+  "variants": 128,
+  "groups": 128,
+  "poses_checked": 12164,
+  "maximum_tcp_target_error_m": 9.529767688393402e-12,
+  "maximum_tilt_error_deg": 9.638050357807515e-10,
+  "unchanged_inputs": {
+    "pen_strokes.json": true,
+    "stroke_graph.json": true,
+    "construction_plan.json": true,
+    "geometry.glb": true,
+    "normalized.glb": true
+  },
+  "inputs": {
+    "runs/palace_15cm_right_angle_lean_cell/cell_drawing_variants.json": "772c0926dae1c7f0ce3004f9fc2b3d7d722d8f8156f05bcc4ffcf48a3dfe0e4d"
+  },
+  "scope": "All saved IK samples of the fixed 10-degree catalogue. This does not verify transits, interpolants, timed shared-arm clearance, or physical deposition."
+}

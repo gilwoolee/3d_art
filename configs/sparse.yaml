@@ -1,0 +1,20 @@
+schema_version: 1
+algorithm: offline_sparse
+maximum_seconds: 5
+# Second solve retains this fraction of the first solve's achieved proxy score.
+retained_coverage: 0.95
+# Separate allowances; actual downstream duration is audited, never assumed to fit.
+overhead_reserve_s: 360
+support_reserve_s: 240
+azimuth_deg: [0, 90, 180, 270]
+elevation_deg: [25, 55]
+# Object-independent interior shape evidence. No per-model feature labels.
+visible_edges:
+  normal_angle_deg: 35
+  depth_jump_m: 0.002
+  smoothing_m: 0.0015
+  spatial_tiles: 4
+  weights:
+    boundary: 0.4
+    interior: 0.4
+    keypoints: 0.2

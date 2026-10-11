@@ -1,0 +1,32 @@
+# Two raw drawing resources; this is not a collision-checked robot schedule.
+schema_version: 1
+algorithm: offline_sparse
+candidate_sources:
+- surface_contours.json
+- geometric_candidates.json
+major_horizontal_sections: 0.4
+maximum_seconds: 5
+retained_coverage: 0.95
+overhead_reserve_s: 360
+support_reserve_s: 240
+azimuth_deg:
+- 0
+- 45
+- 90
+- 135
+- 180
+- 225
+- 270
+- 315
+elevation_deg:
+- 10
+visible_edges:
+  normal_angle_deg: 35
+  depth_jump_m: 0.002
+  smoothing_m: 0.0015
+  spatial_tiles: 4
+  weights:
+    boundary: 0.4
+    interior: 0.4
+    keypoints: 0.2
+drawing_resources: 2

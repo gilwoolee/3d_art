@@ -1,0 +1,15 @@
+{
+  "scope": "Prepared matching inputs and allocation; robot motion and replay not started",
+  "source_run": "/Users/gilwoolee/Workspace/3d_art/runs/palace_15cm_tilted_cell",
+  "baseline_run": "/Users/gilwoolee/Workspace/3d_art/runs/palace_15cm_tilted_single_cell",
+  "resource_mode": "single",
+  "shared_files": {
+    "cell_manifest.json": "a0e3b347b4047ff4c1dc9777ae778bed15ee258486573add39342bcea9b609c6",
+    "cell_drawing_variants.json": "71e67348612bfad7715f30aa57bbd9297b6fa0c49103354cf10cdffb32d4e901",
+    "construction_plan.json": "559492426bbcd8c9b8747cffc1751644253882e191c55448a991604899a5ae1e",
+    "stroke_graph.json": "4080513424ffaf5860b7134d36182ce7b19e6bfcaedcdaa778de9193a500d928",
+    "pen_strokes.json": "8249f25a10b78da047f0a55099b1050bbdcf99166e3745563ae93f32184a5f8e",
+    "allocation_config.json": "72065b1f99e8a0f4b06ccb1f84f15e7e05b74a564a83a54a689d8585e7d2fee5"
+  },
+  "single_allocation_actions": 64
+}

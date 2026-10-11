@@ -1,0 +1,389 @@
+{
+  "status": "REAL_WITNESS_REPAIR_CHECKED",
+  "source_problem_sha256": "b88ce6c099de823460d6fdcd21529a9417f3403e83c75a2ca284ae7f71e348b9",
+  "source_failure_sha256": "2f52cb0c2319d7abd394564e57c8a658fe6683a1096096cece9f31f46fa899d3",
+  "repair": {
+    "kind": "MATERIAL_ORDER",
+    "constraint": {
+      "mode_id": "arm_1/backbone-base-004/anchor-0-reverse-0-roll-0-branch-0",
+      "precedence_modes": [
+        [
+          "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+          "arm_1/backbone-post-001/anchor-0-reverse-0-roll-0-branch-0"
+        ],
+        [
+          "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+          "arm_1/backbone-post-002/anchor-0-reverse-0-roll-0-branch-0"
+        ],
+        [
+          "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+          "arm_2/backbone-post-001/anchor-0-reverse-0-roll-0-branch-0"
+        ],
+        [
+          "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+          "arm_2/backbone-post-002/anchor-0-reverse-0-roll-0-branch-0"
+        ],
+        [
+          "arm_1/backbone-base-004/anchor-0-reverse-0-roll-0-branch-0",
+          "arm_1/backbone-post-003/anchor-0-reverse-0-roll-0-branch-0"
+        ],
+        [
+          "arm_1/backbone-base-004/anchor-0-reverse-0-roll-0-branch-0",
+          "arm_2/backbone-post-003/anchor-0-reverse-0-roll-0-branch-0"
+        ]
+      ]
+    },
+    "evidence": [
+      {
+        "stroke_id": "backbone-base-004",
+        "arm": "arm_1",
+        "phase": "APPROACH",
+        "status": "NO_CONNECTED_APPROACH",
+        "attempts": [
+          {
+            "direction": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.3284793743743435,
+                  -0.7957611011273111,
+                  0.18248410016824496,
+                  2.184123649245469,
+                  -0.20213627086596128,
+                  2.949129585367161,
+                  -0.09344704759907538
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              0.7071067811865475,
+              0.0,
+              0.7071067811865475
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.3273255084605846,
+                  -0.7976837468416661,
+                  0.1817374433742825,
+                  2.180875694582828,
+                  -0.20181130441391548,
+                  2.9479884109886303,
+                  -0.0929862521840765
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              -0.7071067811865475,
+              0.0,
+              0.7071067811865475
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.32969338823484035,
+                  -0.7962013743055627,
+                  0.18343669866654994,
+                  2.1867483633393796,
+                  -0.20260506466516076,
+                  2.9518463483654775,
+                  -0.09465931013259704
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              0.0,
+              0.7071067811865475,
+              0.7071067811865475
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.32671095144680384,
+                  -0.7966646999023757,
+                  0.18417268510538098,
+                  2.1843420018209216,
+                  -0.19917581048067576,
+                  2.950089210036425,
+                  -0.09548938320680184
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              0.0,
+              -0.7071067811865475,
+              0.7071067811865475
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.33061212729541245,
+                  -0.7972345959813563,
+                  0.18143011862515124,
+                  2.183235363312038,
+                  -0.20523892226145884,
+                  2.949629509034369,
+                  -0.0924372270213305
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              0.5773502691896258,
+              0.5773502691896258,
+              0.5773502691896258
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.3266417690914307,
+                  -0.7978691824534822,
+                  0.18397644516893985,
+                  2.1816580141912523,
+                  -0.1994639002382253,
+                  2.948631019091722,
+                  -0.0951716097935993
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              -0.5773502691896258,
+              0.5773502691896258,
+              0.5773502691896258
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.3276796171225888,
+                  -0.7966212660303431,
+                  0.18416662991291372,
+                  2.1865366819223606,
+                  -0.20007521130250763,
+                  2.952108320443865,
+                  -0.09572198128774548
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              0.5773502691896258,
+              -0.5773502691896258,
+              0.5773502691896258
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.329650943826313,
+                  -0.7983285081338043,
+                  0.18151990719343833,
+                  2.180770396917189,
+                  -0.20439261938579456,
+                  2.948318774761299,
+                  -0.09252070048160052
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          },
+          {
+            "direction": [
+              -0.5773502691896258,
+              -0.5773502691896258,
+              0.5773502691896258
+            ],
+            "status": "NO_CONNECTED_IK_PATH",
+            "failed_sample": 1,
+            "lift_sample_m": 0.003,
+            "tracking_rejections": [],
+            "collision_evidence": [
+              {
+                "scope": "arm",
+                "status": "COLLISION",
+                "alpha": 0.5,
+                "positions": [
+                  -0.33051022897687593,
+                  -0.797062424318624,
+                  0.18142539260274887,
+                  2.1856670792695123,
+                  -0.20502653357508926,
+                  2.9518567933119,
+                  -0.09291102601742393
+                ],
+                "pairs": [
+                  {
+                    "first": "tool/nozzle_shank",
+                    "second": "arm_1/backbone-post-003/36/0"
+                  }
+                ],
+                "evaluations": 1,
+                "maximum_depth": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "added_precedence": [
+    [
+      "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+      "arm_1/backbone-post-001/anchor-0-reverse-0-roll-0-branch-0"
+    ],
+    [
+      "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+      "arm_1/backbone-post-002/anchor-0-reverse-0-roll-0-branch-0"
+    ],
+    [
+      "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+      "arm_2/backbone-post-001/anchor-0-reverse-0-roll-0-branch-0"
+    ],
+    [
+      "arm_1/backbone-base-001/anchor-0-reverse-0-roll-0-branch-0",
+      "arm_2/backbone-post-002/anchor-0-reverse-0-roll-0-branch-0"
+    ],
+    [
+      "arm_1/backbone-base-004/anchor-0-reverse-0-roll-0-branch-0",
+      "arm_1/backbone-post-003/anchor-0-reverse-0-roll-0-branch-0"
+    ],
+    [
+      "arm_1/backbone-base-004/anchor-0-reverse-0-roll-0-branch-0",
+      "arm_2/backbone-post-003/anchor-0-reverse-0-roll-0-branch-0"
+    ]
+  ],
+  "all_fixed_modes_preserved": true
+}

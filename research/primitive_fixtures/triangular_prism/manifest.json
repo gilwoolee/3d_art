@@ -1,0 +1,32 @@
+{
+  "name": "triangular_prism",
+  "source": "model_mm.stl",
+  "source_units": "mm",
+  "source_up": "z",
+  "max_extent_m": 0.08,
+  "bounds_m": [
+    [
+      -0.04,
+      -0.03,
+      0.0
+    ],
+    [
+      0.04,
+      0.03,
+      0.08
+    ]
+  ],
+  "stl_sha256": "ed8e62d6e530881c3f67fffbe05136d37157a05ab4674408b0b08564479e0680",
+  "graph_sha256": "7d3e67393cd96add43d9131653f6d857f7e3316713cd7d71ffb44830b125bf0f",
+  "vertices": 6,
+  "material_members": 9,
+  "reference_curves": 9,
+  "total_length_m": 0.688444102037119,
+  "preflight_status": "READY_FOR_ORDER_SEARCH",
+  "max_displacement_m": 5.4976081684775206e-05,
+  "mesh_watertight": true,
+  "importer_roundtrip_verified": true,
+  "automatic_abstraction": false,
+  "robot_feasible": null,
+  "pen_feasible": null
+}

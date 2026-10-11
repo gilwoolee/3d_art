@@ -1,0 +1,10 @@
+schema_version: 1
+simulation_only: true
+# Provisional work-cell dimensions. Replace with measured hardware geometry.
+table_size_m: [4.0, 4.0, 0.1]
+platform_padding_m: 0.04
+clearance_m: 0.001
+maximum_subdivision_depth: 12
+# No pen shape is guessed from a product name. Null checks the arm only.
+# A measured profile is supported here; see docs/tool_geometry.md.
+tool_geometry: null

@@ -1,0 +1,32 @@
+{
+  "name": "bottle",
+  "source": "model_mm.stl",
+  "source_units": "mm",
+  "source_up": "z",
+  "max_extent_m": 0.12,
+  "bounds_m": [
+    [
+      -0.025,
+      -0.025,
+      0.0
+    ],
+    [
+      0.025,
+      0.025,
+      0.12
+    ]
+  ],
+  "stl_sha256": "d4f017a00227944d2a3dece80d61f84d4e39f325ca716e7b1a4da1959640727e",
+  "graph_sha256": "fe5bcb5e7bb86a108b6857af6dccff4692eed1e2eb3b545c28dc3c8e6293dec4",
+  "vertices": 16,
+  "material_members": 28,
+  "reference_curves": 8,
+  "total_length_m": 0.9577112936999843,
+  "preflight_status": "READY_FOR_ORDER_SEARCH",
+  "max_displacement_m": 1.7329977794459972e-06,
+  "mesh_watertight": true,
+  "importer_roundtrip_verified": true,
+  "automatic_abstraction": false,
+  "robot_feasible": null,
+  "pen_feasible": null
+}

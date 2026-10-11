@@ -1,0 +1,8 @@
+{
+  "status": "PARTIAL_DIAGNOSTIC_SUPERSEDED_BY_FULL_RUN",
+  "tracking_status": "BOUNDED",
+  "checked_segments_at_least": 1900,
+  "total_segments": 57072,
+  "proposal_sha256": "54b6914d08fa097fa061ac16d0b91c0a4b5bb0f10382f8b5c450692f91787824",
+  "scope": "Isolated contour. Continuous tip tracking passed; early collision intervals passed. Remaining isolated check stopped to avoid duplicating full-run validation against actual deposited supports. Not a complete collision certificate."
+}

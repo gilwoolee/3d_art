@@ -1,0 +1,17 @@
+schema_version: 1
+simulation_only: true
+# A shared planning clock, with uncalibrated pen/process settings.
+maximum_states: 500
+beam_width: 24
+maximum_dispatch_batches: 24
+maximum_successors_per_state: 4
+# Find a complete feasible schedule before trying to improve its makespan.
+completion_first: true
+alternatives_per_dispatch: 2
+start_offsets_s: [0.5, 2.0]
+# Cooling is a development assumption because the pen profile is not measured.
+assumed_cooling_s: 2.0
+maximum_subdivision_depth: 12
+# Preserves checked geometric edges; introduces stops at their boundaries.
+clock: quintic_stop_at_geometric_knots
+clock_revision: 2
