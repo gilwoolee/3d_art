@@ -28,6 +28,8 @@ FIXED_ORIENTATION_POLICY = "fixed-tcp-orientation-v1"
 ORIENTATION_LIMIT_RAD = 0.003
 # Checks an adaptation candidate passes in order; a failure reports the furthest.
 ADAPTATION_STAGES = ("no_inverse_kinematics", "off_target", "tracking", "collision")
+# Closest a retained cached knot may lie to a request sample or to another one.
+SEED_SAMPLE_GAP_M = 0.0005
 # Total backing-up steps per candidate, and how far behind the furthest point.
 ADAPTATION_BACKTRACKS, ADAPTATION_BACKTRACK_DEPTH = 24, 8
 VALIDATOR_VERSION = "motion-clearance-lipschitz-v1"
@@ -142,10 +144,20 @@ def _preserve_seed_samples(points, old_points):
         # Fully timed records retain actual FK points, which can have tiny
         # curvature rather than the request's exact straight source legs.
         mapped = old_arc / old_arc[-1] * source_arc[-1]
-    all_arc = np.unique(np.r_[source_arc, mapped])
-    # Floating arithmetic can place an existing knot a few ulps from its mapped
-    # counterpart. Merge only sub-nanometre duplicates, preserving every corner.
-    all_arc = all_arc[np.r_[True, np.diff(all_arc) > 1e-10]]
+    # A cached knot within the gap of a request sample adds no resolution, and
+    # beside a source vertex it makes the corner's own knot ambiguous: a timed
+    # record brakes into each corner, leaving knots microns short of it. Every
+    # request sample, and so every corner, is preserved.
+    all_arc, last = list(source_arc), None
+    for value in np.unique(mapped):
+        right = int(np.searchsorted(source_arc, value))
+        gap = min(
+            abs(value - source_arc[i]) for i in (right - 1, right) if 0 <= i < len(source_arc)
+        )
+        if gap > SEED_SAMPLE_GAP_M and (last is None or value - last > SEED_SAMPLE_GAP_M):
+            all_arc.append(value)
+            last = value
+    all_arc = np.unique(all_arc)
     return np.column_stack([np.interp(all_arc, source_arc, axis) for axis in points.T])
 
 
