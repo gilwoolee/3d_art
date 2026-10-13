@@ -6,13 +6,17 @@ whole-tool collision model. Configuration checks alone do not cover motions.
 
 from collections import Counter, OrderedDict
 from dataclasses import dataclass
-from time import monotonic
+from time import monotonic, perf_counter
 
 import fcl
 import numpy as np
 import trimesh
 
 from ..robot import origin_matrix
+
+# Process-wide continuous-check workload: calls, evaluations and seconds spent
+# in self/static versus material queries. Measurement only; never a verdict.
+QUERY_STATS = Counter()
 
 
 @dataclass
@@ -411,54 +415,65 @@ class RobotCollisionModel:
             ):
                 raise ValueError("Path deviation must be finite and nonnegative for each joint")
             uncertain = []
-            for name1, name2, distance, contact in self.distances(q, obstacles, deadline=deadline):
-                if contact:
-                    return {
-                        "status": "COLLISION",
-                        "alpha": alpha,
-                        "positions": q.tolist(),
-                        "pairs": [{"first": name1, "second": name2}],
-                    }
-                radius = (
-                    self._pair_radii[name1, name2]
-                    if name2 not in (obstacles or {}) and (name1, name2) in self._pair_radii
-                    else self.motion_radii[name1]
-                )
-                bound = float(radius @ half_delta)
-                if distance <= bound + margin_m + 1e-6:
-                    uncertain.append(
-                        {
-                            "first": name1,
-                            "second": name2,
-                            "distance_m": float(distance),
-                            "motion_bound_m": bound,
-                        }
-                    )
-            if material is not None:
-                bounds = {
-                    body.name: float(self.motion_radii[body.name] @ half_delta) + margin_m + 1e-6
-                    for body in self.bodies
-                }
-                for name1, name2, distance in self.material_distances(
-                    q, material, bounds, deadline=deadline
+            QUERY_STATS["path_evaluations"] += 1
+            started = perf_counter()
+            try:
+                for name1, name2, distance, contact in self.distances(
+                    q, obstacles, deadline=deadline
                 ):
-                    if distance <= 0:
+                    if contact:
                         return {
                             "status": "COLLISION",
                             "alpha": alpha,
                             "positions": q.tolist(),
                             "pairs": [{"first": name1, "second": name2}],
                         }
-                    bound = float(self.motion_radii[name1] @ half_delta)
+                    radius = (
+                        self._pair_radii[name1, name2]
+                        if name2 not in (obstacles or {}) and (name1, name2) in self._pair_radii
+                        else self.motion_radii[name1]
+                    )
+                    bound = float(radius @ half_delta)
                     if distance <= bound + margin_m + 1e-6:
                         uncertain.append(
                             {
                                 "first": name1,
                                 "second": name2,
-                                "distance_m": distance,
+                                "distance_m": float(distance),
                                 "motion_bound_m": bound,
                             }
                         )
+            finally:
+                QUERY_STATS["self_static_seconds"] += perf_counter() - started
+            if material is not None:
+                bounds = {
+                    body.name: float(self.motion_radii[body.name] @ half_delta) + margin_m + 1e-6
+                    for body in self.bodies
+                }
+                started = perf_counter()
+                try:
+                    for name1, name2, distance in self.material_distances(
+                        q, material, bounds, deadline=deadline
+                    ):
+                        if distance <= 0:
+                            return {
+                                "status": "COLLISION",
+                                "alpha": alpha,
+                                "positions": q.tolist(),
+                                "pairs": [{"first": name1, "second": name2}],
+                            }
+                        bound = float(self.motion_radii[name1] @ half_delta)
+                        if distance <= bound + margin_m + 1e-6:
+                            uncertain.append(
+                                {
+                                    "first": name1,
+                                    "second": name2,
+                                    "distance_m": distance,
+                                    "motion_bound_m": bound,
+                                }
+                            )
+                finally:
+                    QUERY_STATS["material_seconds"] += perf_counter() - started
             if not uncertain:
                 return {"status": "CERTIFIED_MODELED_EDGE"}
             if depth >= maximum_depth:
@@ -475,6 +490,7 @@ class RobotCollisionModel:
                 else first
             )
 
+        QUERY_STATS["path_calls"] += 1
         try:
             result = visit(0.0, 1.0, 0)
         except TimeoutError:

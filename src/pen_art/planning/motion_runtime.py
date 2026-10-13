@@ -503,6 +503,9 @@ class DrawingExperience:
                     yield self._decorate(proposal, oriented, request, "cache")
                 else:
                     self.stats["cache_adaptation_unresolved"] += 1
+                    adaptation = getattr(self.library, "last_adaptation_failure", None) or {}
+                    reason = adaptation.get("reason", "unknown")
+                    self.stats[f"cache_adaptation_failed_{reason}"] += 1
                     self.library.record_attempt(
                         request,
                         None,
@@ -510,6 +513,7 @@ class DrawingExperience:
                             "status": "UNRESOLVED",
                             "context_hash": self.context_hash,
                             "reason": "cache_adaptation",
+                            "adaptation_failure": adaptation,
                             "seconds": perf_counter() - started,
                         },
                         self.scene_record(scene),

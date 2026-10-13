@@ -37,7 +37,7 @@ from .axis_repair import (
 )
 from .cell_motion import drawing_alternatives, radial_pen_rotations
 from .clock_path import timed_path
-from .collision import Body, RobotCollisionModel
+from .collision import QUERY_STATS, Body, RobotCollisionModel
 from .coordinated_motion import check_pair_linear, check_pair_paths
 from .dual_arm import (
     MotionProposal,
@@ -1263,7 +1263,7 @@ class CellPlanner:
         return proposal
 
     def validate_interval(self, state, new, end, *, deposit_only=False, journal=None):
-        started = perf_counter()
+        started, queries = perf_counter(), Counter(QUERY_STATS)
         try:
             return self._validate_interval(
                 state, new, end, deposit_only=deposit_only, journal=journal
@@ -1273,6 +1273,13 @@ class CellPlanner:
                 self.verification_seconds[
                     "deposit_only" if deposit_only else "interval_validation"
                 ] += perf_counter() - started
+                for name, value in (Counter(QUERY_STATS) - queries).items():
+                    target = (
+                        self.verification_seconds
+                        if name.endswith("_seconds")
+                        else self.verification_stats
+                    )
+                    target[f"query_{name}"] += value
 
     def _validate_interval(self, state, new, end, *, deposit_only=False, journal=None):
         """Check one scheduling interval while its material grows.

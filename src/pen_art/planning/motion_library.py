@@ -26,6 +26,8 @@ ADMISSION_IMPLEMENTATION = hashlib.sha256(Path(__file__).read_bytes()).hexdigest
 SCHEMA_VERSION = 2
 FIXED_ORIENTATION_POLICY = "fixed-tcp-orientation-v1"
 ORIENTATION_LIMIT_RAD = 0.003
+# Checks an adaptation candidate passes in order; a failure reports the furthest.
+ADAPTATION_STAGES = ("no_inverse_kinematics", "off_target", "tracking", "collision")
 VALIDATOR_VERSION = "motion-clearance-lipschitz-v1"
 DRAWING_POLICY_VERSION = "whole-connected-action-v1"
 SELF_STATIC_SCOPE = "SELF_STATIC_ONLY"
@@ -1229,7 +1231,13 @@ class MotionLibrary:
 
         Returned drawing is self/static and source-tracking checked. It is still
         a proposal for material, deposition, timing, approach and withdrawal.
+        ``last_adaptation_failure`` names the reason and point of a failure.
         """
+        self.last_adaptation_failure = None
+
+        def failed(reason, point=None, **detail):
+            self.last_adaptation_failure = {"reason": reason, "point": point, **detail}
+
         old = record["trajectory"]
         source, old_source = np.asarray(request.source_points_m), np.asarray(old["source_points_m"])
         old_q = np.asarray(old["q_path"])
@@ -1242,14 +1250,14 @@ class MotionLibrary:
                 old_source, old_q, record["request"]["source_points_m"]
             )
         if old_q.shape[1] != len(arm.robot.names):
-            return None
+            return failed("seed_shape")
         for fixed in (request.q_start, request.q_goal):
             if fixed is not None and (
                 np.shape(fixed) != (len(arm.robot.names),)
                 or np.any(fixed < arm.robot.lower)
                 or np.any(fixed > arm.robot.upper)
             ):
-                return None
+                return failed("fixed_endpoint")
         old_q = np.clip(old_q, arm.robot.lower, arm.robot.upper)
         # Preserve original source breakpoints; add intermediate targets only.
         points = [source[0]]
@@ -1259,7 +1267,7 @@ class MotionLibrary:
         points = _preserve_seed_samples(np.asarray(points), old_source)
         arc, old_arc = _arc(points), _arc(old_source)
         if old_arc[-1] <= 0:
-            return None
+            return failed("seed_shape")
         direction = old_source[-1] - old_source[0]
         length = np.linalg.norm(direction)
         aligned = (
@@ -1286,7 +1294,7 @@ class MotionLibrary:
         seeds = np.column_stack([np.interp(coordinates, old_arc, values) for values in old_q.T])
         original_rotation = old.get("tcp_rotation")
         if original_rotation is None or old.get("free_tool_orientation", False):
-            return None
+            return failed("seed_orientation")
         rotation = np.asarray(
             request.fixed_tcp_rotation
             if request.fixed_tcp_rotation is not None
@@ -1300,7 +1308,7 @@ class MotionLibrary:
         path = []
         for i, (point, seed) in enumerate(zip(points, seeds, strict=True)):
             if monotonic() >= deadline:
-                return None
+                return failed("deadline", i, points=len(points))
             target = arm.robot.forward(seed, arm.flange_to_tcp).copy()
             target[:3, 3] = point
             if rotation is not None:
@@ -1324,11 +1332,15 @@ class MotionLibrary:
                 proposals = [np.asarray(row["positions"]) for row in found]
             proposals.sort(key=lambda q: np.linalg.norm(q - (path[-1] if path else seed)))
             selected = None
+            # The furthest check any candidate reached names the failure.
+            stage = "no_inverse_kinematics"
             for q in proposals:
                 if np.linalg.norm(arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] - point) > 0.0003:
+                    stage = max(stage, "off_target", key=ADAPTATION_STAGES.index)
                     continue
                 if not path:
                     if arm.collision.check(q, obstacles, clearance_m, deadline=deadline):
+                        stage = "collision"
                         continue
                 else:
                     piece = PolynomialPiece(
@@ -1345,16 +1357,18 @@ class MotionLibrary:
                         0.003,
                     )
                     if tracked["status"] != "BOUNDED":
+                        stage = max(stage, "tracking", key=ADAPTATION_STAGES.index)
                         continue
                     checked = arm.collision.check_edge(
                         path[-1], q, obstacles, clearance_m, maximum_depth=20, deadline=deadline
                     )
                     if checked["status"] != "CERTIFIED_MODELED_EDGE":
+                        stage = "collision"
                         continue
                 selected = q
                 break
             if selected is None:
-                return None
+                return failed(stage, i, points=len(points), candidates=len(proposals))
             path.append(selected)
         provenance = record.get("provenance", {})
         preference = provenance.get("orientation_preference", {})

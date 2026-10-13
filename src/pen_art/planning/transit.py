@@ -8,11 +8,12 @@ Physical pen/mount geometry and contact/process calibration remain required.
 
 import argparse
 from pathlib import Path
-from time import monotonic
+from time import monotonic, perf_counter
 
 import numpy as np
 
 from ..kinematics import inverse_candidates
+from .collision import QUERY_STATS
 from .curve_motion import search_layers
 from .tracking import tracking_bounds
 
@@ -179,6 +180,17 @@ def contact_validator(
         return False
 
     def valid(a, b, depth=0):
+        if depth:
+            return check(a, b, depth)
+        # Nested time: the arm and tip checks inside are also counted as
+        # self/static and material seconds.
+        started = perf_counter()
+        try:
+            return check(a, b, 0)
+        finally:
+            QUERY_STATS["contact_seconds"] += perf_counter() - started
+
+    def check(a, b, depth):
         if monotonic() >= deadline:
             return rejected("contact", {"status": "TIME_BUDGET"})
         arm_result = arm.check_edge(
@@ -213,7 +225,7 @@ def contact_validator(
             return rejected("tip", result)
         if depth >= 8:
             return rejected("tip", result)
-        return valid(a, middle, depth + 1) and valid(middle, b, depth + 1)
+        return check(a, middle, depth + 1) and check(middle, b, depth + 1)
 
     valid.failures = failures
     return valid

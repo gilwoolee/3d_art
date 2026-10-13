@@ -725,10 +725,22 @@ def run_job(spec):
     """Execute one job in a worker; a failure is a result, never an exception."""
     from collections import Counter
 
+    from .collision import QUERY_STATS
+
     context = _CONTEXT
     planner = context["build"].planner
     seconds = Counter()
     started = perf_counter()
+    # Worker-side workload, reported as this job's own change.
+    reuse = context["model"].experience
+    sources = {
+        "collision": QUERY_STATS,
+        "verification_counts": getattr(planner, "verification_stats", {}),
+        "verification_seconds": getattr(planner, "verification_seconds", {}),
+        "reuse_counts": getattr(reuse, "stats", {}),
+        "reuse_seconds": getattr(reuse, "seconds", {}),
+    }
+    before = {name: Counter(values) for name, values in sources.items()}
     planner.deadline = min(context["deadline"], monotonic() + context["budget"])
     try:
         summary = {"propose": _propose, "check": _check, "connect": _connect}[spec["kind"]](
@@ -754,6 +766,9 @@ def run_job(spec):
     return {
         **summary,
         "seconds": {**seconds, "total": perf_counter() - started},
+        "counters": {
+            name: dict(Counter(values) - before[name]) for name, values in sources.items()
+        },
         "worker": os.getpid(),
         "memory": _memory(),
         "prefix_rebuilds": 0 if prefix is None else prefix.rebuilds,
@@ -820,6 +835,7 @@ class Coordinator:
                 "current": current,
                 "failure": summary.get("failure"),
                 "seconds": summary.get("seconds", {}),
+                "counters": summary.get("counters", {}),
                 "worker": summary.get("worker"),
                 "memory": summary.get("memory", {}),
             }
@@ -921,10 +937,14 @@ def build_binding(build, order, budget):
 def _summarize(coordinator, schedule, workers, phases):
     stages = {}
     for job in coordinator.jobs:
-        row = stages.setdefault(job["kind"], {"jobs": 0, "seconds": {}})
+        row = stages.setdefault(job["kind"], {"jobs": 0, "seconds": {}, "counters": {}})
         row["jobs"] += 1
         for name, value in job["seconds"].items():
             row["seconds"][name] = row["seconds"].get(name, 0.0) + value
+        for group, values in job.get("counters", {}).items():
+            totals = row["counters"].setdefault(group, {})
+            for name, value in values.items():
+                totals[name] = totals.get(name, 0) + value
     peak = {}
     for job in coordinator.jobs:
         if job["worker"] is not None:
