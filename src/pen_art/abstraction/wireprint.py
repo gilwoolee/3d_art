@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import polygonize, unary_union
 
 from ..graph import base_anchors, connect_components, straight_edge
@@ -162,7 +162,7 @@ def _mesh_framework_at_height(
             kept.append(up)
         layers[index] = kept
 
-    relations, bridges, spacing_adjustments, omitted_steep = [], [], [], 0
+    relations, bridges, spacing_adjustments, omitted_steep, nearest_pairs = [], [], [], 0, 0
     for index in range(1, len(layers)):
         lower, upper = layers[index - 1], layers[index]
         pairs = []
@@ -184,7 +184,49 @@ def _mesh_framework_at_height(
         for li, ui in pairs:
             down, up = lower[li], upper[ui]
             perimeter = max(LineString(loop["points"]).length for loop in (down, up))
+            # Where contours split or merge, equal fractions pair unrelated
+            # points. Stand each upper contour on the nearest part of the
+            # contour beneath it instead.
+            co_parents = [parent for parent, u in pairs if u == ui]
+            branching = (
+                maximum_branch_descent_deg is not None
+                and not minimum_anchor_spacing
+                and (len(co_parents) > 1 or sum(parent == li for parent, _ in pairs) > 1)
+            )
+            beneath = LineString(down["points"][:, :2])
+
+            def anchors(i, count, nearest, up=up, beneath=beneath):
+                a, b, c = i / count, (i + 0.5) / count, (i + 1) / count
+                if nearest:
+                    a, c = (
+                        beneath.project(Point(sample_loop(up["points"], f)[:2]), normalized=True)
+                        for f in (a, c)
+                    )
+                return a, b, c
+
+            def steepest(count, nearest, up=up, down=down, anchors=anchors):
+                falls = []
+                for i in range(count - 1):
+                    _, b, c = anchors(i, count, nearest)
+                    fall = sample_loop(up["points"], b) - sample_loop(down["points"], c)
+                    falls.append(np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2]))))
+                return max(falls)
+
             count = max(3, int(np.ceil(perimeter / zigzag_spacing)))
+            above = max(3, int(np.ceil(LineString(up["points"]).length / zigzag_spacing)))
+            # Two contours of different outline can also pair badly by equal
+            # fractions. Use the nearest part beneath when that alone brings
+            # the diagonals within the limit; like outlines keep equal fractions.
+            # A degree of margin covers the later 20 micron junction merge.
+            nearest = branching or (
+                maximum_branch_descent_deg is not None
+                and not minimum_anchor_spacing
+                and steepest(count, False) > maximum_branch_descent_deg
+                and steepest(above, True) <= maximum_branch_descent_deg - 1
+            )
+            if nearest:
+                count = above
+                nearest_pairs += 1
             original_count = count
             if minimum_anchor_spacing:
                 # Equal fractions on a large upper contour can crowd anchors
@@ -222,30 +264,31 @@ def _mesh_framework_at_height(
                         "closing_diagonal_omitted": True,
                     }
                 )
+            step = 0
             for i in range(count):
-                a, b, c = i / count, (i + 0.5) / count, (i + 1) / count
+                a, b, c = anchors(i, count, nearest)
+                if branching:
+                    top = Point(sample_loop(up["points"], b)[:2])
+                    if li != min(co_parents, key=lambda k: lower[k]["polygon"].distance(top)):
+                        continue
                 # WirePrint omits the closing diagonal to leave print-head
                 # access. With one anchor this also avoids retracing the riser.
                 if (minimum_anchor_spacing or omit_closing_diagonal) and i == count - 1:
                     c = None
-                # Where contours split or merge, equal fractions pair unrelated
-                # points and a diagonal can come out nearly vertical at any
-                # layer height. Leave that one out; its riser still stands.
-                if (
-                    c is not None
-                    and maximum_branch_descent_deg is not None
-                    and (sum(u == ui for _, u in pairs) > 1 or sum(p == li for p, _ in pairs) > 1)
-                ):
+                # A diagonal that still comes out too steep there is left out
+                # rather than thinning every layer; its riser still stands.
+                if c is not None and branching:
                     fall = sample_loop(up["points"], b) - sample_loop(down["points"], c)
                     steepness = np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2])))
-                    if steepness > maximum_branch_descent_deg:
+                    if steepness > maximum_branch_descent_deg - 1:
                         omitted_steep += 1
                         c = None
                 down["joins"].add(a % 1.0)
                 if c is not None:
                     down["joins"].add(c % 1.0)
                 up["joins"].add(b)
-                bridges.append((index, li, ui, a, b, c))
+                bridges.append((index, li, ui, a, b, c, step))
+                step += 1
             relations.append(
                 {
                     "layer": index,
@@ -308,10 +351,9 @@ def _mesh_framework_at_height(
 
     for index, loops in enumerate(layers):
         # Rising/descending strokes stand on the already completed lower contour.
-        for layer, li, ui, a, b, c in (row for row in bridges if row[0] == index):
+        for layer, li, ui, a, b, c, step in (row for row in bridges if row[0] == index):
             down, up = layers[layer - 1][li]["points"], layers[layer][ui]["points"]
             name = f"zigzag-{layer}-{li}-{ui}"
-            step = sum(1 for prior in bridges if prior[:3] == (layer, li, ui) and prior[3] < a)
             add(
                 sample_loop(down, a),
                 sample_loop(up, b),
@@ -354,6 +396,7 @@ def _mesh_framework_at_height(
         omitted_cavity_contours=omitted_cavities,
         omitted_small_contours=omitted_small,
         omitted_steep_branch_diagonals=omitted_steep,
+        nearest_point_zigzags=nearest_pairs,
         anchor_spacing_adjustments=spacing_adjustments,
         generation={
             "layer_height_m": layer_height,
@@ -433,10 +476,7 @@ def mesh_framework(
             omit_closing_diagonal=maximum_descent_angle_deg is not None,
             slice_simplification=slice_simplification,
             minimum_contour=minimum_contour,
-            # A degree of margin covers the later 20 micron junction merge.
-            maximum_branch_descent_deg=None
-            if maximum_descent_angle_deg is None
-            else maximum_descent_angle_deg - 1,
+            maximum_branch_descent_deg=maximum_descent_angle_deg,
         )
         layer_z = sorted({node["position"][2] for node in graph["nodes"]})
         effective_height = max(np.diff(layer_z), default=0.0)
