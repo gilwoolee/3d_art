@@ -341,15 +341,19 @@ verification; wireframe generation (under a minute) is not included.
 | Cube | 39 | 50.0 s | 26.3 s | 50.5 s | 133.9 s | 5.1 GB |
 | Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
 | Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 88.2 s | 25.8 s | 67.2 s | 190.1 s | 6.7 GB |
-| Palace, 8 mm feature | 366 | 257.1 s | 68.7 s | 177.0 s | 573.6 s | 9.0 GB |
+| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 25.7 s | 15.3 s | 33.6 s | 83.0 s | 9.7 GB |
+| Palace, 8 mm feature (24 workers) | 366 | 78.7 s | 39.1 s | 93.9 s | 242.2 s | 12.9 GB |
 
 The cube, branching shape and Palace were measured on 2026-10-13 with the
 current code. The other five date from 2026-10-12, before the material
 stiffness change, the wireframe generator fixes and the three speed-ups of
 2026-10-13 (progress-report throttle, build-order screens on the workers,
 lighter library lookup); their wireframes are unchanged by those fixes. Totals
-include setup (67 s for the Palace). Details and history:
+include setup (27 s for the Palace). The Palace and branching rows use 24
+workers and the code of late 2026-10-13; the cube row predates that day's later
+speed-ups. What the pipeline does to be fast, where the time goes and what
+limits it:
+[fast planning and verification](docs/2026_1013_fast_planning_and_verification.md). Details and history:
 [geometry-first planning plan](docs/2026_1012_geometry_first_planning_plan.md).
 
 ## Repository contents

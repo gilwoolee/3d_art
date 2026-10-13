@@ -108,7 +108,9 @@ whole action. Active library: `runs/motion_library_phase1_upright27_v1`.
 
 New objects are planned geometry first: a collision-free untimed path for the
 whole object, timed once at the end. Status and results:
-[geometry-first planning plan](2026_1012_geometry_first_planning_plan.md). It
+[geometry-first planning plan](2026_1012_geometry_first_planning_plan.md);
+current speed, bottlenecks and options:
+[fast planning and verification](2026_1013_fast_planning_and_verification.md). It
 supersedes the [cached swept-volume plan](2026_1012_cached_swept_volume_plan.md),
 which is not scheduled.
 
