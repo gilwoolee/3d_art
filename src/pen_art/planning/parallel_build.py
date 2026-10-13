@@ -185,17 +185,43 @@ class ForwardSchedule:
         ]
         self.returned = None
         self.stale = 0
+        # Specs derived from the current slots; emptied whenever a slot changes.
+        self._memo = {}
+
+    def _remembered(self, name, index, compute):
+        if (name, index) not in self._memo:
+            self._memo[name, index] = compute(index)
+        return self._memo[name, index]
+
+    def _selected_chain(self, _=None):
+        """Deposits of the leading selected candidates, with a digest per prefix.
+
+        Every spec names the material before it. Hashing each prefix afresh for
+        every action on every finished job grew with the cube of the action
+        count; one running digest binds the same prefix.
+        """
+        chain, digests = [], [digest([])]
+        for slot in self.slots:
+            if slot["candidate"] is None:
+                break
+            chain.append([slot["candidate"]["deposit_key"], slot["candidate"]["table_index"]])
+            digests.append(digest([digests[-1], chain[-1]]))
+        return chain, digests
 
     def chain(self, count):
-        candidates = [slot["candidate"] for slot in self.slots[:count]]
-        if any(candidate is None for candidate in candidates):
-            return None
-        return [[row["deposit_key"], row["table_index"]] for row in candidates]
+        chain, _ = self._remembered("chain", None, self._selected_chain)
+        return None if count > len(chain) else chain[:count]
+
+    def _prefix_digest(self, count):
+        return self._remembered("chain", None, self._selected_chain)[1][count]
 
     def _key(self, *parts):
         return digest([POLICY, self.binding, *parts])
 
     def _check_spec(self, index):
+        return self._remembered("check", index, self._derive_check_spec)
+
+    def _derive_check_spec(self, index):
         chain = self.chain(index + 1)
         if chain is None:
             return None
@@ -206,7 +232,9 @@ class ForwardSchedule:
             "candidate": candidate["key"],
             "deposit_key": candidate["deposit_key"],
             "chain": chain[:index],
-            "key": self._key("check", self.actions[index], candidate["key"], chain[:index]),
+            "key": self._key(
+                "check", self.actions[index], candidate["key"], self._prefix_digest(index)
+            ),
         }
 
     def _checked(self, index):
@@ -217,6 +245,9 @@ class ForwardSchedule:
 
     def _connect_spec(self, index):
         """Incoming transit of action ``index``; ``len(actions)`` returns home."""
+        return self._remembered("connect", index, self._derive_connect_spec)
+
+    def _derive_connect_spec(self, index):
         count = len(self.actions)
         chain = self.chain(index)
         previous = HOME if index == 0 else self._checked(index - 1)
@@ -232,7 +263,7 @@ class ForwardSchedule:
             "chain": chain,
             "start": None if previous == HOME else [previous["q_end"], previous["table_index"]],
             "end": None if current == HOME else [current["q_start"], current["table_index"]],
-            "key": self._key("connect", index, ends, chain),
+            "key": self._key("connect", index, ends, self._prefix_digest(index)),
         }
 
     def _connected(self, index):
@@ -241,6 +272,9 @@ class ForwardSchedule:
         return held if spec is not None and held and held["key"] == spec["key"] else None
 
     def _propose_spec(self, index):
+        return self._remembered("propose", index, self._derive_propose_spec)
+
+    def _derive_propose_spec(self, index):
         slot = self.slots[index]
         if slot["unresolved"] is not None or slot["candidate"] is not None:
             return None
@@ -264,14 +298,14 @@ class ForwardSchedule:
         for index in range(len(self.actions)):
             spec = self._propose_spec(index)
             if spec is not None:
-                result.append(spec)
+                result.append(dict(spec))
             spec = self._check_spec(index)
             if spec is not None and self._checked(index) is None:
-                result.append(spec)
+                result.append(dict(spec))
         for index in range(len(self.actions) + 1):
             spec = self._connect_spec(index)
             if spec is not None and self._connected(index) is None:
-                result.append(spec)
+                result.append(dict(spec))
         return result
 
     def complete(self):
@@ -318,9 +352,16 @@ class ForwardSchedule:
         slot["candidate"] = slot["check"] = slot["connect"] = None
         slot["attempts"] += 1
         self._exhaust(slot)
+        self._memo.clear()
 
     def apply(self, spec, summary):
         """Record a finished job. Returns False for a result nothing wants now."""
+        try:
+            return self._record(spec, summary)
+        finally:
+            self._memo.clear()
+
+    def _record(self, spec, summary):
         current = {row["key"] for row in self.wanted()}
         if spec["key"] not in current:
             self.stale += 1
@@ -1231,16 +1272,16 @@ def run_parallel_forward(
     published = [-np.inf]
 
     def progress(coordinator, final=False):
-        build.best = [
-            schedule.actions[index]
-            for index in range(len(schedule.actions))
-            if schedule._checked(index) is not None
-        ]
         # The report grows with the plan (40 MB for 366 actions); writing it
         # after every job kept the coordinator busier than the workers.
         if not final and perf_counter() - published[0] < PROGRESS_INTERVAL_S:
             return
         published[0] = perf_counter()
+        build.best = [
+            schedule.actions[index]
+            for index in range(len(schedule.actions))
+            if schedule._checked(index) is not None
+        ]
         build.report(
             "PARALLEL_FORWARD_RUNNING",
             parallel={"workers": workers, "jobs": len(coordinator.jobs), "stale": schedule.stale},
