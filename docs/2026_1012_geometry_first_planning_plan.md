@@ -104,8 +104,17 @@ Limits of these two results:
   refinement overshoots (Palace 0.9 mm layers, 852 actions).
 - The Palace build ran on the wireframe from one commit earlier, which differs
   from the current generator's by 2 of 6,881 members.
-- Setup for the Palace takes 159 s and its chain 1.4 s per action; neither has
-  been profiled.
+- Profiling the Palace (2026-10-13): the coordinator rewrote the 40 MB
+  `section_build.json` after every finished job and was busier than the workers
+  (41% worker utilisation). Progress reports are now written at most every 5 s:
+  chain 526.5 s to 292.9 s, total 937.0 s to 700.7 s, utilisation 86%
+  (`runs/geomfirst_gf16_*`; branching 224.9 s, cube 139.9 s).
+- What the Palace's 700.7 s is now: setup 155 s (one structural screen per step
+  of the build order, 366 solves on one core), chain 293 s, timing 69 s,
+  verification 179 s. Chain worker time per action: adapting the library path
+  3.8 s, retrieving it 2.0 s, approach and withdraw 1.1 s, material validation
+  1.2 s, connection 0.9 s. Next candidates: the single-core setup screen and the
+  2 s retrieval from an 80-record library.
 
 Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
 (not in the original list). Open: G5 (verification still re-derives deposits and

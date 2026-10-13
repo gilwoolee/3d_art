@@ -35,6 +35,8 @@ POLICY = "parallel-forward-v1"
 HOME = "home"
 # Outcomes that say nothing about feasibility of the candidate itself.
 UNRESOLVED = {"UNRESOLVED", "ERROR", "WORKER_LOST"}
+# Seconds between live progress reports while jobs are finishing.
+PROGRESS_INTERVAL_S = 5.0
 
 
 def deposit_key(operations):
@@ -1184,12 +1186,19 @@ def run_parallel_forward(
         for process in list(getattr(pools[-1], "_processes", {}).values()):
             process.kill()
 
-    def progress(coordinator):
+    published = [-np.inf]
+
+    def progress(coordinator, final=False):
         build.best = [
             schedule.actions[index]
             for index in range(len(schedule.actions))
             if schedule._checked(index) is not None
         ]
+        # The report grows with the plan (40 MB for 366 actions); writing it
+        # after every job kept the coordinator busier than the workers.
+        if not final and perf_counter() - published[0] < PROGRESS_INTERVAL_S:
+            return
+        published[0] = perf_counter()
         build.report(
             "PARALLEL_FORWARD_RUNNING",
             parallel={"workers": workers, "jobs": len(coordinator.jobs), "stale": schedule.stale},
@@ -1224,6 +1233,7 @@ def run_parallel_forward(
     try:
         started = perf_counter()
         status = coordinator.run()
+        progress(coordinator, final=True)
         phases["planning_0"] = perf_counter() - started
         timed_keys = {}
         if status == "COMPLETE":

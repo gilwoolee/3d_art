@@ -338,16 +338,18 @@ verification; wireframe generation (under a minute) is not included.
 | Triangular prism | 29 | 40.8 s | 14.0 s | 25.4 s | 88.3 s | 3.8 GB |
 | Bottle | 55 | 51.3 s | 13.4 s | 37.8 s | 121.8 s | 5.6 GB |
 | Torus | 27 | 71.0 s | 15.4 s | 36.0 s | 137.2 s | 4.1 GB |
-| Cube | 39 | 56.2 s | 26.6 s | 47.4 s | 143.8 s | 4.6 GB |
+| Cube | 39 | 54.9 s | 26.5 s | 48.7 s | 139.9 s | 4.7 GB |
 | Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
 | Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 116.4 s | 25.3 s | 67.0 s | 237.2 s | 6.2 GB |
-| Palace, 8 mm feature | 366 | 526.5 s | 69.1 s | 177.8 s | 937.0 s | 8.7 GB |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 105.8 s | 25.3 s | 65.7 s | 224.9 s | 6.2 GB |
+| Palace, 8 mm feature | 366 | 292.9 s | 68.7 s | 179.4 s | 700.7 s | 8.8 GB |
 
-The first six were measured on 2026-10-12, before the material stiffness change
-and the wireframe generator fixes; their wireframes are unchanged by those
-fixes. The Palace ran on a wireframe differing from the current generator's by
-2 of 6,881 members. Details and history:
+The cube, branching shape and Palace were measured on 2026-10-13 with the
+current code. The other five date from 2026-10-12, before the material
+stiffness change, the wireframe generator fixes and the progress-report
+throttle; their wireframes are unchanged by those fixes. Totals include setup
+(155 s for the Palace: one structural screen per step of the build order, on
+one core). Details and history:
 [geometry-first planning plan](docs/2026_1012_geometry_first_planning_plan.md).
 
 ## Repository contents
