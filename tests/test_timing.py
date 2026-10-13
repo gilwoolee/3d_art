@@ -144,8 +144,10 @@ def test_whole_action_vertex_hold_preserves_spline_and_counts_feed_lags(tmp_path
     )
     restored = ClockPath.from_record(path.record())
     holds = [edge for edge in restored.edges if edge.kind != "DRAW"]
-    assert [edge.kind for edge in holds] == ["PEN_STOP_WAIT", "VERTEX_COOL", "PEN_START_WAIT"]
-    assert sum(edge.end_s - edge.start_s for edge in holds) == pytest.approx(1.5)
+    # The feed stops on arrival and is restarted before the 1 s hold ends, so
+    # both half-second lags fall inside the hold and no separate cooling remains.
+    assert [edge.kind for edge in holds] == ["PEN_STOP_WAIT", "PEN_START_WAIT"]
+    assert sum(edge.end_s - edge.start_s for edge in holds) == pytest.approx(1.0)
     assert all(
         np.allclose(edge.q0, positions[2]) and np.allclose(edge.q1, positions[2]) for edge in holds
     )

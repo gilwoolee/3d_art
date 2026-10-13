@@ -395,11 +395,14 @@ def split_drawing_operations(operation):
         contact = np.asarray(holds[last]["contact_m"])
         stop_lag = operation.get("stop_lag_s", 0.0)
         duration = holds[last]["duration_s"]
-        # Cooling starts at arrival; known feed decay is part of this elapsed time.
+        # Cooling starts at arrival. The feed's decay and the response to
+        # restarting it are both part of this elapsed time: the restart is
+        # commanded early enough for material to arrive as the hold ends.
+        start_lag = operation.get("start_lag_s", 0.0)
         for kind, seconds in (
             ("PEN_STOP_WAIT", stop_lag),
-            ("VERTEX_COOL", max(0.0, duration - stop_lag)),
-            ("PEN_START_WAIT", operation.get("start_lag_s", 0.0)),
+            ("VERTEX_COOL", max(0.0, duration - stop_lag - start_lag)),
+            ("PEN_START_WAIT", start_lag),
         ):
             if seconds > 0:
                 yield {

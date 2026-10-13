@@ -15,7 +15,7 @@ departure_directions:
   - [1, -1, 1]
   - [-1, -1, 1]
 parking_clearance_m: 0.10
-lift_sample_m: 0.010
+lift_sample_m: 0.030
 lift_position_tolerance_m: 0.0003
 lift_orientation_tolerance_rad: 0.003
 # Idealized tip only, not the unmeasured pen body or mount.

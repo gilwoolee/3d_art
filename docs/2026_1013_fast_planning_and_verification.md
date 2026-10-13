@@ -163,6 +163,24 @@ start and stop 537 s, cooling 419 s, joining 151 s, against 453 s of drawing.
 Strokes are still drawn one at a time with a lift between them.
 Runs: `runs/geomfirst_gf47_{palace,branching}_w24`.
 
+Two further changes the same day brought the branching shape to 30.4 min and
+the Palace to 56.0 min (`runs/geomfirst_gf49_*_w24`):
+
+- The lift-off is asked for as one 30 mm piece and refined only where its
+  straight-line tracking fails. In practice it comes out as four pieces, about
+  1.0 s per approach or withdraw (3.1 s at the start of the day). One truly
+  smooth move needs a curved lift, which the contact check does not handle.
+- At a corner the feed restart is commanded before the 1 s cooling hold ends,
+  so the hold is 1.0 s instead of 1.5 s.
+
+Not done, and why: withdrawing without a hold from a closed contour, and
+starting the feed during the approach. The planner's state between strokes
+requires all wire to have cooled, and feed commands exist only as hold edges;
+both would change with stroke chaining. Consecutive strokes already meet end
+to start in only 33 of 150 cases on the branching shape (15 of 270 on the
+Palace), and where they meet the arm's posture differs by a median 25 degrees,
+so chaining needs the planner to choose starts and postures for it.
+
 Runs: `runs/geomfirst_gf40_{palace,branching}_w24` (sources
 `runs/geomfirst_{palacevr,branchingvr}_f8_l3_source`),
 `runs/geomfirst_gf39_*_w24` (slanted zigzags),
