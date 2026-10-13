@@ -338,6 +338,13 @@ enclosing all wire; an arm not clear of those is a rejection. Pass
 `--verification-option=--full-replay` and leave the first option out for a fully
 independent verification.
 
+Each zigzag is a vertical riser from the lower contour followed by one slanted
+stroke back down to it, as in WirePrint (since 2026-10-13; before that both
+strokes were slanted). The riser's top is the nearest point of the contour
+above, so it is exactly vertical only where the outline does not move between
+layers. The Palace and branching rows below use this wireframe; the other rows
+predate it, and their wireframes would now come out different.
+
 Long runs on Blondie go in tmux. Wireframe settings live in the source run's
 `fabrication_config.json` (defaults in `configs/fabrication.yaml`):
 
@@ -362,8 +369,8 @@ verification; wireframe generation (under a minute) is not included.
 | Cube | 39 | 50.0 s | 26.3 s | 50.5 s | 133.9 s | 5.1 GB |
 | Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
 | Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 6.1 s | 3.2 s | 8.8 s | 21.3 s | 6.6 GB |
-| Palace, 8 mm feature (24 workers) | 366 | 18.6 s | 8.3 s | 18.6 s | 59.1 s | 9.2 GB |
+| Branching shape, 8 mm feature, 1 mm strand (24 workers) | 151 | 5.7 s | 3.0 s | 7.3 s | 19.1 s | 6.5 GB |
+| Palace, 8 mm feature (24 workers) | 271 | 15.2 s | 5.8 s | 14.0 s | 43.0 s | 8.2 GB |
 
 The cube, branching shape and Palace were measured on 2026-10-13 with the
 current code. The other five date from 2026-10-12, before the material

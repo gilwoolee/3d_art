@@ -37,8 +37,18 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     assert angles.size and angles.max() <= 27 + 1e-8
     metadata = graph["generation"]
     assert metadata["requested_layer_height_m"] == 0.01
-    # Even the straight-leg formula is too tall around a square corner.
-    assert metadata["effective_layer_height_m"] < 0.025 / 2 * np.tan(np.radians(27))
+    # Each zigzag is a vertical riser and one slanted stroke down. The stroke
+    # across a square corner is the shortest, and it sets the layer height.
+    assert metadata["effective_layer_height_m"] == pytest.approx(0.008)
+    rising = [
+        nodes[edge["end"]] - nodes[edge["start"]]
+        for edges in groups.values()
+        for edge in edges
+        if nodes[edge["end"]][2] > nodes[edge["start"]][2]
+    ]
+    assert len(rising) == 13 * len(groups)
+    # The end slices are cut a micron inside the mesh, hence the allowance.
+    assert max(np.linalg.norm(delta[:2]) for delta in rising) < 2e-6
     assert metadata["actual_maximum_descent_angle_deg"] == pytest.approx(angles.max())
     assert metadata["descending_member_count"] == len(angles)
     assert metadata["closing_diagonal_omitted"]

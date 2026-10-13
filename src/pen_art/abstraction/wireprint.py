@@ -1,5 +1,8 @@
 """Horizontal contours and ordered connecting zigzags in the physical build frame.
 
+Each zigzag is a vertical riser from the lower contour followed by a slanted
+stroke back down to it, as in WirePrint.
+
 This is a WirePrint-style generator, not a calibrated printer implementation.
 The returned topology and order still require structural and robot validation.
 """
@@ -194,15 +197,28 @@ def _mesh_framework_at_height(
                 and (len(co_parents) > 1 or sum(parent == li for parent, _ in pairs) > 1)
             )
             beneath = LineString(down["points"][:, :2])
+            overhead = LineString(up["points"][:, :2])
 
-            def anchors(i, count, nearest, up=up, beneath=beneath):
-                a, b, c = i / count, (i + 0.5) / count, (i + 1) / count
+            def anchors(i, count, nearest, up=up, down=down, beneath=beneath, overhead=overhead):
+                """Foot, top and next foot of one zigzag: a riser and a diagonal.
+
+                As in WirePrint, the riser goes straight up, or as near to it as
+                the two outlines allow, and only the stroke back down is
+                slanted. Like outlines space the feet evenly on the lower
+                contour and put each top at the nearest point above. Where the
+                outlines differ the tops are spaced evenly on the upper contour
+                and each foot is the nearest point beneath.
+                """
+                first, following = i / count, (i + 1) / count
                 if nearest:
                     a, c = (
                         beneath.project(Point(sample_loop(up["points"], f)[:2]), normalized=True)
-                        for f in (a, c)
+                        for f in (first, following)
                     )
-                return a, b, c
+                    return a, first, c
+                foot = Point(sample_loop(down["points"], first)[:2])
+                top = overhead.project(foot, normalized=True)
+                return first, top, following
 
             def steepest(count, nearest, up=up, down=down, anchors=anchors):
                 falls = []
@@ -241,7 +257,7 @@ def _mesh_framework_at_height(
                                 for i in range(count)
                             ]
                         )
-                        for loop, offset in ((down, 0.0), (up, 0.5))
+                        for loop, offset in ((down, 0.0), (up, 0.0))
                     ]
                     if all(
                         min(

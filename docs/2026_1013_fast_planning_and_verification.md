@@ -113,7 +113,34 @@ cache once (about 40 s).
 What is left of the Palace's 59 s: setup 11 s, path 19 s, timing 8 s,
 export 2 s, verification 19 s.
 
-Runs: `runs/geomfirst_gf39_{palace,branching}_w24` (current),
+### Vertical risers in the wireframe (2026-10-13, later still)
+
+The generator now builds each zigzag as WirePrint does: a riser straight up
+from the lower contour, then one slanted stroke back down. Before, both strokes
+were slanted at about 15 degrees and nothing was vertical. This changes the
+object that is planned, so the rows above and below are not like for like.
+
+| | Slanted both ways | Vertical risers |
+| --- | ---: | ---: |
+| Palace: actions / members / wire | 366 / 6,879 / 24.8 m | 271 / 4,854 / 18.0 m |
+| Palace: layer height | 2.12 mm (refined from 3) | 2.94 mm |
+| Palace: planning and verification | 59.1 s | 43.0 s |
+| Palace: print time | 8,277 s | 6,116 s |
+| Branching: strand needed to pass the structural screen | 1.5 mm (1.2 mm sag at 1 mm) | 1 mm (0.10 mm sag) |
+| Branching: planning and verification | 21.3 s | 19.1 s |
+| Branching: print time | 3,360 s | 3,354 s |
+
+Risers lean where the outline moves between layers: the median is 78 degrees
+from horizontal on the Palace and 81 on the branching shape, with 190 of 528
+and 110 of 268 within 5 degrees of vertical. The slanted strokes are now about
+16-17 mm long at about 10 degrees (they were 9.5 mm at 13-18). Every steep
+stroke was drawn upward in both plans. The Palace had two rejected candidates
+(action 257, source coverage) that planning recovered from; the branching
+shape had none.
+
+Runs: `runs/geomfirst_gf40_{palace,branching}_w24` (current, sources
+`runs/geomfirst_{palacevr,branchingvr}_f8_l3_source`),
+`runs/geomfirst_gf39_*_w24` (slanted zigzags),
 `runs/geomfirst_gf37_*_w24` (member pieces, before the bookkeeping changes),
 `runs/geomfirst_gf33_*_w24` (a piece per path sample),
 `runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf26` (steps).
