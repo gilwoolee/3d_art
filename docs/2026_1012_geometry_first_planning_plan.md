@@ -56,9 +56,17 @@ failures, no timing rejections:
 | Triangular prism | 29 | 40.8 s | 14.0 s | 25.4 s | 88.3 s | 3.8 GB |
 | Torus | 27 | 71.0 s | 15.4 s | 36.0 s | 137.2 s | 4.1 GB |
 | Bottle | 55 | 51.3 s | 13.4 s | 37.8 s | 121.8 s | 5.6 GB |
+| Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
 
-Not yet built: vase (slices to 119 actions), branching shape, Palace (its mesh
-has 253,000 open edges and fails slicing at fine layer heights).
+The wireframe generator now welds coincident points before slicing (texture
+seams read as open edges), nudges a cut that comes out open by up to 10 um, and
+omits inner contours that begin above the bed (cavity walls); the vase went from
+a rejected 119-action frame sagging 169 mm to a verified 57-action shell.
+
+Not buildable yet: the branching shape (4,396 actions, 83,639 members, structure
+rejected) and the Palace (closed once welded, but still an open contour at layer
+375). In both, thin or overhanging features drive the 27-degree descent rule to
+hundreds of very thin layers. That needs a wireframe policy for thin parts.
 
 Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
 (not in the original list). Open: G5 (verification still re-derives deposits and

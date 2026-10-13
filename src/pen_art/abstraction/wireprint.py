@@ -64,10 +64,20 @@ def _mesh_framework_at_height(
         # these contours to the end plane moves them by at most one micron.
         end_offset = min(0.000001, (high - low) / 1000)
         cut_height = np.clip(height, low + end_offset, high - end_offset)
-        section = mesh.section(plane_origin=[0, 0, cut_height], plane_normal=[0, 0, 1])
+        # A plane through mesh vertices or along flat faces can cut a closed
+        # surface into open pieces. Nudge the cut by a few microns before
+        # concluding that the surface itself is open.
+        for nudge in (0.0, 2e-6, -2e-6, 5e-6, -5e-6, 1e-5, -1e-5):
+            nudged = np.clip(cut_height + nudge, low + end_offset, high - end_offset)
+            section = mesh.section(plane_origin=[0, 0, nudged], plane_normal=[0, 0, 1])
+            paths = [] if section is None else section.discrete
+            if all(np.linalg.norm(points[0] - points[-1]) <= 1e-6 for points in paths):
+                if nudge:
+                    repairs.append({"layer": layer, "method": "nudged_cut", "offset_m": nudge})
+                break
         loops = []
         rings = []
-        for points in [] if section is None else section.discrete:
+        for points in paths:
             if np.linalg.norm(points[0] - points[-1]) > 1e-6:
                 raise ValueError(f"Open contour at layer {layer}; repair the input mesh")
             original = LineString(points[:, :2])
@@ -123,6 +133,23 @@ def _mesh_framework_at_height(
             )
         loops.sort(key=lambda loop: (loop["depth"], *loop["points"][0, :2]))
         layers.append(loops)
+
+    # An inner contour that begins above the bed is the wall of a cavity, such
+    # as the inside of a vase: a ring with nothing beneath it. Print the outer
+    # shell only. Removing it bottom-up also removes the contours it would have
+    # carried. Inner contours that start on the bed, like a torus's hole, stay.
+    omitted_cavities = 0
+    for index in range(1, len(layers)):
+        kept = []
+        for up in layers[index]:
+            if up["depth"] and not any(
+                up["depth"] == down["depth"] and up["polygon"].intersects(down["polygon"])
+                for down in layers[index - 1]
+            ):
+                omitted_cavities += 1
+                continue
+            kept.append(up)
+        layers[index] = kept
 
     relations, bridges, spacing_adjustments = [], [], []
     for index in range(1, len(layers)):
@@ -300,6 +327,7 @@ def _mesh_framework_at_height(
         edges=edges,
         contour_events=relations,
         contour_repairs=repairs,
+        omitted_cavity_contours=omitted_cavities,
         anchor_spacing_adjustments=spacing_adjustments,
         generation={
             "layer_height_m": layer_height,
@@ -424,6 +452,10 @@ def generate(run, **settings):
     # Slice the normalized source; keep the simplified mesh for robot previews.
     source_file = read_json(run / "asset_manifest.json")["artifacts"]["reference"]
     mesh = trimesh.load(run / source_file, force="mesh")
+    # Slice geometry only: texture seams duplicate points along the surface and
+    # would otherwise read as open edges.
+    mesh = trimesh.Trimesh(np.asarray(mesh.vertices), np.asarray(mesh.faces), process=True)
+    mesh.merge_vertices(merge_tex=True, merge_norm=True)
     config_path = run / "fabrication_config.json"
     config = read_json(config_path) if config_path.exists() else {}
     configured = config.get("wireprint", {})
