@@ -89,30 +89,66 @@ def _padded(polynomial, size):
     return coefficients
 
 
-def _clock_onto(geometry, timed, start):
+def _nearest_parameters(geometry, point, low, high, tolerance):
+    """Piece parameters in ``[low, high]`` whose configuration is ``point``."""
+    squared = Polynomial([0])
+    for p, value in zip(geometry, point, strict=True):
+        squared = squared + (p - value) ** 2
+    found = [high, low] + [
+        float(root.real)
+        for root in squared.deriv().roots()
+        if abs(root.imag) < 1e-9 and low < root.real < high
+    ]
+    return [
+        value
+        for value in found
+        if max(abs(p(value) - q) for p, q in zip(geometry, point, strict=True)) <= tolerance
+    ]
+
+
+def _clock_onto(geometry, timed, start, tolerance=SWEEP_TOLERANCE_RAD):
     """Fit the quadratic clock placing ``timed`` on ``geometry`` from ``start``.
 
     Returns the reached piece parameter and the summed coefficient difference.
-    A timed edge that is not this cubic under a nondecreasing quadratic clock
-    cannot produce a small difference.
+    The fit is only a guess; the difference is computed from the composed
+    polynomials, so a timed edge that is not this cubic under a nondecreasing
+    quadratic clock cannot produce a small one.
     """
-    slope = np.array([p.deriv()(start) for p in geometry])
-    scale = float(slope @ slope)
-    if scale < 1e-24:
-        return None, np.inf
-    curvature = np.array([p.deriv(2)(start) for p in geometry])
     size = max(max(len(p.coef) for p in timed), 7)
     target = np.array([_padded(p, size) for p in timed])
-    linear = float(slope @ target[:, 1]) / scale
-    quadratic = float(slope @ (target[:, 2] - curvature * linear**2 / 2)) / scale
-    if linear < -1e-12 or linear + 2 * quadratic < -1e-12:
-        return None, np.inf
-    clock = Polynomial([start, linear, quadratic])
-    difference = max(
-        float(np.abs(_padded(p(clock), size) - row).sum())
-        for p, row in zip(geometry, target, strict=True)
-    )
-    return start + linear + quadratic, difference
+
+    def composed(linear, quadratic):
+        if linear < -1e-12 or linear + 2 * quadratic < -1e-12:
+            return None, np.inf
+        clock = Polynomial([start, linear, quadratic])
+        difference = max(
+            float(np.abs(_padded(p(clock), size) - row).sum())
+            for p, row in zip(geometry, target, strict=True)
+        )
+        return start + linear + quadratic, difference
+
+    slope = np.array([p.deriv()(start) for p in geometry])
+    scale = float(slope @ slope)
+    if scale > 1e-24:
+        curvature = np.array([p.deriv(2)(start) for p in geometry])
+        linear = float(slope @ target[:, 1]) / scale
+        best = composed(
+            linear, float(slope @ (target[:, 2] - curvature * linear**2 / 2)) / scale
+        )
+        if best[1] <= tolerance:
+            return best
+    # The geometry can be stationary in its own parameter at a knot. Locate the
+    # timed edge's end and midpoint on the piece; they determine the clock.
+    best = (None, np.inf)
+    final = [float(row.sum()) for row in target]
+    middle = [float(row @ 0.5 ** np.arange(size)) for row in target]
+    for reached in _nearest_parameters(geometry, final, start, 1 + tolerance, tolerance):
+        for half in _nearest_parameters(geometry, middle, start, reached, tolerance):
+            quadratic = 2 * (reached - start) - 4 * (half - start)
+            candidate = composed(reached - start - quadratic, quadratic)
+            if candidate[1] < best[1]:
+                best = candidate
+    return best
 
 
 def same_sweep(geometric, timed, tolerance=SWEEP_TOLERANCE_RAD):

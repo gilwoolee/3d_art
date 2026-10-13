@@ -1220,7 +1220,7 @@ def run_parallel_forward(
         kill=kill_pool,
         intercept=intercept if inject_rejections else None,
     )
-    exported = None
+    exported, timing_rejections = None, []
     try:
         started = perf_counter()
         status = coordinator.run()
@@ -1261,6 +1261,13 @@ def run_parallel_forward(
                     timed_keys[spec["index"]] = spec["key"]
                 else:
                     status = "TIMING_REJECTED"
+                    timing_rejections.append(
+                        {
+                            "action": order[spec["index"]]["id"],
+                            "status": summary["status"],
+                            "failure": summary.get("failure"),
+                        }
+                    )
             phases["timing_0"] = perf_counter() - started
         if status == "COMPLETE":
             started = perf_counter()
@@ -1316,6 +1323,7 @@ def run_parallel_forward(
     summary["replay_status"] = "NOT_RUN"
     summary["export_status"] = None if exported is None else exported["status"]
     summary["blocked"] = schedule.blocked()
+    summary["timing_rejections"] = timing_rejections
     write_json(build.run / "parallel_build.json", summary)
     compact = {
         key: summary[key]

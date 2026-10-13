@@ -240,3 +240,13 @@ def test_timing_must_sweep_exactly_the_checked_geometric_path(tmp_path):
                    lambda edges: edges[:-1]):
         assert altered(change) == "SWEEP_MISMATCH"
     assert same_sweep(timed, timed)["reason"] == "not_a_geometric_path"
+    # A piece may be stationary in its own parameter where a timed edge starts.
+    from numpy.polynomial import Polynomial
+
+    from pen_art.planning.geometric_path import _clock_onto
+
+    stationary = [Polynomial([0.2, 0, 0.5, -0.1]), Polynomial([-0.4, 0, -0.3, 0.2])]
+    clock = Polynomial([0.0, 0.1, 0.3])
+    reached, difference = _clock_onto(stationary, [p(clock) for p in stationary], 0.0)
+    assert abs(reached - 0.4) < 1e-9 and difference < 1e-9
+    assert _clock_onto(stationary, [p(clock) + 1e-6 for p in stationary], 0.0)[1] > 1e-9
