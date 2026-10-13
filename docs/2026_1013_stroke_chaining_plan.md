@@ -17,9 +17,8 @@ with chaining.
 
 Print time before chaining, same settings: prism 8.3 min, bottle 10.1, torus
 7.8, cube 11.1, narrowed cube 11.0, vase 15.9, branching shape 31.0, Palace
-56.6. Every join that could chain did chain; one chained candidate (bottle)
-was rejected for a posture change and replaced by an unchained one earlier in
-testing. Planning takes longer because chained strokes are proposed one after
+56.6. Every join that could chain did chain. One candidate on the bottle was
+rejected for a posture change and re-planned; there were no other rejections. Planning takes longer because chained strokes are proposed one after
 another: Palace 40.6 s to 52.8 s in total, branching shape 21.1 s to 29.5 s.
 
 What was built, against the plan below: Phases 0 to 4 as written, except that
