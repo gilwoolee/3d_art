@@ -564,6 +564,32 @@ class RobotCollisionModel:
         return {**result, "evaluations": evaluations, "maximum_depth": greatest_depth}
 
 
+class ArmLinksModel:
+    """The full robot, with its tool left out of every fixed-obstacle test.
+
+    For a path whose pen and tool already hold a proof against the cell and the
+    wire. Self-collision, including tool against arm, and every arm link
+    against every obstacle are still measured. It grants no proof itself.
+    """
+
+    check_bounded_path = RobotCollisionModel.check_bounded_path
+    check_edge = RobotCollisionModel.check_edge
+    _obstacle_key = staticmethod(RobotCollisionModel._obstacle_key)
+
+    def __init__(self, model, tool_bodies):
+        self.model, self.tool_bodies = model, frozenset(tool_bodies)
+        self._reference = None
+
+    def __getattr__(self, name):
+        return getattr(self.model, name)
+
+    def distances(self, positions, obstacles=None, *, deadline=float("inf"), only=None):
+        for row in self.model.distances(positions, obstacles, deadline=deadline, only=only):
+            if row[0] in self.tool_bodies and row[1] in (obstacles or {}):
+                continue
+            yield row
+
+
 def work_surfaces(center_xy, height, width, depth, table_z=0.0, table_size=(4.0, 4.0, 0.1)):
     if height < 0 or min(width, depth, *table_size) <= 0:
         raise ValueError("Invalid work-surface dimensions")

@@ -18,6 +18,8 @@ SCOPE_STATUS = {
     "joint_speed": "CHECKED",
     "drawing_speed": "CHECKED",
     "drawing_orientation": "BOUNDED",
+    # The pen and tool against the cell and the wire of a named preceding chain.
+    "pen_material_path": "CHECKED",
 }
 
 

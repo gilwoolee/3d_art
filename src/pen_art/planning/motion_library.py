@@ -328,7 +328,7 @@ class MaterialOnlyCollisionModel:
     def __getattr__(self, name):
         return getattr(self.model, name)
 
-    def distances(self, positions, obstacles=None, *, deadline=float("inf")):
+    def distances(self, positions, obstacles=None, *, deadline=float("inf"), only=None):
         if monotonic() >= deadline:
             raise TimeoutError("Material verification exceeded its budget")
         self.robot.frames(positions)

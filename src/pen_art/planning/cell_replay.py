@@ -70,8 +70,11 @@ def _parallel_journal(root, key):
     cache = _LOCAL.setdefault("journals", OrderedDict())
     if key not in cache:
         path = root / f"{key}.json"
-        value = (load_journal(path) if path.exists() else
-                 pickle.loads(path.with_suffix(".pkl").read_bytes()))
+        value = (
+            load_journal(path)
+            if path.exists()
+            else pickle.loads(path.with_suffix(".pkl").read_bytes())
+        )
         from .parallel_build import deposit_key
 
         if deposit_key(value) != key:
@@ -139,6 +142,75 @@ def _parallel_check(index, chain):
     }
 
 
+def _parallel_arm_check(index):
+    """Check the arm, not the pen, on an interval whose pen holds planning's proof.
+
+    Every edge is checked continuously with the full robot against itself, and
+    its arm links against the cell and one volume enclosing all printed wire.
+    The tool is left out of the obstacle tests only: its proof covers them.
+    """
+    from .collision import ArmLinksModel
+
+    planner = _PARALLEL["planner"]
+    a, b, new = _PARALLEL["intervals"][index]
+    state, _ = _PARALLEL["states"][index]
+    obstacles = {**planner.obstacles, "printed_volume": _PARALLEL["envelope"]}
+    depth, edges = planner.settings["maximum_subdivision_depth"], 0
+    for motion in state.active + new:
+        arm = planner.arms[motion.proposal.arm]
+        models = _LOCAL.setdefault("arm_links", {})
+        if motion.proposal.arm not in models:
+            models[motion.proposal.arm] = ArmLinksModel(
+                arm.collision, {body.name for body in arm.tool.bodies}
+            )
+        model = models[motion.proposal.arm]
+        for edge in motion.proposal.payload.edges:
+            if not a - 1e-9 <= motion.start_s + edge.start_s < b - 1e-9:
+                continue
+            if edge.coefficients is None:
+                check = model.check_edge(
+                    edge.q0, edge.q1, obstacles, planner.margin, depth, None, planner.deadline
+                )
+            else:
+                piece = edge.piece()
+                check = model.check_bounded_path(
+                    piece.position,
+                    piece.deviation,
+                    obstacles,
+                    planner.margin,
+                    depth,
+                    None,
+                    planner.deadline,
+                )
+            if check["status"] != "CERTIFIED_MODELED_EDGE":
+                return {"certified": False, "detail": check}
+            edges += 1
+    return {"certified": True, "edges": edges}
+
+
+def _printed_volume(planner):
+    """One upright cylinder about the build axis holding every wire of the object."""
+    import fcl
+
+    from ..curves import transform_points
+    from .collision import placed
+
+    points = np.array([node["position"] for node in planner.graph["nodes"]])
+    radius = max(edge["diameter_m"] for edge in planner.graph["edges"]) / 2 + 0.001
+    transforms = (
+        [np.asarray(planner.profile["world_from_build"])]
+        if planner.turntable is None
+        else [planner.turntable.build_transform(index) for index in range(4)]
+    )
+    axis = transforms[0][:3, 3]
+    world = np.vstack([transform_points(points, transform) for transform in transforms])
+    reach = float(np.linalg.norm(world[:, :2] - axis[:2], axis=1).max()) + radius
+    low, high = world[:, 2].min() - radius, world[:, 2].max() + radius
+    pose = np.eye(4)
+    pose[:3, 3] = [axis[0], axis[1], (low + high) / 2]
+    return placed(fcl.Cylinder(reach, float(high - low)), pose)
+
+
 def _replay_cell(*args, **kwargs):
     pools = []
     try:
@@ -161,6 +233,7 @@ def _replay_cell_body(
     workers=1,
     optimize_contact_geometry=True,
     geometry_proofs=False,
+    pen_proofs=False,
     pools,
 ):
     validation_name = plan_name.removesuffix("_plan") + "_validation.json"
@@ -231,7 +304,7 @@ def _replay_cell_body(
     tasks = {task.identity: task for task in planner.tasks}
     section_audits = {}
     partial_sections = saved.get("partial_section_schedule", False)
-    if geometry_proofs:
+    if geometry_proofs or pen_proofs:
         # Speed and source-coverage proofs planning wrote for these exact clocks.
         # They bind the path, kinematics, source and process settings. Collision,
         # orientation, deposits and structure are still checked here in full.
@@ -254,6 +327,16 @@ def _replay_cell_body(
             None if store is None else planner.path_certificate_context(row["arm"], kinematic=True)
         )
         proofs = result["proofs"] = []
+        # Looked up here, on the workers: binding a proof digests the whole clock.
+        result["pen_proof"] = (
+            store.get(
+                planner.path_certificate_context(row["arm"], pen=True),
+                row["trajectory"],
+                "pen_material_path",
+            )
+            if pen_proofs and store is not None and not row.get("auxiliary", False)
+            else None
+        )
         if planner.turntable is not None:
             from ..curves import flatten_curve, transform_points
             from .source_coverage import audit_source_curve
@@ -335,8 +418,11 @@ def _replay_cell_body(
             else store.get(invariant_context, row["trajectory"], "joint_speed")
         )
         reuse = reuse or speed_proof is not None
-        drawing_proof = (None if store is None else
-                         store.get(invariant_context, row["trajectory"], "drawing_speed"))
+        drawing_proof = (
+            None
+            if store is None
+            else store.get(invariant_context, row["trajectory"], "drawing_speed")
+        )
         proofs.extend(
             name
             for name, proof in (("joint_speed", speed_proof), ("drawing_speed", drawing_proof))
@@ -390,8 +476,9 @@ def _replay_cell_body(
                 tick()
         if store is not None and not reuse:
             if drawing_proof is None and any(edge.kind == "DRAW" for edge in path.edges):
-                store.admit(invariant_context, row["trajectory"], "drawing_speed",
-                            {"status": "CHECKED"})
+                store.admit(
+                    invariant_context, row["trajectory"], "drawing_speed", {"status": "CHECKED"}
+                )
             store.admit(
                 invariant_context,
                 row["trajectory"],
@@ -560,6 +647,9 @@ def _replay_cell_body(
         reused_path_checks=0,
         posture_limit_deg_per_mm=POSTURE_LIMIT_DEG_PER_MM,
         geometry_proofs_accepted=geometry_proofs,
+        pen_proofs_accepted=pen_proofs,
+        pen_proof_intervals=0,
+        pen_proof_fallbacks=0,
         geometry_proof_hits={},
         verification_raw=verification_raw,
         optimize_contact_geometry=optimize_contact_geometry,
@@ -645,7 +735,7 @@ def _replay_cell_body(
             save()
             last_write = monotonic()
 
-    moves = []
+    moves, pen_proof_rows = [], {}
     previous = {identity: (0.0, q) for identity, q in initial.items()}
     previous_index = saved.get("initial_table_index", 0)
     for position, (row, path) in enumerate(zip(ordered, paths, strict=True)):
@@ -653,9 +743,7 @@ def _replay_cell_body(
             return budget_result()
         output["active_action"] = {"arm": row["arm"], "stroke_id": row["stroke_id"]}
         try:
-            audit = (
-                audit_action(row, path, tick) if audits is None else audits[position]
-            )
+            audit = audit_action(row, path, tick) if audits is None else audits[position]
         except TimeoutError:
             return budget_result()
         if planner.turntable is not None:
@@ -677,6 +765,8 @@ def _replay_cell_body(
             raise ValueError("Overlapping or discontinuous arm channel")
         for name in audit["proofs"]:
             output["geometry_proof_hits"][name] = output["geometry_proof_hits"].get(name, 0) + 1
+        if not row.get("auxiliary", False):
+            pen_proof_rows[row["stroke_id"]] = audit.get("pen_proof")
         if audit["reuse"]:
             output["reused_path_checks"] += 1
             output["checked_edges"] += len(path.edges)
@@ -754,6 +844,7 @@ def _replay_cell_body(
         output["status"] = "NO_MOTION_TO_REPLAY"
         save(final=True)
         return (output, state) if return_state else output
+
     def advance(state, new, b, scene):
         """State after a verified interval; independent of the collision work."""
         active = state.active + new
@@ -792,9 +883,7 @@ def _replay_cell_body(
                 failure = {
                     **failure,
                     "stroke_id": motion.proposal.task,
-                    "action_index": [m.proposal.task for m in drawings].index(
-                        motion.proposal.task
-                    ),
+                    "action_index": [m.proposal.task for m in drawings].index(motion.proposal.task),
                 }
         return failure
 
@@ -844,7 +933,30 @@ def _replay_cell_body(
                     ):
                         table_index = edge.table_to_index
             dry = advance(dry, new, b, None)
+        # Planning proved each action's pen clear of the cell and of the wire
+        # of the actions before it. Accept that for the leading actions whose
+        # saved clock holds such a proof and whose chain of preceding deposits
+        # is exactly the one the earlier accepted proofs name.
+        proven = set()
+        if pen_proofs and bool(planner.settings.get("merge_deposits_m", 0.0)):
+            from .replay_checkpoint import digest as chain_digest
+
+            chain = []
+            for move in sorted(moves, key=lambda move: move.start_s):
+                if move.proposal.task not in pen_proof_rows:
+                    continue  # A transit between actions; always checked in full.
+                proof = (
+                    None
+                    if any(edge.kind == "INDEX_TURN" for edge in move.proposal.payload.edges)
+                    else pen_proof_rows[move.proposal.task]
+                )
+                if proof is None or proof.get("chain_sha256") != chain_digest(chain):
+                    break
+                proven.add(move.proposal.task)
+                chain.append(proof["deposit"])
+        accepted = [len(owner) == 1 and owner[0].proposal.task in proven for owner in owners]
         _PARALLEL.update(
+            envelope=_printed_volume(planner) if any(accepted) else None,
             intervals=intervals,
             states=states,
             root=journal_root,
@@ -860,8 +972,12 @@ def _replay_cell_body(
             deposits = [pool.submit(_parallel_deposit, k) for k in range(len(intervals))]
             keys = [future.result() for future in deposits]
             mark("deposit_journals")
+
+            def full_check(k):
+                return pool.submit(_parallel_check, k, [[key, None] for key in keys[:k]])
+
             checks = [
-                pool.submit(_parallel_check, k, [[key, None] for key in keys[:k]])
+                pool.submit(_parallel_arm_check, k) if accepted[k] else full_check(k)
                 for k in range(len(intervals))
             ]
             expected, capsules = state.payload.geometry_prefix(), len(state.payload.objects)
@@ -869,6 +985,24 @@ def _replay_cell_body(
             for k, future in enumerate(checks):
                 result = future.result()
                 _, b, new = intervals[k]
+                if accepted[k] and result["certified"]:
+                    # The arm is clear and the pen holds its proof; the material
+                    # this interval adds is the journal later checks receive.
+                    planner.checked_intervals += result["edges"]
+                    output["pen_proof_intervals"] += 1
+                    scene = MaterialScene()
+                    scene.table_index = expected[1]
+                    state = advance(state, new, b, scene)
+                    output.update(
+                        completed_strokes=len(state.completed),
+                        checked_intervals=planner.checked_intervals,
+                    )
+                    save()
+                    continue
+                if accepted[k]:
+                    # An arm link came near the printed volume: check it exactly.
+                    output["pen_proof_fallbacks"] += 1
+                    result = full_check(k).result()
                 # Merged journals replace a check's fine wire for its successors,
                 # so compare what the check deposited with the journal they use.
                 if (
@@ -989,6 +1123,7 @@ def replay_cell(
     workers=1,
     optimize_contact_geometry=True,
     geometry_proofs=False,
+    pen_proofs=False,
 ):
     """Replay a saved plan with the complete robot model.
 
@@ -1017,6 +1152,7 @@ def replay_cell(
             workers=workers,
             optimize_contact_geometry=optimize_contact_geometry,
             geometry_proofs=geometry_proofs,
+            pen_proofs=pen_proofs,
         )
         stage_update(
             Path(run),
@@ -1030,7 +1166,9 @@ def replay_cell(
         if output.get("requires_final_verification"):
             passed = output["status"] == "CERTIFIED_GEOMETRIC_REPLAY"
             stage_update(
-                Path(run), "motion", "complete" if passed else "partial",
+                Path(run),
+                "motion",
+                "complete" if passed else "partial",
                 artifact=plan_file,
                 message="Verified playback ready" if passed else "Playback awaiting verification",
             )
@@ -1038,12 +1176,17 @@ def replay_cell(
             if report_path.exists():
                 report = read_json(report_path)
                 report.update(
-                    status=("FULL_BUILD_VERIFIED" if passed else
-                            "FULL_BUILD_REPLAY_REJECTED" if output["status"] == "REPLAY_REJECTED"
-                            else "FULL_BUILD_VERIFICATION_INCOMPLETE"),
+                    status=(
+                        "FULL_BUILD_VERIFIED"
+                        if passed
+                        else "FULL_BUILD_REPLAY_REJECTED"
+                        if output["status"] == "REPLAY_REJECTED"
+                        else "FULL_BUILD_VERIFICATION_INCOMPLETE"
+                    ),
                     replay_status=output["status"],
-                    collision_scope=("full_robot" if passed
-                                     else report.get("planning_collision_scope")),
+                    collision_scope=(
+                        "full_robot" if passed else report.get("planning_collision_scope")
+                    ),
                     requires_full_robot_validation=not passed,
                     final_collision_scope=output.get("collision_scope"),
                 )
@@ -1086,6 +1229,13 @@ def main():
         help="Accept planning's speed and source-coverage proofs for the exact saved clocks; "
         "collision, orientation, deposits and structure are still checked in full",
     )
+    parser.add_argument(
+        "--accept-pen-proofs",
+        action="store_true",
+        help="Accept planning's proof that the pen clears the cell and the preceding wire, for "
+        "actions whose exact clock and preceding chain match; the arm is still checked on "
+        "every edge, against itself, the cell and a volume enclosing all wire",
+    )
     args = parser.parse_args()
     result = replay_cell(
         args.run,
@@ -1094,6 +1244,7 @@ def main():
         args.plan_name,
         workers=args.workers,
         geometry_proofs=args.accept_geometry_proofs,
+        pen_proofs=args.accept_pen_proofs,
     )
     print(result["status"], result["completed_strokes"], result["checked_intervals"])
     return 0 if result["status"] == "CERTIFIED_GEOMETRIC_REPLAY" else 1

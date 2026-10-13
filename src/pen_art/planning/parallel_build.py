@@ -854,6 +854,20 @@ def _time(context, spec, seconds):
             "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
             "source_points_m": _points(context, row, table_index),
         }
+        # Its check and transit cleared the pen against exactly this chain of
+        # earlier deposits, under the pen-only model. Verification may accept
+        # that for this clock when the plan it replays has the same chain.
+        store.admit(
+            planner.path_certificate_context(build.arm.identity, pen=True),
+            path.record(),
+            "pen_material_path",
+            {
+                "status": "CHECKED",
+                "deposit": spec["deposit"],
+                "chain_sha256": digest(spec["chain"]),
+                "derived_from": "same_sweep_of_checked_untimed_path",
+            },
+        )
         covered = store.get(coverage_context, payload["clock"].record(), "source_coverage")
         if covered is not None:
             store.admit(
@@ -1352,10 +1366,14 @@ def run_parallel_forward(
                 connected = schedule._connected(index)
                 if not connected.get("untimed"):
                     continue
+                candidate = schedule.slots[index]["candidate"]
                 spec = {
                     "kind": "time",
                     "index": index,
                     "connected": connected["key"],
+                    # The wire this action's pen was checked against, and its own.
+                    "chain": schedule.chain(index),
+                    "deposit": [candidate["deposit_key"], candidate["table_index"]],
                     "key": digest({"time": connected["key"], "binding": context["binding"]}),
                 }
                 futures[submit(spec)] = spec
