@@ -262,19 +262,27 @@ def retime_operation(
     for finer in ((0, True), (101, True)):
         if finer[0] >= grids[-1][0] and finer[1] >= grids[-1][1] and finer != grids[-1]:
             grids.append(finer)
-    best = None
+    best, failure = None, None
     for samples, midpoints in grids:
-        result = _retime_operation(
-            operation, robot, offset, velocity_limits, acceleration_limits, speed, period,
-            sample_output=sample_output, path=path,
-            continuous_acceleration=continuous_acceleration,
-            grid_samples=samples, grid_midpoints=midpoints,
-        )
+        try:
+            result = _retime_operation(
+                operation, robot, offset, velocity_limits, acceleration_limits, speed, period,
+                sample_output=sample_output, path=path,
+                continuous_acceleration=continuous_acceleration,
+                grid_samples=samples, grid_midpoints=midpoints,
+            )
+        except TimingParameterizationError as error:
+            # A checked path can always be traversed slowly enough; a numerical
+            # failure on one grid is a reason to refine it, not to give up.
+            failure = error
+            continue
         if best is None or result["duration_s"] < best["duration_s"]:
             best = result
         speeds = np.asarray(result["path_clock"]["speeds"])
         if len(speeds) < 3 or speeds[1:-1].min() >= STALLED_CLOCK_FRACTION * speeds.max():
             break
+    if best is None:
+        raise failure
     return best
 
 

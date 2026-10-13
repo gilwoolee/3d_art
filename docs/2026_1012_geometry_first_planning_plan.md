@@ -167,8 +167,11 @@ that keep their contact point. Metadata marks it `parameterization: geometric`.
   `audit_indexed_clock`, release readiness, then `same_sweep`. Assemble the
   schedule in build order. The saved plan keeps today's timed format and adds
   the geometric record, so export and the viewer are unchanged.
-  A timing failure returns that action to G3 with its reason, at most three
-  times, then stops with the action named; it never relaxes a limit.
+  Timing a checked path is pure software: it can always be traversed slowly
+  enough, so a rejection is a retimer defect to fix, never a reason to re-plan
+  geometry. The retimer refines its grid on a numerical failure or a stalled
+  clock; any remaining rejection stops the build and is listed with its reason
+  in `parallel_build.json`. It never relaxes a limit.
 
 - [ ] **G5 — Split final verification.**
   Owners: `planning/cell_replay.py`, `planning/parallel_build.py`.
