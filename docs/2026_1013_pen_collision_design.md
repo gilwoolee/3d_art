@@ -1,10 +1,10 @@
 # Pen-against-wire collision check: design
 
 **Date:** 2026-10-13
-**Status:** Design agreed in outline (items 1-4 of the
-[collision and timing research](2026_1013_collision_and_timing_research.md));
-nothing here is implemented or measured. Numbers marked *estimate* are
-reasoning, not results.
+**Status:** Simplified on 2026-10-13 at the user's direction: the pen is a row
+of spheres checked at the ends of each short piece, not a swept volume with a
+derived remainder bound. Nothing here is implemented or measured. Numbers
+marked *estimate* are reasoning, not results.
 
 ## Goal
 
@@ -38,33 +38,25 @@ through a Python binding.
 
 ## Design
 
-### 1. Bound the motion by its chord plus a second-order remainder
+### 1. Check at the ends of each short piece
 
-A point `p` rigidly attached to the tool moves along `p(u)` for `u` in
-`[0, 1]` over one path piece. For any twice-differentiable curve,
+The pen moves at fixed orientation and each piece moves it about half a
+millimetre. If the pen is clear by the required margin at the start and at the
+end of such a piece, it is clear in between.
 
-    | p(u) - chord(u) |  <=  max |p''| / 8,
+That is more than a likelihood. Between two checked positions a sphere centre
+travels a distance `s`, so it is never further than `s / 2` from a checked
+position (plus a few microns of bulge from the curved joint path). If both
+checked positions have clearance of at least the 1 mm margin, the clearance in
+between is at least `1 mm - s / 2`. For the median piece (0.45 mm) that is
+0.77 mm. Contact is impossible as long as `s` stays under 2 mm.
 
-where `chord` is the straight segment from `p(0)` to `p(1)`. The curve
-therefore lies inside the capsule around the chord with radius `max|p''| / 8`.
-
-- `p(0)` and `p(1)` come from forward kinematics at the piece's two ends.
-- `max|p''|` is bounded without sampling by the serial-chain bound the
-  repository already uses for tracking and deposition
-  (`timing.tcp_acceleration_bound`), fed with the piece's largest joint
-  velocity and acceleration (`PolynomialPiece.derivatives`), and with the lever
-  arm of the point in question in place of the tool-point offset.
-
-With joint motion near 0.001 rad per piece, the remainder is of order
-`lever * (velocity^2 + acceleration) / 8`: about a micron from the velocity
-term, and up to tens of microns where the spline bends (*estimate*). The
-first-order bound in use today is about a millimetre. Where the remainder is
-still too large for the clearance, the piece is halved, which divides the
-remainder by four; this replaces today's halving but should rarely trigger.
-
-This makes no assumption that the pen stays upright or that the path is
-straight. Orientation drift inside a piece is part of `p(u)` and is covered by
-the same remainder.
+Rule: check every sphere at both ends of every piece, requiring the full
+margin. Where a sphere centre travels more than 1 mm within a piece (the
+longest drawing pieces, approach, withdraw and travel moves), add evenly spaced
+checks so that no gap exceeds 1 mm. Clearance between checks is then at least
+0.5 mm everywhere. No motion bound is derived and nothing is subdivided
+adaptively.
 
 ### 2. Model the tool as spheres along its axis
 
@@ -81,21 +73,20 @@ a tuning choice). The adapter block is covered by spheres on its bounding
 cylinder. The profile is generated from `tool_geometry` in the cell profile, so
 a different pen needs no code change.
 
-By item 1, each sphere sweeps a volume inside the capsule around its centre's
-chord with radius `sphere radius + remainder`. The whole question becomes:
+The whole question becomes, at each checked position:
 
-    distance(segment of sphere k's chord, segment of wire w)
-        >=  r_k + remainder_k + r_w + margin
+    distance(centre of sphere k, segment of wire w)  >=  r_k + r_w + margin
 
 for every sphere `k` and every nearby wire `w`.
 
 ### 3. Batched closed-form distances
 
-Segment-to-segment distance is closed form. All pairs for one piece, or for all
-pieces of an action, are evaluated as one array operation. No collision library
-is involved. One action is about 170 pieces x 70 spheres x the wires within
-reach; with the culling below that is on the order of a million pairs:
-tens of milliseconds in numpy, about a millisecond compiled (*estimate*).
+Point-to-segment distance is closed form and simpler than segment-to-segment.
+All pairs for one piece, or for all pieces of an action, are evaluated as one
+array operation. No collision library is involved. One action is about 170
+pieces x 70 spheres x the wires within reach; with the culling below that is on
+the order of a million pairs: tens of milliseconds in numpy, about a
+millisecond compiled (*estimate*).
 
 Arithmetic is double precision. A fixed rounding allowance (1e-9 m) is added to
 the right-hand side.
@@ -113,13 +104,12 @@ wires in its own and neighbouring cells. The cull must use each sphere's full
 inflated radius; that is the one place where a mistake silently drops a pair,
 so the index is tested against brute force over all wires.
 
-### 5. Deposited wire from the same chords
+### 5. Deposited wire
 
-The wire a piece deposits is the tool point's path. By item 1 it lies inside
-the capsule around the tool point's chord with radius
-`strand radius + remainder`. That replaces the subdivision in
-`add_piece_material`. If the remainder exceeds the present 20 um enclosure
-tolerance the piece is halved, as now.
+The wire a piece deposits is recorded as the capsule between the tool point's
+two end positions with the strand radius. The existing enclosure by subdivision
+(`add_piece_material`) is kept where a piece is long or strongly curved; for
+the typical half-millimetre piece it already produces exactly this capsule.
 
 ## What stays exactly as it is
 
@@ -142,8 +132,8 @@ tolerance the piece is halved, as now.
 | Change | Place |
 | --- | --- |
 | Sphere profile from tool geometry | new, beside `planning/tool.py` |
-| Chord and remainder per sphere per piece | new function taking a `PolynomialPiece` and the arm |
-| Batched segment distances | new, pure numpy |
+| Sphere centres at the checked positions of a piece | new function taking a `PolynomialPiece` and the arm |
+| Batched point-to-segment distances | new, pure numpy |
 | Append-only grid with birth tags | beside `MaterialScene` in `planning/scene.py`, fed by `MaterialPrefix` |
 | Use in the check | the non-contact branch of `_validate_interval` that calls `check_bounded_path` with a wire scene and a pen model |
 | Deposits | `add_piece_material` |
@@ -156,9 +146,8 @@ validation below passes.
 1. **Distance kernel.** Batched segment distances against a scalar reference
    and against FCL capsule-capsule distance on random pairs, including
    parallel, touching and degenerate segments.
-2. **Remainder bound.** For random pieces of real plans, the largest sampled
-   deviation of every sphere centre from its chord (thousands of samples per
-   piece) must never exceed the bound.
+2. **Spacing rule.** On real plans, the largest travel of any sphere centre
+   between consecutive checked positions must not exceed 1 mm.
 3. **Profile cover.** Random points on the true tool surface must lie inside
    the sphere union.
 4. **Index.** Grid queries equal brute force over all wires for random spheres
@@ -179,7 +168,7 @@ others localise a failure.
 
 | Risk | Consequence | Mitigation |
 | --- | --- | --- |
-| Remainder bound derived with a wrong constant or lever arm | Certifies a collision | Validation 2 on real pieces; the bound reuses the function already trusted for tracking |
+| A long or fast piece is checked too sparsely | Clearance between checks falls below 0.5 mm | The 1 mm spacing rule adds checks; validation 2 measures the largest gap on real plans |
 | Sphere over-estimate at the nose removes clearance the plan needs | Valid actions rejected, more re-planning | Fine spacing near the tip; validation 5 counts these; spacing is a setting |
 | Grid cull radius too small | Silently skipped pairs | Validation 4 against brute force |
 | Contact pieces handled by two different models | Inconsistent verdicts at corners | Contact branch untouched in this change |
@@ -195,7 +184,7 @@ pen proofs, and gains the same factor under `--full-replay`.
 
 ## Order of work
 
-1. Distance kernel, sphere profile, remainder bound, each with its test.
+1. Distance kernel, sphere profile and the spacing rule, each with its test.
 2. Append-only grid with birth tags, tested against brute force.
 3. Shadow mode in the check job; run both shapes; study disagreements.
 4. Switch the non-contact branch; then the deposits; re-run both shapes.
