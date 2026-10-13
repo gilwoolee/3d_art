@@ -1,0 +1,22 @@
+{
+  "status": "PASSED",
+  "run": "runs/staged_checkpoint_partial_v1",
+  "revalidated_saved_motions": 2,
+  "freshly_planned_remaining_sections": 1,
+  "fresh_ik_batches_on_resume": 1,
+  "corrupt_witness_rejected": true,
+  "changed_input_binding_rejected": true,
+  "independent_replay": "CERTIFIED_GEOMETRIC_REPLAY",
+  "checked_intervals": 545,
+  "simulation_only": true,
+  "inputs": {
+    "runs/staged_checkpoint_partial_v1/forward_checkpoint.json": "ae6487ace0263fa35465b654ee876cce78a20ddd0ddc343f966bbf5c7a531a16",
+    "runs/staged_checkpoint_partial_v1/offline_dual_arm_plan.json": "f2ea44e1941c4133f88eb7cfdbd33d4abd42ba3f42286d82d7b47cc2fae943a0",
+    "runs/staged_checkpoint_partial_v1/offline_dual_arm_validation.json": "f26837b189f016cca899082ef774ad9314d9b8b49bde98561b72585b887bd825",
+    "scripts/check_section_checkpoints.py": "a336926dfc748f65a641f370773516ab89a6f33807b8f01e36b4288dc49a1d7d",
+    "src/pen_art/planning/section_build.py": "b736b4f31e0cdd4ca20a7ee93c70acefa9144657e245412717b5c991156c0804",
+    "research/blondie/deep_section_search.json": "77b1ea34e4858b580263c583caad634dd3094ed7386daa154ccf9edd8698025d",
+    "research/blondie/staged_checkpoint_partial_v1_browser_replay.json": "74ba9bfe43d219f85f3a05968b5f2cdcc5ddde33824c11eae84dceb619922dbd"
+  },
+  "browser_replay": "research/blondie/staged_checkpoint_partial_v1_browser_replay.json"
+}

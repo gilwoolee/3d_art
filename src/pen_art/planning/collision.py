@@ -4,6 +4,7 @@ The mounted pen and growing material must be added before this can serve as a
 whole-tool collision model. Configuration checks alone do not cover motions.
 """
 
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from time import monotonic
 
@@ -60,10 +61,14 @@ def placed(geometry, matrix):
 
 
 class RobotCollisionModel:
-    def __init__(self, robot, extra_bodies=()):
+    """Fixed robot/tool geometry; rebuild this model after calibration changes."""
+
+    def __init__(self, robot, extra_bodies=(), *, include_robot=True):
         self.robot = robot
         self.bodies = []
-        for link in robot.xml.findall("link"):
+        # Candidate tool-only checks retain robot kinematics and joint limits,
+        # but do not construct URDF collision bodies or their pair caches.
+        for link in robot.xml.findall("link") if include_robot else ():
             name = link.get("name")
             for index, element in enumerate(link.findall("collision")):
                 geometry, radius = collision_geometry(element.find("geometry"))
@@ -79,7 +84,7 @@ class RobotCollisionModel:
         self.bodies.extend(extra_bodies)
         self.adjacent = {frozenset((joint["parent"], joint["child"])) for joint in robot.joint_data}
         if not self.bodies:
-            raise ValueError("Robot URDF has no collision bodies")
+            raise ValueError("Collision model has no bodies")
         # A fixed world-to-base joint is part of the mounting assembly. Exclude
         # only those links from the table check, never a moving link.
         self.mount_links = {robot.root}
@@ -105,14 +110,11 @@ class RobotCollisionModel:
                     radii[joint["index"]] = reach
                 reach += np.linalg.norm(joint["origin"][:3, 3])
             self.motion_radii[body.name] = radii
-
-    def pairs(self, positions, obstacles=None):
-        frames = self.robot.frames(positions)
-        objects = [
-            (body, placed(body.geometry, frames[body.link] @ body.origin)) for body in self.bodies
-        ]
-        for index, (body, obj) in enumerate(objects):
-            for other, other_obj in objects[index + 1 :]:
+        self._self_pairs = [[] for _ in self.bodies]
+        self._pair_radii = {}
+        for index, body in enumerate(self.bodies):
+            for other_index in range(index + 1, len(self.bodies)):
+                other = self.bodies[other_index]
                 if body.link == other.link:
                     continue
                 if body.touch_links is not None or other.touch_links is not None:
@@ -122,56 +124,212 @@ class RobotCollisionModel:
                         continue
                 elif frozenset((body.link, other.link)) in self.adjacent:
                     continue
+                first, second = self.motion_radii[body.name], self.motion_radii[other.name]
+                # Common ancestor joints transform both bodies rigidly and
+                # cannot change their separation. Cache only relative joints.
+                radii = np.where((first > 0) & (second > 0), 0.0, first + second)
+                self._self_pairs[index].append((other_index, radii > 0))
+                self._pair_radii[body.name, other.name] = radii
+        self._self_cache = OrderedDict()
+        self.self_cache_hits = self.self_cache_misses = 0
+        self._material_poses = OrderedDict()
+        self.material_cache_stats = Counter()
+
+    def _material_pose(self, positions, *, enabled):
+        """Reuse exact world placements for this immutable robot/tool model.
+
+        No joint quantization is permitted. Every hit still validates current
+        joint limits, and the actual base matrix participates in its key. Other
+        calibration/geometry changes require rebuilding the collision model.
+        """
+        q = np.asarray(positions, dtype=np.float64)
+        if q.shape != (len(self.robot.names),) or not np.isfinite(q).all():
+            raise ValueError("Expected finite joint positions matching the arm DOF")
+        if np.any(q < self.robot.lower) or np.any(q > self.robot.upper):
+            raise ValueError("Joint positions exceed URDF limits")
+        base = np.asarray(getattr(self.robot, "world_from_base", np.eye(4)), dtype=np.float64)
+        key = q.tobytes(), base.tobytes()
+        pose = self._material_poses.get(key) if enabled else None
+        if pose is not None:
+            self._material_poses.move_to_end(key)
+            self.material_cache_stats["pose_hits"] += 1
+            return pose
+        self.material_cache_stats["pose_misses"] += 1
+        frames = self.robot.frames(q)
+        pose = {
+            "transforms": [frames[body.link] @ body.origin for body in self.bodies],
+            "objects": {},
+            "proofs": {},
+        }
+        if enabled:
+            self._material_poses[key] = pose
+            if len(self._material_poses) > 2048:
+                self._material_poses.popitem(last=False)
+        return pose
+
+    def pairs(self, positions, obstacles=None):
+        frames = self.robot.frames(positions)
+        objects = [
+            (body, placed(body.geometry, frames[body.link] @ body.origin)) for body in self.bodies
+        ]
+        for index, (body, obj) in enumerate(objects):
+            for other_index, _ in self._self_pairs[index]:
+                other, other_obj = objects[other_index]
                 yield body.name, other.name, obj, other_obj
             for name, obstacle in (obstacles or {}).items():
                 if name == "table" and body.link in self.mount_links:
                     continue
                 yield body.name, name, obj, obstacle
 
-    def material_distances(self, positions, material, clearance_bounds=None):
-        frames = self.robot.frames(positions)
-        for body in self.bodies:
-            transform = frames[body.link] @ body.origin
-            if clearance_bounds is not None and not material.possibly_near(
-                transform[:3, 3], body.radius, clearance_bounds[body.name]
-            ):
-                continue
-            obj = placed(body.geometry, transform)
-            if clearance_bounds is not None and not material.possibly_near_body(
-                obj, clearance_bounds[body.name]
-            ):
-                continue
-            nearest = material.nearest(obj)
-            if nearest:
-                yield body.name, nearest["name"], nearest["distance_m"]
+    def distances(self, positions, obstacles=None, *, deadline=float("inf")):
+        """Yield names, signed clearance and overlap; cache only self pairs.
 
-    def check(self, positions, obstacles=None, margin_m=0.0, material=None):
+        Keys retain exact relative joint values, without angle quantization.
+        The bounded, in-memory cache belongs to this fixed robot/tool model.
+        Obstacle poses and deposited material never enter its certificates.
+        """
+        q = np.asarray(positions, dtype=np.float64)
+        frames = self.robot.frames(q)  # Validate every configuration, including hits.
+        objects = {}
+
+        def object_at(index):
+            if index not in objects:
+                body = self.bodies[index]
+                objects[index] = placed(body.geometry, frames[body.link] @ body.origin)
+            return objects[index]
+
+        def measure(first, second):
+            result = fcl.CollisionResult()
+            contact = bool(
+                fcl.collide(first, second, fcl.CollisionRequest(enable_contact=True), result)
+            )
+            distance = (
+                -max((row.penetration_depth for row in result.contacts), default=1e-9)
+                if contact
+                else fcl.distance(first, second, fcl.DistanceRequest(), fcl.DistanceResult())
+            )
+            if not np.isfinite(distance):
+                raise ValueError("Invalid collision distance")
+            if distance < 0 and not contact:
+                # FCL's overlap and distance queries can disagree at a GJK
+                # tolerance boundary. A negative distance must reject the
+                # candidate, never certify clearance or abort the whole search.
+                contact = True
+                distance = -1e-9
+            return float(distance), contact
+
+        for index, body in enumerate(self.bodies):
+            for other_index, relative in self._self_pairs[index]:
+                if monotonic() >= deadline:
+                    raise TimeoutError("Self-collision check exceeded its budget")
+                key = (index, other_index, q[relative].tobytes())
+                cached = self._self_cache.get(key)
+                if cached is None:
+                    self.self_cache_misses += 1
+                    cached = measure(object_at(index), object_at(other_index))
+                    self._self_cache[key] = cached
+                    if len(self._self_cache) > 8192:
+                        self._self_cache.popitem(last=False)
+                else:
+                    self.self_cache_hits += 1
+                    self._self_cache.move_to_end(key)
+                yield body.name, self.bodies[other_index].name, *cached
+            for name, obstacle in (obstacles or {}).items():
+                if name == "table" and body.link in self.mount_links:
+                    continue
+                if monotonic() >= deadline:
+                    raise TimeoutError("Obstacle collision check exceeded its budget")
+                yield body.name, name, *measure(object_at(index), obstacle)
+
+    def material_distances(
+        self, positions, material, clearance_bounds=None, *, deadline=float("inf")
+    ):
+        enabled = material.clearance_query_enabled
+        prefix_cache = enabled and getattr(material, "supports_prefix_cache", True)
+        pose = self._material_pose(positions, enabled=enabled)
+        suffixes = {}
+        for index, body in enumerate(self.bodies):
+            if monotonic() >= deadline:
+                raise TimeoutError("Material-distance query exceeded its budget")
+            transform = pose["transforms"][index]
+            threshold = None if clearance_bounds is None else clearance_bounds[body.name]
+            if threshold is not None and (not np.isfinite(threshold) or threshold < 0):
+                raise ValueError("Material clearance must be finite and nonnegative")
+            query_scene = material
+            proof = pose["proofs"].get(index) if prefix_cache and threshold is not None else None
+            if proof is not None:
+                count, prefix, gap = proof
+                if (
+                    threshold <= gap
+                    and count <= len(material.objects)
+                    and material.geometry_prefix(count) == prefix
+                ):
+                    self.material_cache_stats["prefix_hits"] += 1
+                    if count == len(material.objects):
+                        continue
+                    if count not in suffixes:
+                        suffixes[count] = material.suffix(count)
+                        suffixes[count].clearance_stats = material.clearance_stats
+                    query_scene = suffixes[count]
+                    self.material_cache_stats["suffix_capsules"] += len(query_scene.objects)
+                else:
+                    self.material_cache_stats["prefix_misses"] += 1
+            clear = threshold is not None and not query_scene.possibly_near(
+                transform[:3, 3], body.radius, threshold
+            )
+            if not clear:
+                if index not in pose["objects"]:
+                    pose["objects"][index] = placed(body.geometry, transform)
+                    self.material_cache_stats["objects_created"] += 1
+                obj = pose["objects"][index]
+                clear = threshold is not None and not query_scene.possibly_near_body(obj, threshold)
+                if not clear:
+                    query = {
+                        "deadline": deadline,
+                        "bounding_sphere": (transform[:3, 3], body.radius),
+                    }
+                    nearest = (
+                        query_scene.nearest(obj, **query)
+                        if threshold is None
+                        else query_scene.within_clearance(obj, threshold, **query)
+                    )
+                    if nearest:
+                        yield body.name, nearest["name"], nearest["distance_m"]
+                        continue
+                    clear = threshold is not None
+            if prefix_cache and clear:
+                # The previous proof covers the entire prefix and this query
+                # covers every appended capsule, with the current swept bound.
+                pose["proofs"][index] = (
+                    len(material.objects), material.geometry_prefix(), threshold
+                )
+
+    def check(
+        self, positions, obstacles=None, margin_m=0.0, material=None, *, deadline=float("inf")
+    ):
         if margin_m < 0:
             raise ValueError("Collision margin must be nonnegative")
         overlaps = []
 
-        def near(first, second, name1, name2):
-            result = fcl.CollisionResult()
-            count = fcl.collide(first, second, fcl.CollisionRequest(), result)
-            if count:
+        for name1, name2, distance, contact in self.distances(
+            positions, obstacles, deadline=deadline
+        ):
+            if contact:
                 overlaps.append({"first": name1, "second": name2, "kind": "overlap"})
-            elif margin_m:
-                distance = fcl.distance(first, second, fcl.DistanceRequest(), fcl.DistanceResult())
-                if distance < margin_m:
-                    overlaps.append(
-                        {
-                            "first": name1,
-                            "second": name2,
-                            "kind": "clearance",
-                            "distance_m": float(distance),
-                        }
-                    )
-
-        for name1, name2, first, second in self.pairs(positions, obstacles):
-            near(first, second, name1, name2)
+            elif distance < margin_m:
+                overlaps.append(
+                    {
+                        "first": name1,
+                        "second": name2,
+                        "kind": "clearance",
+                        "distance_m": distance,
+                    }
+                )
         if material is not None:
             bounds = dict.fromkeys((body.name for body in self.bodies), margin_m)
-            for name1, name2, distance in self.material_distances(positions, material, bounds):
+            for name1, name2, distance in self.material_distances(
+                positions, material, bounds, deadline=deadline
+            ):
                 if distance <= margin_m:
                     overlaps.append(
                         {
@@ -253,8 +411,7 @@ class RobotCollisionModel:
             ):
                 raise ValueError("Path deviation must be finite and nonnegative for each joint")
             uncertain = []
-            for name1, name2, first, second in self.pairs(q, obstacles):
-                contact = fcl.collide(first, second, fcl.CollisionRequest(), fcl.CollisionResult())
+            for name1, name2, distance, contact in self.distances(q, obstacles, deadline=deadline):
                 if contact:
                     return {
                         "status": "COLLISION",
@@ -262,10 +419,11 @@ class RobotCollisionModel:
                         "positions": q.tolist(),
                         "pairs": [{"first": name1, "second": name2}],
                     }
-                distance = fcl.distance(first, second, fcl.DistanceRequest(), fcl.DistanceResult())
-                if not np.isfinite(distance) or distance < 0:
-                    raise ValueError(f"Invalid collision distance for {name1} and {name2}")
-                radius = self.motion_radii[name1] + self.motion_radii.get(name2, 0)
+                radius = (
+                    self._pair_radii[name1, name2]
+                    if name2 not in (obstacles or {}) and (name1, name2) in self._pair_radii
+                    else self.motion_radii[name1]
+                )
                 bound = float(radius @ half_delta)
                 if distance <= bound + margin_m + 1e-6:
                     uncertain.append(
@@ -281,7 +439,9 @@ class RobotCollisionModel:
                     body.name: float(self.motion_radii[body.name] @ half_delta) + margin_m + 1e-6
                     for body in self.bodies
                 }
-                for name1, name2, distance in self.material_distances(q, material, bounds):
+                for name1, name2, distance in self.material_distances(
+                    q, material, bounds, deadline=deadline
+                ):
                     if distance <= 0:
                         return {
                             "status": "COLLISION",
@@ -315,7 +475,10 @@ class RobotCollisionModel:
                 else first
             )
 
-        result = visit(0.0, 1.0, 0)
+        try:
+            result = visit(0.0, 1.0, 0)
+        except TimeoutError:
+            result = {"status": "TIME_BUDGET"}
         return {**result, "evaluations": evaluations, "maximum_depth": greatest_depth}
 
 

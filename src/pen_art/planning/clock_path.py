@@ -6,11 +6,13 @@ changed geometry requires fresh tracking and collision checks. Neither clock
 establishes the behavior of an uncalibrated physical pen.
 """
 
+from copy import copy
 from dataclasses import dataclass
 from time import monotonic
 
 import numpy as np
 from numpy.polynomial import Polynomial
+from scipy.interpolate import PPoly
 
 from ..kinematics import geometric_jacobian
 from ..timing import clock_polynomials, make_path, retime_operation, tcp_acceleration_bound
@@ -96,6 +98,8 @@ class ClockEdge:
     tcp1: np.ndarray | None = None
     # Ascending powers of normalized edge time, one row per joint.
     coefficients: list[list[float]] | None = None
+    table_index: int | None = None
+    table_to_index: int | None = None
 
     def piece(self, a=None, b=None):
         if self.coefficients is None:
@@ -106,7 +110,7 @@ class ClockEdge:
         else:
             polynomials = [Polynomial(c) for c in self.coefficients]
         piece = PolynomialPiece(polynomials)
-        if a is None and b is None:
+        if (a is None and b is None) or (a == self.start_s and b == self.end_s):
             return piece
         width = self.end_s - self.start_s
         return piece.subpiece((a - self.start_s) / width, (b - self.start_s) / width)
@@ -114,7 +118,17 @@ class ClockEdge:
     def position(self, time):
         u = float(np.clip((time - self.start_s) / (self.end_s - self.start_s), 0, 1))
         if self.coefficients is not None:
-            return self.piece().position(u)
+            # Evaluate the current mutable coefficients directly. Horner uses
+            # the same interpolant as Polynomial without rebuilding seven
+            # Polynomial objects for every FK/collision sample. Joint degrees
+            # may differ; do not retain a stale coefficient or piece cache.
+            result = np.empty(len(self.coefficients), dtype=float)
+            for i, coefficients in enumerate(self.coefficients):
+                value = 0.0
+                for coefficient in reversed(coefficients):
+                    value = value * u + coefficient
+                result[i] = value
+            return result
         return self.q0 + (self.q1 - self.q0) * smoothstep(u)
 
     def deviation(self, a, b):
@@ -139,6 +153,10 @@ class ClockEdge:
         }
         if self.coefficients is not None:
             result["coefficients"] = [list(row) for row in self.coefficients]
+        if self.table_index is not None:
+            result["table_index"] = self.table_index
+        if self.table_to_index is not None:
+            result["table_to_index"] = self.table_to_index
         return result
 
 
@@ -180,7 +198,26 @@ class ClockPath:
                 None if row.get("tcp0_m") is None else np.asarray(row["tcp0_m"]),
                 None if row.get("tcp1_m") is None else np.asarray(row["tcp1_m"]),
                 row.get("coefficients"),
+                row.get("table_index"),
+                row.get("table_to_index"),
             )
+            if edge.table_index is not None:
+                from .turntable import index_angle
+
+                index_angle(edge.table_index)
+                if edge.table_to_index is not None:
+                    index_angle(edge.table_to_index)
+                    if (
+                        edge.kind != "INDEX_TURN"
+                        or abs(edge.table_index - edge.table_to_index) != 1
+                        or not np.allclose(edge.q0, edge.q1, atol=1e-12, rtol=0)
+                        or edge.coefficients is not None
+                    ):
+                        raise ValueError("Indexing requires one quarter-turn and a stationary arm")
+                elif edge.kind == "INDEX_TURN":
+                    raise ValueError("Turntable action has no destination index")
+            elif edge.table_to_index is not None or edge.kind == "INDEX_TURN":
+                raise ValueError("Turntable action has no starting index")
             if (
                 not np.isfinite([edge.start_s, edge.end_s]).all()
                 or edge.end_s <= edge.start_s
@@ -245,6 +282,62 @@ class ClockPath:
         }
 
 
+def restrict_spline(path, first, last):
+    """Restrict a checked spline at its knots without fitting new geometry."""
+    if not 0 <= first < last < len(path.cspl.x):
+        raise ValueError("Invalid drawing spline interval")
+    result = copy(path)
+    start, end = path.cspl.x[[first, last]]
+    width = end - start
+    knots = (path.cspl.x[first : last + 1] - start) / width
+    coefficients = path.cspl.c[:, first:last].copy()
+    for index in range(len(coefficients)):
+        coefficients[index] *= width ** (len(coefficients) - 1 - index)
+    result.cspl = PPoly(coefficients, knots)
+    result.cspld, result.cspldd = result.cspl.derivative(), result.cspl.derivative(2)
+    result.ss_waypoints = knots
+    result._q_waypoints = result.cspl(knots)
+    return result
+
+
+def split_drawing_operations(operation):
+    """Stop at true source corners and hold in place, without pen restarts elsewhere."""
+    positions = np.asarray(operation["positions"])
+    cuts = sorted(set([0, len(positions) - 1, *operation.get("break_indices", [])]))
+    if cuts[0] != 0 or cuts[-1] != len(positions) - 1:
+        raise ValueError("Drawing break lies outside its joint path")
+    holds = operation.get("vertex_holds", {})
+    for first, last in zip(cuts[:-1], cuts[1:], strict=True):
+        part = {
+            key: value
+            for key, value in operation.items()
+            if key not in {"break_indices", "vertex_holds", "stop_lag_s", "start_lag_s"}
+        }
+        part["positions"] = positions[first : last + 1]
+        if operation.get("path") is not None:
+            part["path"] = restrict_spline(operation["path"], first, last)
+        yield part
+        if last == len(positions) - 1 or not holds.get(last):
+            continue
+        contact = np.asarray(holds[last]["contact_m"])
+        stop_lag = operation.get("stop_lag_s", 0.0)
+        duration = holds[last]["duration_s"]
+        # Cooling starts at arrival; known feed decay is part of this elapsed time.
+        for kind, seconds in (
+            ("PEN_STOP_WAIT", stop_lag),
+            ("VERTEX_COOL", max(0.0, duration - stop_lag)),
+            ("PEN_START_WAIT", operation.get("start_lag_s", 0.0)),
+        ):
+            if seconds > 0:
+                yield {
+                    "kind": kind,
+                    "positions": [positions[last]],
+                    "hold_s": seconds,
+                    "contact_m": contact,
+                    "stroke_id": operation.get("stroke_id"),
+                }
+
+
 def timed_path(
     operations,
     arm,
@@ -255,45 +348,75 @@ def timed_path(
     *,
     drawing_clock="quintic_stop_at_geometric_knots",
     acceleration_constraint="interpolated",
+    drawing_capture=None,
+    drawing_reuse=None,
 ):
-    """Analytically time checked edges without changing their geometric sweep."""
+    """Analytically time checked edges without changing their geometric sweep.
+
+    ``drawing_capture`` collects each retimed DRAW part in order. Supplying the
+    same list as ``drawing_reuse`` assembles a longer clock around those exact
+    polynomials instead of retiming them, so deposits predicted from a local
+    drawing clock remain those of the complete action.
+    """
     edges, elapsed, diagnostics = [], 0.0, []
+    reused = 0
     if drawing_clock not in {"quintic_stop_at_geometric_knots", "cubic_toppra"}:
         raise ValueError(f"Unsupported drawing clock: {drawing_clock}")
     if acceleration_constraint not in {"interpolated", "cubic_bernstein"}:
         raise ValueError(f"Unsupported acceleration constraint: {acceleration_constraint}")
-    for op in operations:
+    expanded = []
+    for operation in operations:
+        expanded.extend(
+            split_drawing_operations(operation) if operation.get("break_indices") else [operation]
+        )
+    for op in expanded:
         q = np.asarray(op["positions"], float)
         if op["kind"] == "DRAW" and drawing_clock == "cubic_toppra":
             points = [arm.robot.forward(joints, arm.flange_to_tcp)[:3, 3] for joints in q]
-            path = op.get("path")
-            if path is None:
-                path = make_path(q, points, interpolation="pchip", subdivisions=2)
-            result = retime_operation(
-                {"positions": q, "tcp_path_m": points},
-                arm.robot,
-                arm.flange_to_tcp,
-                velocity,
-                acceleration,
-                drawing_speed,
-                0.2,
-                sample_output=False,
-                path=path,
-                continuous_acceleration=acceleration_constraint == "cubic_bernstein",
-            )
-            pieces = clock_polynomials(
-                path, np.array(result["path_clock"]["s"]), np.array(result["path_clock"]["speeds"])
-            )
-            diagnostics.append(
-                {
-                    "stroke_id": op.get("stroke_id"),
-                    "time_scale_correction": result["time_scale_correction"],
-                    "retiming_method": result["retiming_method"],
-                    "retiming_fallback_reason": result["retiming_fallback_reason"],
-                    "bounds": result["bounds"],
-                    "acceleration_constraint": acceleration_constraint,
+            if drawing_reuse is not None:
+                if reused >= len(drawing_reuse) or not np.array_equal(
+                    drawing_reuse[reused]["positions"], q
+                ):
+                    raise ValueError("Retained drawing clock belongs to a different joint path")
+                timed = drawing_reuse[reused]
+                reused += 1
+            else:
+                path = op.get("path")
+                if path is None:
+                    path = make_path(q, points, interpolation="pchip", subdivisions=2)
+                result = retime_operation(
+                    {"positions": q, "tcp_path_m": points},
+                    arm.robot,
+                    arm.flange_to_tcp,
+                    velocity,
+                    acceleration,
+                    drawing_speed,
+                    0.2,
+                    sample_output=False,
+                    path=path,
+                    continuous_acceleration=acceleration_constraint == "cubic_bernstein",
+                )
+                timed = {
+                    "positions": q,
+                    "duration_s": result["duration_s"],
+                    "pieces": clock_polynomials(
+                        path,
+                        np.array(result["path_clock"]["s"]),
+                        np.array(result["path_clock"]["speeds"]),
+                    ),
+                    "diagnostic": {
+                        "stroke_id": op.get("stroke_id"),
+                        "time_scale_correction": result["time_scale_correction"],
+                        "retiming_method": result["retiming_method"],
+                        "retiming_fallback_reason": result["retiming_fallback_reason"],
+                        "bounds": result["bounds"],
+                        "acceleration_constraint": acceleration_constraint,
+                    },
                 }
-            )
+            if drawing_capture is not None:
+                drawing_capture.append(timed)
+            pieces, result = timed["pieces"], timed
+            diagnostics.append(timed["diagnostic"])
             for start, duration, polynomials in pieces:
                 normalized = [p(Polynomial([0, duration])) for p in polynomials]
                 first = np.array([p(0) for p in normalized])
@@ -356,6 +479,8 @@ def timed_path(
                 )
             )
             elapsed += duration
+    if drawing_reuse is not None and reused != len(drawing_reuse):
+        raise ValueError("Retained drawing clock has unused parts")
     result = ClockPath(edges)
     if diagnostics:
         result.metadata["drawing_timing"] = diagnostics

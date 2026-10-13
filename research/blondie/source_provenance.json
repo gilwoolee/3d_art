@@ -1,0 +1,154 @@
+{
+  "status": "PASSED",
+  "simulation_only": true,
+  "runs": [
+    {
+      "run": "runs/cube_sections_v1",
+      "scope": "saved complete schedule",
+      "inputs": {
+        "stroke_graph.json": "8502db5bc9ab0870ffca43cba7cc45799ee5c3f15777c31fd2d1b4f0151f1f44",
+        "offline_dual_arm_plan.json": "f97f33e75de12a7cd961715fd83488e5c6226cba85eb568534f843affb744ce8"
+      },
+      "audit": {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+          "status": "EXACT_INTERVAL_COVERAGE",
+          "sources": 12,
+          "represented_intervals": 12
+        },
+        "physical_sections": 12,
+        "physical_members": 12,
+        "shared_intervals": []
+      }
+    },
+    {
+      "run": "runs/prism_sections_v1",
+      "scope": "saved complete schedule",
+      "inputs": {
+        "stroke_graph.json": "7d3e67393cd96add43d9131653f6d857f7e3316713cd7d71ffb44830b125bf0f",
+        "offline_dual_arm_plan.json": "b8af71f7d38e2df94de58c83de6b5c24d4b5c5a600cd371aeef2060b59cd3a13"
+      },
+      "audit": {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+          "status": "EXACT_INTERVAL_COVERAGE",
+          "sources": 9,
+          "represented_intervals": 9
+        },
+        "physical_sections": 9,
+        "physical_members": 9,
+        "shared_intervals": []
+      }
+    },
+    {
+      "run": "runs/bottle_sections_v1",
+      "scope": "saved complete schedule",
+      "inputs": {
+        "stroke_graph.json": "fe5bcb5e7bb86a108b6857af6dccff4692eed1e2eb3b545c28dc3c8e6293dec4",
+        "offline_dual_arm_plan.json": "d575200e921f6aef413a4b54fe3eafa114a785e1448eb2dc94c857143c995805"
+      },
+      "audit": {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+          "status": "EXACT_INTERVAL_COVERAGE",
+          "sources": 8,
+          "represented_intervals": 28
+        },
+        "physical_sections": 28,
+        "physical_members": 28,
+        "shared_intervals": []
+      }
+    },
+    {
+      "run": "runs/torus_sections_v1",
+      "scope": "saved complete schedule",
+      "inputs": {
+        "stroke_graph.json": "6be66878755d23abea0695848c7263aec13595ec90734389ce4357925ba71236",
+        "offline_dual_arm_plan.json": "da87f631d3f25b0e4a2d6e45a8ec8b2e236a53e9e65a50708c6eaff9dae9d9b0"
+      },
+      "audit": {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+          "status": "EXACT_INTERVAL_COVERAGE",
+          "sources": 8,
+          "represented_intervals": 32
+        },
+        "physical_sections": 32,
+        "physical_members": 32,
+        "shared_intervals": []
+      }
+    },
+    {
+      "run": "runs/staged_regression_iterative_v1",
+      "scope": "saved complete schedule",
+      "inputs": {
+        "stroke_graph.json": "76b98875e801d33b82c8b6c97b2fdc24c2c3ea3dd86e6bb41b54fe7267b8a9bb",
+        "offline_dual_arm_plan.json": "ec146a78940d812d5ac2676b504a5a09989d076b035c8876db8b7136043ba216"
+      },
+      "audit": {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+          "status": "EXACT_INTERVAL_COVERAGE",
+          "sources": 2,
+          "represented_intervals": 3
+        },
+        "physical_sections": 3,
+        "physical_members": 3,
+        "shared_intervals": []
+      }
+    },
+    {
+      "run": "runs/interleaved_sections_v1",
+      "scope": "saved complete schedule",
+      "inputs": {
+        "stroke_graph.json": "945709a1cd5d99528680bf6debbf06990fcba1cb0eb93c84267ca27b1345bc06",
+        "offline_dual_arm_plan.json": "0a92ffd70cf3fa403d5c263e981ffe0185ef35ca22fff12a135dc41aee6d3cd7"
+      },
+      "audit": {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+          "status": "EXACT_INTERVAL_COVERAGE",
+          "sources": 2,
+          "represented_intervals": 3
+        },
+        "physical_sections": 3,
+        "physical_members": 3,
+        "shared_intervals": []
+      }
+    },
+    {
+      "run": "runs/palace_hybrid_v7",
+      "scope": "prepared sources only",
+      "inputs": {
+        "stroke_graph.json": "b8b2603b0efac17fec260cab5249f496b65268c119d27018c1a4df031169cdb0",
+        "construction_plan.json": "b54ff8dc0962274744000ea239c703ac9b7b37e284b0bec5d4a4635c75c5940e",
+        "style_selection.json": "4033dc77f55cb67dfc7ec45a5846a957a4027a89278822bf53861e614e46fdc3",
+        "wir3d_20.json": "7f2cf1c5de710e987966abf1a32e74b0f61524283f4c30708bfbd2eafeabc8ac"
+      },
+      "audit": {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+          "status": "EXACT_INTERVAL_COVERAGE",
+          "sources": 289,
+          "represented_intervals": 1219
+        },
+        "physical_sections": 1218,
+        "physical_members": 8950,
+        "shared_intervals": [
+          {
+            "parent_curve": "contour-3-51",
+            "source_interval": [
+              0.40483673374436147,
+              0.5416560565100249
+            ],
+            "stage": "framework",
+            "members": [
+              "member-04174-part0"
+            ],
+            "credited_after_section": "section-00370"
+          }
+        ]
+      }
+    }
+  ]
+}

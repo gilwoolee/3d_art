@@ -1,0 +1,17 @@
+{
+  "method": "backward_search_with_complete_framework",
+  "physical_geometry_identical": true,
+  "physical_graph_sha256": "20359d4dd99223cd917b355247d403b4269eb11209096a1a8c0833bdd6bf3777",
+  "runs": {
+    "runs/palace_hybrid_v7": {
+      "graph_sha256": "b8b2603b0efac17fec260cab5249f496b65268c119d27018c1a4df031169cdb0",
+      "construction_sha256": "b54ff8dc0962274744000ea239c703ac9b7b37e284b0bec5d4a4635c75c5940e"
+    },
+    "runs/palace_hybrid_backward_v1": {
+      "graph_sha256": "91e866531a758365830d1148919b14320e35c3f6d757fe5e6f8876ff703ac848",
+      "construction_sha256": "b54ff8dc0962274744000ea239c703ac9b7b37e284b0bec5d4a4635c75c5940e"
+    }
+  },
+  "simulation_only": true,
+  "robot_feasibility": "unverified"
+}

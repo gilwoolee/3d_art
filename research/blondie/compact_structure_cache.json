@@ -1,0 +1,49 @@
+{
+  "status": "PASS",
+  "simulation_only": true,
+  "cases": [
+    {
+      "mode": "forward",
+      "run": "runs/staged_compact_cache_forward_v1",
+      "validation": "research/blondie/staged_compact_cache_forward.json",
+      "status": "PASS",
+      "compact_prefix_entries": 2,
+      "full_graph_geometry_retained": true,
+      "checked_intervals": 545,
+      "regression": {}
+    },
+    {
+      "mode": "backward",
+      "run": "runs/staged_compact_cache_backward_v1",
+      "validation": "research/blondie/staged_compact_cache_backward.json",
+      "status": "PASS",
+      "compact_prefix_entries": 0,
+      "full_graph_geometry_retained": true,
+      "checked_intervals": 590,
+      "regression": {
+        "status": "FOUND",
+        "attempts": 3,
+        "structural_states": 4,
+        "forward_stiffness_guide": {
+          "section-00000": 0,
+          "section-00002": 1,
+          "section-00001": 2
+        },
+        "forward_guide_complete": true,
+        "forward_guide_seconds": 0.004801754999789409,
+        "failures": []
+      }
+    }
+  ],
+  "inputs": {
+    "scripts/check_shared_source.py": "bfef6c818b34d2a7ddc8e63390ebbcc83ed1be1a36fb4ea1ca5dac37ccbe57e2",
+    "src/pen_art/planning/section_build.py": "8a5964e72cefa99db745e706fd0a756aba448805159ddc6d4b685e0a87078b8c",
+    "src/pen_art/planning/regression.py": "89a94c2121e2da620173322687b5b3790316b8f8b1fbe7939365b280a78569ff",
+    "runs/staged_compact_cache_forward_v1/cache_check_driver.py": "47ccc035b5a8e605001197e8346716a03dd4a1c112df31ace3f522ee10b8f4de"
+  },
+  "reproduction_driver": {
+    "path": "research/blondie/check_compact_structure_cache.py",
+    "sha256": "b629ae189223e88134ee57557ccc5a83e81f08c40302ccf2ec9039ed8ab61b40",
+    "note": "Formatted archive of executed driver; snapshot in inputs preserves exact executed bytes."
+  }
+}

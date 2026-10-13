@@ -1,6 +1,11 @@
 schema_version: 1
 # Development parameters only; the pen/mount have not been measured.
 simulation_only: true
+wireprint:
+  # Geometric descent angle from horizontal, not tool tilt.
+  maximum_descent_angle_deg: 27.0
+  layer_height: 0.01
+  zigzag_spacing: 0.025
 graph:
   strand_diameter_m: 0.001
   junction_tolerance_m: 0.00075
@@ -34,7 +39,10 @@ process:
   minimum_curvature_radius_m: null
   cooled_anchor_age_s: null
   # Timing assumptions only, not measurements or pen specifications.
-  nominal_speed_m_s: 0.003
+  nominal_speed_m_s: 0.030
+  vertex_cooling_s: 1.0
+  vertex_cooling_policy: wireprint_nonhorizontal_edge_end
+  vertex_feed_policy: stop_with_lag_then_restart
   join_s: 1.0
   stop_lag_s: 0.5
   start_lag_s: 0.5

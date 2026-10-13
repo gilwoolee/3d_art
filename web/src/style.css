@@ -24,6 +24,12 @@
 .setup-details{border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:18px}
 .setup-details summary{font-size:11px;color:var(--muted);cursor:pointer}
 .mode-button{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:4px;background:#edf1e8;font-size:11px;margin-bottom:18px}
+.toolbar:has(#robot-play:not(.hidden)){height:auto;min-height:64px;padding:10px 16px;flex-wrap:wrap}
+.toolbar:has(#robot-play:not(.hidden)) #frame-label{flex:1}
+#robot-play{width:auto;min-height:44px;margin:0;padding:12px 22px;background:#295d48;border-color:#295d48;color:#fff;font-size:14px;font-weight:600;white-space:normal}
+#robot-play:hover{background:#214d3b}
+#robot-play:disabled{cursor:wait;background:#66786d;border-color:#66786d}
+.playback-load{padding:12px 16px;border-bottom:1px solid var(--line);background:#e9ede3;color:#295d48;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .setup-details[open] summary{margin-bottom:20px}
 @media(min-width:651px){.main[data-stage="motion"] .inspector{max-height:calc(100vh - 235px);overflow-y:auto;scrollbar-gutter:stable}}
 @media(max-width:650px){.main[data-stage="motion"] #metrics{grid-column:1/-1}}
@@ -35,3 +41,6 @@
 .planner-checkpoint{padding:12px;margin-bottom:16px;border:1px solid var(--line);border-radius:5px;background:#edf1e8;font-size:11px}.planner-checkpoint p{font-size:10px;line-height:1.6;color:var(--muted);margin:8px 0}.planner-checkpoint a{font-size:10px}
 
 .mount-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px;margin:14px 0}.mount-table th,.mount-table td{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:anywhere}.mount-table th{font-weight:500}.mount-table th:first-child{width:37%}
+#run-scope{max-width:170px}
+.reuse-stats{display:flex;flex-wrap:wrap;gap:12px 28px;padding:16px 0;border-block:1px solid var(--line);font-size:12px;color:var(--muted)}.reuse-stats strong{display:block;font-family:'IBM Plex Mono',monospace;font-size:22px;color:var(--ink);margin-bottom:5px}#motion-reuse-panel details{margin:20px 0}#motion-reuse-panel summary{cursor:pointer;font-size:12px}#motion-reuse-panel h2:not(:first-child){margin-top:28px}
+@media(max-width:650px){.topbar{height:auto;min-height:64px;flex-wrap:wrap;gap:10px;padding:12px 18px}.top-right{width:100%;min-width:0}.top-right select{min-width:0;max-width:none}#run-scope{flex:0 0 160px}#run-select{flex:1;width:0}}

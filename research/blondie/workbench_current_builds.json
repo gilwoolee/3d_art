@@ -1,0 +1,182 @@
+{
+  "current_runs": [
+    "cube_stl_forward_turntable_v1",
+    "bottle_hybrid_forward_turntable_v1",
+    "palace_turntable_v1"
+  ],
+  "changes": [
+    {
+      "run": "palace_15cm_one_arm_reordered",
+      "before": {
+        "name": "Palace wireframe \u00b7 right-angle pen",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Palace wireframe \u00b7 right-angle pen",
+        "workbench_primary": false
+      }
+    },
+    {
+      "run": "palace_restart_turntable_v1",
+      "before": {
+        "name": "Palace + all 18 selected art curves, one exact supported restart",
+        "workbench_primary": null
+      },
+      "after": {
+        "name": "Palace \u00b7 restart trial",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "bottle_hybrid_restart_turntable_v1",
+      "before": {
+        "name": "WirePrint bottle + all 29 WIR3D curves, one supported restart",
+        "workbench_primary": null
+      },
+      "after": {
+        "name": "Bottle \u00b7 restart trial",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "palace_15cm_one_arm",
+      "before": {
+        "name": "Palace wireframe \u00b7 right-angle pen",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Palace wireframe \u00b7 right-angle pen",
+        "workbench_primary": false
+      }
+    },
+    {
+      "run": "palace_turntable_v1",
+      "before": {
+        "name": "Meshy_AI_Palace_Reflections_1011014238_texture WirePrint \u00b7 one-arm \u00b7 one-arm",
+        "workbench_primary": null
+      },
+      "after": {
+        "name": "Palace \u00b7 WirePrint + WIR3D",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "bottle_hybrid_turntable_v1",
+      "before": {
+        "name": "Bottle WirePrint + WIR3D \u00b7 one-arm \u00b7 one-arm",
+        "workbench_primary": null
+      },
+      "after": {
+        "name": "Bottle \u00b7 WirePrint + WIR3D",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "cube_stl_turntable_v2",
+      "before": {
+        "name": "Solid cube STL \u2192 WirePrint \u2192 robot planning",
+        "workbench_primary": null
+      },
+      "after": {
+        "name": "Cube \u00b7 WirePrint",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "bottle_hybrid_turntable_v1",
+      "before": {
+        "name": "Bottle \u00b7 WirePrint + WIR3D",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Bottle \u00b7 WirePrint + WIR3D",
+        "workbench_primary": false
+      }
+    },
+    {
+      "run": "bottle_hybrid_restart_turntable_v1",
+      "before": {
+        "name": "Bottle \u00b7 restart trial",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Bottle \u00b7 restart trial",
+        "workbench_primary": false
+      }
+    },
+    {
+      "run": "bottle_hybrid_forward_turntable_v1",
+      "before": {
+        "name": "Bottle WirePrint + WIR3D \u00b7 one-arm \u00b7 one-arm",
+        "workbench_primary": null
+      },
+      "after": {
+        "name": "Bottle \u00b7 actual-material forward trial",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "bottle_hybrid_forward_turntable_v1",
+      "before": {
+        "name": "Bottle \u00b7 actual-material forward trial",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Bottle \u00b7 WirePrint + WIR3D",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "cube_stl_forward_turntable_v1",
+      "before": {
+        "name": "model_mm WirePrint \u00b7 one-arm \u00b7 one-arm \u00b7 one-arm",
+        "workbench_primary": null
+      },
+      "after": {
+        "name": "Cube \u00b7 WirePrint",
+        "workbench_primary": true
+      }
+    },
+    {
+      "run": "cube_stl_turntable_v2",
+      "before": {
+        "name": "Cube \u00b7 WirePrint",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Cube \u00b7 WirePrint",
+        "workbench_primary": false
+      }
+    },
+    {
+      "run": "palace_restart_turntable_v1",
+      "before": {
+        "name": "Palace \u00b7 restart trial",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Palace \u00b7 restart trial",
+        "workbench_primary": false
+      }
+    },
+    {
+      "run": "palace_turntable_v1",
+      "before": {
+        "name": "Palace \u00b7 WirePrint + WIR3D",
+        "workbench_primary": true
+      },
+      "after": {
+        "name": "Palace \u00b7 WirePrint + WIR3D",
+        "workbench_primary": true
+      }
+    }
+  ],
+  "scope": "Display grouping and labels only; no source geometry, plans, or historical artifacts removed",
+  "previous_current_runs": [
+    "cube_stl_turntable_v2",
+    "bottle_hybrid_forward_turntable_v1",
+    "palace_turntable_v1",
+    "palace_restart_turntable_v1"
+  ],
+  "reason": "One representative per object in the default selector. Opening an older direct link adds only that run, not the entire archive."
+}

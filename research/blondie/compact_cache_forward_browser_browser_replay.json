@@ -1,0 +1,33 @@
+{
+  "status": "PASSED_BROWSER_REPLAY",
+  "run": "staged_compact_cache_forward_v1",
+  "rate": 10,
+  "horizon_s": 113.26918983808696,
+  "wall_seconds": 13.888,
+  "observed_times_s": [
+    10.0029999999888,
+    20.0009999999963,
+    30.0009999999965,
+    38.2719999999928,
+    50.3569999999931,
+    61.0009999999971,
+    71.4669999999936,
+    81.6890000000049,
+    91.0019999999939,
+    101.000999999997,
+    112.015999999995,
+    113.269189838087
+  ],
+  "errors": [],
+  "final_clock": "1.9 min / 1.9 min",
+  "badge": "One-arm geometric replay passed",
+  "inputs": {
+    "runs/staged_compact_cache_forward_v1/offline_dual_arm_plan.json": "0e8acc69800c861e18be72403a4a6b5c495fb842e3d435f5e944165a1b3cd86f",
+    "runs/staged_compact_cache_forward_v1/offline_dual_arm_validation.json": "774d512ea25ea333ca6eff8705b59da973c7a69e07b3ab42a7fc03f6aeb11b6b"
+  },
+  "screenshots": [
+    "/home/gilwoo/Workspace/3d_art/research/blondie/compact_cache_forward_browser_full_cell.png",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/compact_cache_forward_browser_completed.png"
+  ],
+  "simulation_only": true
+}

@@ -1,6 +1,7 @@
 import './style.css';
-import { Viewer, type Curve, type Junction, type Deformation, type RobotRig, type ToolModel, type CellArmView } from './viewer';
-import { timedPose, coordinatedPose, coordinatedTimeline, replayProgressLabel, type TimedSchedule, type CoordinatedPlan, type CoordinatedAction } from './timing';
+import { Viewer, curveColors, displayRole, type Curve, type Junction, type Deformation, type RobotRig, type ToolModel, type CellArmView, type BuildRiser } from './viewer';
+import { timedPose, coordinatedPose, coordinatedTimeline, replayProgressLabel, replayState, playbackReady, tableAngleAt, type IndexedTable, type TimedSchedule, type CoordinatedPlan, type CoordinatedAction } from './timing';
+import { renderMotionReuse, type MotionReuse } from './motion-reuse';
 
 interface SmoothAudit {
   status:string; requested_operations:number; source_schedule_sha256:string;
@@ -11,7 +12,7 @@ interface SmoothAudit {
 }
 
 interface Stage { status: string; artifact?:string; message?: string; budgets?: number[]; curve_count?:number }
-interface CellConfig { drawing_pen_tilt_deg?:number; setup_description?:string }
+interface CellConfig { drawing_pen_tilt_deg?:number; drawing_orientation_policy?:string; setup_description?:string }
 interface MountAssessment {
   status:string;limitations:string[];drawing_pen_tilt_deg?:number;
   candidates:{id:string;label:string;world_from_base:Record<string,number[][]>;
@@ -20,8 +21,9 @@ interface MountAssessment {
     pose_pairs:{samples:number[];positions:Record<string,number[]>|null}[];clear_pair_count:number}[];
 }
 interface CellManifest {
+  turntable?:IndexedTable;
   world_from_build:number[][]; placement_confirmed:boolean; limitations:string[];
-  environment:{table_z_m:number;platform_size_m:number[]};
+  environment:{table_z_m:number;platform_size_m:number[];platform_top_z_m?:number;build_riser?:BuildRiser};
   initial_inter_arm_check:{status:string}|null;
   arms:{id:string;robot_manifest:string;robot_visual:string;world_from_base:number[][];
     flange_to_tcp:number[][];initial_positions:number[];tool_model:ToolModel;
@@ -82,7 +84,7 @@ interface GeometricPartition {
   source_length_m:number;partitioned_length_m:number;
   construction_status:string;construction_actions:number;
 }
-interface Run { artifact_revision?:string; id: string; name: string; created_at: string; updated_at: string; stages: Record<string, Stage>; artifacts: string[]; cell_source_run?:string; workbench_primary?:boolean; drawing_pen_tilt_deg?:number; resource_mode?:'single'|'dual' }
+interface Run { artifact_revision?:string; id: string; name: string; created_at: string; updated_at: string; stages: Record<string, Stage>; artifacts: string[]; cell_source_run?:string; workbench_primary?:boolean; workbench_collection?:string; drawing_pen_tilt_deg?:number; resource_mode?:'single'|'dual' }
 interface CollisionRow { id:string; status:string; tracking_status?:string; position_error_bound_m?:number; orientation_error_bound_rad?:number; witnesses:{edge_index:number;alpha:number;positions:number[];pairs:{first:string;second:string}[]}[] }
 interface CollisionAudit {tool_model?:ToolModel;source_motion_sha256:string; status:string; counts:Record<string,number>; config:{clearance_m:number}; strokes:CollisionRow[]}
 interface DepartureAttempt {direction:number[];status:string;failed_sample?:number;collision_evidence?:{scope:string;status:string;pairs:{first:string;second:string}[]}[]}
@@ -106,7 +108,7 @@ interface StrokeGraph { edges: Curve[]; nodes: Junction[]; source_method: string
 interface Structure { modeled_pass:boolean; maximum_displacement_m?:number; maximum_stress_pa?:number; resting_com_inside_contacts?:boolean; failure?:string; edges:Deformation[] }
 interface ProcessRow { id:string; modeled_pass:boolean; requires_calibration:boolean; directions:{reverse:boolean;failures:string[];advisories:string[]}[] }
 interface ProcessScreen { acceptable_actions:number; rejected_actions:number; calibration_required_actions:number; edges:ProcessRow[]; settings:Record<string,number|null|boolean|string>; timing_assumption:{speed_m_s:number;deposition_only_s:number} }
-interface BuildAction extends Curve { start:string; end:string; source_stroke:string; depends_on:number[]; existing_join_nodes:string[]; members:string[] }
+interface BuildAction extends Curve { parent_curve?:string; stage?:string; junction_visits?:{node:string;segment_boundary:number}[]; start:string; end:string; source_stroke:string; depends_on:number[]; existing_join_nodes:string[]; members:string[] }
 interface Construction { status:string; actions:BuildAction[]; total_length_m:number; states:number }
 
 const stages = [
@@ -137,30 +139,67 @@ let playback: ReturnType<typeof setInterval> | null = null;
 let cellReferenceVisible=false;
 let selectedCellCandidate:string|null=null;
 let selectedCellWaypoint=0;
+let allRuns:Run[]=[];
+let runScope:'current'|'reuse'|'all'='current';
 let motionMode:'drawings'|'sequence' = 'drawings';
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const escape = (s: unknown) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const number = (n: number) => new Intl.NumberFormat('en-US').format(n);
 async function json<T>(url: string): Promise<T> { const response = await fetch(url); if (!response.ok) throw new Error(`${response.status}: ${url}`); return response.json(); }
+function playbackLoading(message:string) {
+  const button=$<HTMLButtonElement>('#robot-play');
+  button.classList.remove('hidden');button.disabled=true;button.textContent='Loading playback…';
+  $('#playback-load').classList.remove('hidden');$('#playback-load').textContent=message;
+}
+async function artifactText(response:Response,progress:(received:number,total:number|null)=>void) {
+  const length=Number(response.headers.get('content-length'));
+  const total=Number.isFinite(length)&&length>0?length:null;
+  if(!response.body)return response.text();
+  const reader=response.body.getReader(),decoder=new TextDecoder();
+  const chunks:string[]=[];let received=0,lastUpdate=0;
+  progress(0,total);
+  while(true) {
+    const {value,done}=await reader.read();
+    if(done)break;
+    received+=value.byteLength;chunks.push(decoder.decode(value,{stream:true}));
+    if(performance.now()-lastUpdate>100){progress(received,total);lastUpdate=performance.now();}
+  }
+  chunks.push(decoder.decode());progress(received,total);
+  return chunks.join('');
+}
 async function checkedArtifact<T>(file:string,onDigest?:(digest:string)=>void):Promise<T> {
   const artifactRun=encodeURIComponent(run.id);
+  const loadRequest=stageRequest;
+  const tracked=['dual_arm_plan.json','dual_arm_repair_plan.json','offline_dual_arm_plan.json',
+    'dual_arm_validation.json','dual_arm_repair_validation.json','offline_dual_arm_validation.json'].includes(file)
+    && ['cell','motion','timing','validation'].includes(activeStage);
+  const label=file.endsWith('_validation.json')?'validation report':'motion plan';
+  const status=(message:string)=>{if(tracked&&loadRequest===stageRequest)playbackLoading(message);};
   // A running planner may atomically replace a checkpoint between these reads.
   for(let attempt=0;attempt<3;attempt++) {
+    status(`Starting ${label} download…`);
     const response=await fetch(`/api/runs/${artifactRun}/artifacts/${file}`);
     if(!response.ok)throw new Error(`Could not load ${file}`);
-    const raw=await response.text();
+    const raw=tracked?await artifactText(response,(received,total)=>{
+      const downloaded=(received/1e6).toFixed(1);
+      status(`Downloading ${label}: ${downloaded}${total?` / ${(total/1e6).toFixed(1)}`:''} MB${total?` (${Math.min(100,Math.floor(received/total*100))}%)`:''}`);
+    }):await response.text();
+    status(`Downloaded ${label}. Checking saved evidence…`);
     const validity=await json<{current:boolean;artifact_sha256:string;stale_inputs:string[]}>(`/api/runs/${artifactRun}/checks/${file}`);
     const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw)))].map(v=>v.toString(16).padStart(2,'0')).join('');
     if(digest!==validity.artifact_sha256)continue;
     if(!validity.current)throw new Error(`Artifact inputs changed: ${validity.stale_inputs.join(', ')}`);
     onDigest?.(digest);
+    status(`Checked ${label}. Preparing the full playback…`);
+    // Let the status paint before parsing a large local JSON payload.
+    if(tracked)await new Promise<void>(resolve=>setTimeout(resolve,0));
     return JSON.parse(raw) as T;
   }
   throw new Error('The planner is updating this result. Refresh to load its next checkpoint.');
 }
 function url(file: string) { return `/api/runs/${encodeURIComponent(run.id)}/artifacts/${file}`; }
 function statusText(status: string) { return ({complete:'Available',partial:'Partial result',pending:'Not generated',running:'Processing',awaiting_compute:'GPU job prepared',failed:'Needs attention'} as Record<string,string>)[status] ?? status; }
-function runLabel(value:Run) { return value.name+(value.resource_mode==='single'?' · one active arm':'')+((value.drawing_pen_tilt_deg??0)>0?` · ${value.drawing_pen_tilt_deg}° ${value.resource_mode==='single'?'initial pen lean':'inward pen tilt'}`:''); }
+function runLabel(value:Run) { if(value.workbench_primary)return value.name; return value.name+(value.resource_mode==='single'?' · one active arm':'')+((value.drawing_pen_tilt_deg??0)>0?` · ${value.drawing_pen_tilt_deg}° ${'initial pen lean'}`:''); }
 function curveStageKey() { return method === 'selected' ? 'selection' : method === 'wir3d' ? 'wir3d' : 'geometric'; }
 function defaultCurveMethod(value:Run) {
   if(value.artifacts.includes('selected_candidates.json') && (value.stages.selection?.curve_count ?? 0)>0) return 'selected';
@@ -169,7 +208,7 @@ function defaultCurveMethod(value:Run) {
 }
 
 $('#app').innerHTML = `
-<header class="topbar"><div class="brand"><svg viewBox="0 0 30 35" fill="none" aria-hidden="true"><path d="M4 28V12l11-8 11 8v16l-11 5L4 28Z M4 12l11 7 11-7 M15 19v14 M4 28l11-9 11 9" stroke="#526e59" stroke-width="1.3"/></svg>pen<span>/</span>art</div><div class="top-right"><span class="local"><i class="dot"></i>Local workbench</span><select id="run-select" aria-label="Model run"></select></div></header>
+<header class="topbar"><div class="brand"><svg viewBox="0 0 30 35" fill="none" aria-hidden="true"><path d="M4 28V12l11-8 11 8v16l-11 5L4 28Z M4 12l11 7 11-7 M15 19v14 M4 28l11-9 11 9" stroke="#526e59" stroke-width="1.3"/></svg>pen<span>/</span>art</div><div class="top-right"><span class="local"><i class="dot"></i>Local workbench</span><select id="run-scope" aria-label="Run collection"></select><select id="run-select" aria-label="Model run"></select></div></header>
 <div id="error" class="error-banner hidden" role="alert"></div>
 <div class="layout"><aside class="sidebar"><div class="eyebrow">The pipeline</div><nav id="stage-nav" style="display:contents"></nav><div class="sidebar-footer"><strong>Spatial strokes. Shared workspace.</strong>Inspect every transformation<br>from mesh to sculpture.</div></aside>
 <main class="main"><div class="heading"><div><div class="eyebrow" id="breadcrumb">Model / 01</div><h1 id="title"></h1><p id="subtitle"></p></div><span id="badge" class="badge">Available</span></div>
@@ -186,6 +225,7 @@ const viewer = new Viewer($('#viewport'), curve => {
   $('#selection').innerHTML = curve ? `<strong>${escape(curve.id)}</strong><br>${(curve.length_m * 1000).toFixed(1)} mm of stroke<br>${curve.segments.length} Bézier pieces<br>${escape(curve.role ?? 'Candidate curve')}<br>${curve.closed ? 'Closed contour' : 'Open curve'}${row ? `<br><br>${row.modeled_pass ? 'No geometric screen failure; pen capability and construction order remain unverified.' : failures.map(f=>escape(f.toLowerCase().replaceAll('_',' '))).join('<br>')}` : ''}` : 'Click a stroke to inspect it.';
 });
 $('#frame-label').insertAdjacentHTML('afterend','<button id="robot-play" class="mode-button hidden">Play robot motion</button>');
+$('.toolbar').insertAdjacentHTML('afterend','<div id="playback-load" class="playback-load hidden" role="status" aria-live="polite"></div>');
 $('.stage-summary').insertAdjacentHTML('afterend', '<section id="reference-panel" class="reference-panel hidden"></section>');
 $('.stage-summary').insertAdjacentHTML('afterend', '<section id="criteria-panel" class="criteria-panel hidden"></section>');
 $('.stage-summary').insertAdjacentHTML('afterend', '<section id="comparison-panel" class="comparison-panel hidden"></section>');
@@ -193,6 +233,7 @@ $('.stage-summary').insertAdjacentHTML('afterend', '<section id="selection-evide
 $('#viewport').insertAdjacentHTML('beforeend', '<figure id="source-thumbnail" class="source-thumbnail hidden"><img alt="Original textured model reference"><figcaption>Original model</figcaption></figure>');
 $('.stage-summary').insertAdjacentHTML('afterend', '<section id="timing-panel" class="comparison-panel hidden"></section>');
 $('.stage-summary').insertAdjacentHTML('afterend', '<section id="audit-panel" class="comparison-panel hidden"></section>');
+$('.stage-summary').insertAdjacentHTML('afterend', '<section id="motion-reuse-panel" class="comparison-panel hidden"></section>');
 $('.inspector').insertAdjacentHTML('beforeend', '<section id="graph-controls" class="panel hidden"></section>');
 $('#viewport').insertAdjacentHTML('beforeend', '<div id="paired-labels" class="paired-labels hidden"><span>Original textured model</span><span>Candidate strokes</span></div>');
 $('#overlay-control').insertAdjacentHTML('beforebegin', '<div class="control hidden" id="paired-control"><label>Compare with original <input type="checkbox" id="paired" checked></label></div>');
@@ -296,7 +337,16 @@ async function loadModel(mode: string) {
 
 async function selectStage(id: string) {
   stageLoads++;
+  const selectedRun=run.id;
   try { await renderStage(id); }
+  catch(error) {
+    if(run.id===selectedRun&&activeStage===id&&['cell','motion','timing','validation'].includes(id)) {
+      const button=$<HTMLButtonElement>('#robot-play');
+      button.classList.remove('hidden');button.disabled=true;button.textContent='Playback unavailable';
+      $('#playback-load').classList.remove('hidden');$('#playback-load').textContent=String(error);
+    }
+    throw error;
+  }
   finally { stageLoads--; }
 }
 
@@ -305,9 +355,15 @@ async function renderStage(id: string) {
   viewer.camera.zoom=1;
   if (playback) { clearInterval(playback); playback = null; }
   $('#robot-play').classList.add('hidden');
+  $<HTMLButtonElement>('#robot-play').disabled=false;
+  $('#playback-load').classList.add('hidden');
   $<HTMLButtonElement>('#robot-play').onclick=null;
   const request = ++stageRequest;
   activeStage = id;
+  const selectedUrl=new URL(location.href);
+  selectedUrl.searchParams.set('run',run.id);
+  selectedUrl.searchParams.set('stage',id);
+  history.replaceState(null,'',selectedUrl);
   $('#comparison-panel').classList.add('hidden');
   $('#selection-evidence').classList.add('hidden');
   $('#timing-panel').classList.add('hidden');
@@ -354,6 +410,7 @@ async function renderStage(id: string) {
   if (id === 'construction') $('#count-control').classList.add('hidden');
   $('#graph-controls').classList.add('hidden');
   $('#criteria-panel').classList.add('hidden');
+  $('#motion-reuse-panel').classList.add('hidden');
   processRows.clear();
   viewer.setCurves([]);
   viewer.setPlatform();
@@ -369,11 +426,14 @@ async function renderStage(id: string) {
     if (request !== stageRequest) return;
   }
   if(['cell','motion','timing','validation'].includes(id) && run.artifacts.includes('cell_manifest.json')) {
+    playbackLoading('Loading robot setup and saved playback files…');
     ++modelRequest;$('#loader').classList.add('hidden');
     const cell=await checkedArtifact<CellManifest>('cell_manifest.json');
     const cellConfig=await checkedArtifact<CellConfig>('cell_config.json');
     const penTilt=cellConfig.drawing_pen_tilt_deg??0;
-    const penAngleLabel=penTilt===0?'Vertical':`${penTilt.toFixed(0)}° toward build center`;
+    const penAngleLabel=penTilt===0?'Vertical':cellConfig.drawing_orientation_policy==='outward_radial'
+      ? `${penTilt.toFixed(0)}° outward body lean · nozzle inward/down`
+      : `${penTilt.toFixed(0)}° toward build center`;
     const arms:CellArmView[]=await Promise.all(cell.arms.map(async arm=>({
       ...arm,rig:await json<RobotRig>(url(arm.robot_manifest)),url:url(arm.robot_visual),
     })));
@@ -382,7 +442,8 @@ async function renderStage(id: string) {
     if(request!==stageRequest)return;
     displayedModel='cell';
     const origin=cell.world_from_build.map(row=>row[3]);
-    viewer.setPlatform(origin.slice(0,2),origin[2],cell.environment.table_z_m,...cell.environment.platform_size_m as [number,number]);
+    viewer.setPlatform(origin.slice(0,2),cell.environment.platform_top_z_m??origin[2],cell.environment.table_z_m,...cell.environment.platform_size_m as [number,number],cell.environment.build_riser);
+    if(cell.turntable)viewer.setTurntable(cell.turntable,cell.environment.build_riser);
     $('#frame-label').textContent='Shared world frame · meters';
     $('#badge').textContent=`${arms.length===1?'One-arm':'Two-arm'} setup · provisional`;
     $('#metrics').innerHTML=`<h2>${arms.length===1?'One robot arm':'Two independent arms'}</h2>${metric('Arm count',String(arms.length))}${metric('Placement',cell.placement_confirmed?'Measured':'Development assumption')}${metric('Initial inter-arm clearance',cell.initial_inter_arm_check?.status==='CERTIFIED_INTER_ARM_INTERVAL'?'Clear at initial poses':escape(cell.initial_inter_arm_check?.status.replaceAll('_',' ')??'Not applicable'))}<p id="cell-setup-scope" class="description">This setup snapshot checks the imported arm meshes. Staged start poses and timed trajectories are checked separately.</p>${cell.arms.map((arm,i)=>`<h2>${escape(arm.id)}</h2>${metric('Tip marker',i===0?'Blue':'Bronze')}${metric('Base XYZ',arm.world_from_base.slice(0,3).map(row=>row[3].toFixed(2)).join(', ')+' m')}${metric('Pen/mount bodies',arm.tool_model.configured?'Configured':'Not supplied')}${metric('Initial static contacts',String(arm.initial_static_contacts.length))}`).join('')}<a class="download" href="${url('cell_manifest.json')}" target="_blank">Open shared cell manifest ↗</a>`;
@@ -390,7 +451,7 @@ async function renderStage(id: string) {
     $('#input-summary').textContent=arms.length===1?'One robot description, the pen-tip transform and a shared build frame.':'Two robot descriptions, individual tool transforms and one shared build frame.';
     $('#output-summary').textContent=`${arms.length===1?'One-arm':'Two-arm'} kinematic and initial-clearance preview. No task assignment yet.`;
     $('#next-summary').textContent=arms.length===1?'Plan the complete stroke order, pen orientation and collision-free motions.':'Search per-arm stroke alternatives, assignments and collision-free overlapping trajectories.';
-    $('#legend').innerHTML=arms.map((arm,i)=>`<span><i style="background:${i===0?'#327aa0':'#c0813f'}"></i>Arm ${i+1} tip</span>`).join('')+'<span>Reference shape · 15 cm</span>';
+    $('#legend').innerHTML=arms.map((arm,i)=>`<span><i style="background:${i===0?'#327aa0':'#c0813f'}"></i>Arm ${i+1} tip</span>`).join('')+`<span>Reference shape · ${(manifest.max_extent_m*100).toFixed(1)} cm</span>`;
     const setupMetrics=$('#metrics').innerHTML;
     const unavailable:string[]=[];
     async function optionalResult<T>(file:string,label:string,onDigest?:(digest:string)=>void):Promise<T|null> {
@@ -444,6 +505,7 @@ async function renderStage(id: string) {
     }
     availablePlans.sort((a,b)=>Number(b.file_name==='offline_dual_arm_plan.json')-Number(a.file_name==='offline_dual_arm_plan.json') || b.completed_strokes-a.completed_strokes || a.modeled_duration_s-b.modeled_duration_s);
     const plan=availablePlans[0]??null;
+    const motionReuse=await optionalResult<MotionReuse>('viewer_motion_reuse.json','Motion cache evidence');
     if(allocation?.motion_preparation&&plan?.file_name==='offline_dual_arm_plan.json'){
       allocation.motion_preparation.replay=plan.replay;
       allocation.motion_preparation.replay_in_progress=plan.replay_in_progress;
@@ -453,12 +515,15 @@ async function renderStage(id: string) {
       catch(error){console.warn('Comparison unavailable or stale',error);}
     }
     if(request!==stageRequest)return;
-    const options=[...(restart?[['restarts','One-arm restart trial']]:[]),...(mountAssessment?[['mounting','Base mounting assessment']]:[]),...(partition?[['partition','Structural work regions']]:[]),...(allocation?[['allocation','Offline allocation']]:[]),...(allocationProblem?.precedence_modes?.length&&construction?[['material-order','Material ordering constraints']]:[]),...(orientationProbe?[['orientation','Pen-angle diagnostic']]:[]),...(construction?[['scale','Size and speed study']]:[]),...(allocation?.motion_preparation?.motions.length?[['prepared','Selected full motions']]:[]),...(candidates?[['candidates','Fixed drawing paths']]:[]),...(plan?[['schedule',!plan.replay_in_progress&&plan.replay?.status==='CERTIFIED_GEOMETRIC_REPLAY'?'Checked motion replay':plan.full_schedule?'Full schedule · validation pending or rejected':'Earlier checked prefix']]:[])];
+    const options=[...(restart?[['restarts','One-arm restart trial']]:[]),...(mountAssessment?[['mounting','Base mounting assessment']]:[]),...(partition?[['partition','Structural work regions']]:[]),...(allocation?[['allocation','Offline allocation']]:[]),...(allocationProblem?.precedence_modes?.length&&construction?[['material-order','Material ordering constraints']]:[]),...(orientationProbe?[['orientation','Pen-angle diagnostic']]:[]),...(construction?[['scale','Size and speed study']]:[]),...(allocation?.motion_preparation?.motions.length?[['prepared','Selected full motions']]:[]),...(candidates?[['candidates','Fixed drawing paths']]:[]),...(plan?[['schedule',!plan.replay_in_progress&&replayState(plan)!=='unverified'?(replayState(plan)==='full'?'Checked motion replay':'Checked prefix replay'):plan.full_schedule?'Full schedule · validation pending or rejected':'Earlier checked prefix']]:[])];
     const show=(mode:string)=>{
       if(playback){clearInterval(playback);playback=null;}
       $('#robot-play').classList.add('hidden');
+      $<HTMLButtonElement>('#robot-play').disabled=false;
+      $('#playback-load').classList.add('hidden');
       $<HTMLButtonElement>('#robot-play').onclick=null;
       viewer.clearSequence();$('#timing-panel').classList.add('hidden');
+      $('#motion-reuse-panel').classList.add('hidden');
       viewer.camera.zoom=1;
       $('#frame-label').textContent='Shared world frame · meters';
       $('#scale-label').textContent=`Object: ${manifest.bounds_m[1].map((v,i)=>((v-manifest.bounds_m[0][i])*100).toFixed(1)).join(' × ')} cm`;
@@ -497,14 +562,19 @@ async function renderStage(id: string) {
       else if(mode==='schedule'&&plan){
         $('#title').textContent=id==='validation'?'Replay the saved two-arm build.':'Coordinate two pens on one clock.';
         $('#subtitle').textContent='Inspect simultaneous robot motion, automatic joins, feed commands and the checked construction prefix.';
-        renderCellSchedule(plan,arms);
+        renderCellSchedule(plan,arms,motionReuse);
       }
       else if(candidates)renderCellCandidates(candidates,arms);
+      if($<HTMLButtonElement>('#robot-play').classList.contains('hidden')) {
+        $('#playback-load').classList.remove('hidden');
+        $('#playback-load').textContent=plan?'Choose “Checked motion replay” in Planning result to play the saved build.':
+          unavailable.length?unavailable.join(' '):'This run has no saved full-build playback yet.';
+      }
       $('#metrics').insertAdjacentHTML('afterbegin',`<label class="control">Planning result<select class="method-select" id="cell-mode" aria-label="Planning result">${options.map(([value,label])=>`<option value="${value}" ${value===mode?'selected':''}>${label}</option>`).join('')}</select></label>`);
       $('#metrics').insertAdjacentHTML('afterbegin',metric(arms.length===1?'Initial drawing pen angle':'Configured drawing pen angle',penAngleLabel));
-      const setupDescription=arms.length===1
-        ? 'One Flexiv arm with a rigid right-angle pen bracket. The initial pen lean is a starting preference; motion planning can adjust orientation to clear deposited material. Tool dimensions and process parameters remain provisional.'
-        : cellConfig.setup_description;
+      const setupDescription=cellConfig.setup_description ?? (arms.length===1
+        ? 'One Flexiv arm with a rigid pen mount. The initial pen lean is a starting preference; motion planning can adjust orientation to clear deposited material. Tool dimensions and process parameters remain provisional.'
+        : undefined);
       if(setupDescription)$('#metrics').insertAdjacentHTML('beforeend',`<p class="description">${escape(setupDescription)}</p>`);
       $('#metrics').insertAdjacentHTML('beforeend',`<label class="control"><input type="checkbox" id="cell-reference" ${cellReferenceVisible?'checked':''}> Show source mesh reference</label>`);
       $('#cell-reference').addEventListener('change',()=>{
@@ -547,7 +617,7 @@ async function renderStage(id: string) {
     const options = ['<option value="geometric">Geometry baseline</option>', '<option value="wir3d">WIR3D abstraction</option>'];
     if(run.artifacts.includes('surface_contours.json'))options.push('<option value="contours">Surface outlines and openings</option>');
     if(run.artifacts.includes('selected_candidates.json') && (run.stages.selection?.curve_count ?? 0)>0)options.push('<option value="selected">Budgeted selection</option>');
-    const availableBudgets = (run.stages.wir3d.budgets ?? []).filter(b => run.artifacts.includes(`wir3d_${b}.json`));
+    const availableBudgets = (run.stages.wir3d?.budgets ?? []).filter(b => run.artifacts.includes(`wir3d_${b}.json`));
     if (!availableBudgets.includes(budget) && availableBudgets.length) budget = availableBudgets[0];
     const file = method === 'geometric' ? 'geometric_candidates.json' : method === 'contours' ? 'surface_contours.json' : method === 'selected' ? 'selected_candidates.json' : availableBudgets.includes(budget) ? `wir3d_${budget}.json` : null;
     const loadedCurves = file && run.artifacts.includes(file) ? (method==='selected'?await checkedArtifact<CurveSet>(file):await json<CurveSet>(url(file))) : null;
@@ -570,7 +640,7 @@ async function renderStage(id: string) {
       viewer.setLimit(currentCurves.curves.length);
       $('#curve-count').textContent = `${slider.max} / ${slider.max}`;
       viewer.setSource($<HTMLInputElement>('#overlay').checked, true);
-    } else empty('Curve output is not available yet', run.stages.wir3d.message ?? 'The prepared job needs to run in the WIR3D GPU environment.');
+    } else empty('Curve output is not available yet', run.stages.wir3d?.message ?? 'The prepared job needs to run in the WIR3D GPU environment.');
     if (method === 'wir3d' && run.artifacts.includes('wir3d_keypoints.json')) {
       const keypoints = await json<{points:number[][]}>(url('wir3d_keypoints.json'));
       if (request !== stageRequest) return;
@@ -634,7 +704,15 @@ async function renderStage(id: string) {
     $('#curve-count').textContent = `${slider.max} / ${slider.max}`;
     $('#badge').textContent = 'Pen sketch · uncalibrated';
     $('#badge').classList.add('pending');
-    const m = graph.metrics;
+    const components = new Map(graph.nodes.map(n=>[n.id,n.id]));
+    const root = (id:string):string => { const next=components.get(id) ?? id; return next===id?id:root(next); };
+    for(const edge of graph.edges as BuildAction[])components.set(root(edge.start),root(edge.end));
+    const m = graph.metrics ?? {
+      input_curves:strokes.curves.length, material_members:graph.edges.length,
+      material_components:new Set(graph.nodes.map(n=>root(n.id))).size,
+      ground_contacts:graph.nodes.filter(n=>n.ground).length,
+      total_length_m:strokes.total_length_m, added_length_m:0,
+    };
     $('#metrics').innerHTML = `<h2>Continuous pen strokes</h2><div class="metric big"><strong>${number(strokes.curves.length)}</strong><span class="metric-label">Proposed pen strokes</span></div>${metric('Material graph members',number(m.material_members))}${metric('Material components',number(m.material_components))}${metric('Ground contacts',number(m.ground_contacts))}${metric('Object dimensions',manifest.bounds_m[1].map((v,i)=>((v-manifest.bounds_m[0][i])*100).toFixed(1)).join(' × ')+' cm')}${metric('Total drawing length',m.total_length_m.toFixed(2)+' m')}${metric('Added material',m.added_length_m.toFixed(2)+' m')}<p class="description">Each contour stays continuous through incidental intersections. Graph members track connections; they are not separate pen starts. Ordering can add intentional cooling pauses.</p><a class="download" href="${url(`${prefix}pen_strokes.json`)}" target="_blank">Open continuous strokes ↗</a>`;
     if(run.artifacts.includes('backbone_graph.json')) {
       $('#metrics').insertAdjacentHTML('afterbegin', `<label class="control">Structure version<select id="structure-version" aria-label="Structure version"><option value="backbone" ${supported?'selected':''}>Automatic supports · intact contours</option><option value="original" ${!supported?'selected':''}>Original connected graph</option></select></label>`);
@@ -646,19 +724,20 @@ async function renderStage(id: string) {
       }
     }
     $('#graph-controls').classList.remove('hidden');
-    $('#graph-controls').innerHTML = `<h2>Geometry & pen checks</h2>${metric('Geometry needs repair',number(process.rejected_actions))}${metric('Need pen calibration',number(process.calibration_required_actions))}${metric('Cooled frame',structure.failure ? 'Analysis unresolved' : structure.modeled_pass ? 'Modeled pass' : 'Modeled failure')}${metric('Peak deflection',structure.maximum_displacement_m !== undefined ? (structure.maximum_displacement_m*1000).toFixed(3)+' mm' : 'Unavailable')}<div class="control"><label>Highlight geometry issues <input id="rejected" type="checkbox"></label></div><div class="control"><label>Show physical junctions <input id="junctions" type="checkbox"></label></div>${['artistic','connector','support','base','brace'].filter(role=>graph.edges.some(e=>e.role===role)).map(role=>`<div class="control"><label>${role[0].toUpperCase()+role.slice(1)} strokes <input data-role="${role}" type="checkbox" checked></label></div>`).join('')}<div class="control"><label>Deformation overlay <span id="deformation-scale">Off</span></label><input id="deformation" aria-label="Deformation magnification" type="range" min="0" max="100" value="0" step="5" ${structure.failure ? 'disabled' : ''}></div><p class="description">${structure.failure ? 'The structural calculation is unresolved. This is not a demonstrated physical failure, and no deformation field is shown.' : 'Assumed material, rigid welds, and a clamped bed. Purple deformation lines are magnified, not measured.'}</p><a class="download" href="${url(supported?'backbone_process.json':'process_screen.json')}" target="_blank">Open pen diagnostics ↗</a>`;
+    $('#graph-controls').innerHTML = `<h2>Geometry & pen checks</h2>${metric('Geometry needs repair',number(process.rejected_actions))}${metric('Need pen calibration',number(process.calibration_required_actions))}${metric('Cooled frame',structure.failure ? 'Analysis unresolved' : structure.modeled_pass ? 'Modeled pass' : 'Modeled failure')}${metric('Peak deflection',structure.maximum_displacement_m !== undefined ? (structure.maximum_displacement_m*1000).toFixed(3)+' mm' : 'Unavailable')}<div class="control"><label>Highlight geometry issues <input id="rejected" type="checkbox"></label></div><div class="control"><label>Show physical junctions <input id="junctions" type="checkbox"></label></div>${['framework','artistic','connector','support','base','brace'].filter(role=>strokes.curves.some(curve=>displayRole(curve)===role)).map(role=>`<div class="control"><label>${role[0].toUpperCase()+role.slice(1)} strokes <input data-role="${role}" type="checkbox" checked></label></div>`).join('')}<div class="control"><label>Deformation overlay <span id="deformation-scale">Off</span></label><input id="deformation" aria-label="Deformation magnification" type="range" min="0" max="100" value="0" step="5" ${structure.failure ? 'disabled' : ''}></div><p class="description">${structure.failure ? 'The structural calculation is unresolved. This is not a demonstrated physical failure, and no deformation field is shown.' : 'Assumed material, rigid welds, and a clamped bed. Purple deformation lines are magnified, not measured.'}</p><a class="download" href="${url(supported?'backbone_process.json':'process_screen.json')}" target="_blank">Open pen diagnostics ↗</a>`;
     $('#rejected').addEventListener('change',()=>viewer.highlight($<HTMLInputElement>('#rejected').checked ? process.edges.filter(e=>!e.modeled_pass).map(e=>e.id) : []));
     $('#junctions').addEventListener('change',()=>{viewer.junctions.visible = $<HTMLInputElement>('#junctions').checked;});
     document.querySelectorAll<HTMLInputElement>('[data-role]').forEach(control=>control.addEventListener('change',()=>viewer.setRoleVisible(control.dataset.role!,control.checked)));
     $('#deformation').addEventListener('input',()=>{const scale = Number($<HTMLInputElement>('#deformation').value); $('#deformation-scale').textContent = scale ? `${scale}×` : 'Off'; viewer.setDeformation(structure.edges,scale);});
-    $('#note-text').textContent = `This ${graph.source_method === 'geometric_sections' ? 'geometric baseline' : graph.source_method === 'budgeted_selection' ? 'budgeted selection' : 'WIR3D sketch'} proposes ${strokes.curves.length} continuous pen strokes. Unknown free-space, curvature, and cooling capabilities are calibration questions, not automatic rejections. ${process.rejected_actions} strokes still need geometric repair. Construction order and robot access remain to be checked.`;
+    const sourceMethod=graph.source_method ?? strokes.method;
+    $('#note-text').textContent = `This ${sourceMethod?.includes('wireprint') ? 'WirePrint framework' : sourceMethod === 'reference_fixture' ? 'reference fixture' : sourceMethod === 'geometric_sections' ? 'geometric baseline' : sourceMethod === 'budgeted_selection' ? 'budgeted selection' : 'WIR3D sketch'} proposes ${strokes.curves.length} continuous pen strokes. Unknown free-space, curvature, and cooling capabilities are calibration questions, not automatic rejections. ${process.rejected_actions} strokes still need geometric repair. Construction order and robot access remain to be checked.`;
     $('#input-summary').textContent = `${m.input_curves} curves, with contacts detected in 3D.`;
     $('#output-summary').textContent = `${m.material_components} material component${m.material_components === 1 ? '' : 's'}, real connectors and supports, cooled-frame and deposition screens.`;
     $('#next-summary').textContent = 'Choose a sparse sketch, draw its base and frame first, then plan contours and deliberate joins.';
-    $('#legend').innerHTML = '<span><i></i>Artistic</span><span><i style="background:#537b8a"></i>Connector</span><span><i style="background:#52745a"></i>Base / support</span><span><i style="background:#8c695d"></i>Brace</span>';
+    $('#legend').innerHTML = [...new Set(strokes.curves.map(displayRole))].map(role=>`<span><i style="background:#${curveColors[role].toString(16).padStart(6,'0')}"></i>${role[0].toUpperCase()+role.slice(1)}</span>`).join('');
     $('#criteria-panel').classList.remove('hidden');
     const criteria = [['minimum_stroke_m','Minimum continuous stroke'],['maximum_free_tip_length_m','Length before reaching another anchor'],['maximum_horizontal_reach_m','Horizontal reach'],['maximum_downward_motion_m','Downward drawing'],['minimum_curvature_radius_m','Bend radius']];
-    $('#criteria-panel').innerHTML = `<h2>A practical pen check</h2><p>Begin with a bed line and join, an upright stroke, a bridge, and a curved stroke. Use those results to set the pen envelope. This preview does not infer printer-style overhang rules or require stopping at every crossing.</p><table><thead><tr><th>Capability</th><th>Current evidence</th></tr></thead><tbody>${criteria.map(([key,label])=>`<tr><td>${label}</td><td>${process.settings[key] == null ? 'Not measured — no hard limit' : `${Number(process.settings[key])*1000} mm (${process.settings.calibrated ? 'calibrated' : 'assumed, advisory only'})`}</td></tr>`).join('')}<tr><td>Start at the bed or existing material</td><td>Checked during construction planning</td></tr><tr><td>Keep the path above the bed</td><td>Geometric constraint</td></tr></tbody></table><h2>Drawing workload at an assumed speed</h2><p>At an assumed <strong id="speed-value">${process.timing_assumption.speed_m_s*1000} mm/s</strong>, this sketch needs <strong id="draw-time">${(process.timing_assumption.deposition_only_s/60).toFixed(1)} minutes</strong> of aggregate drawing across the pens. Parallel elapsed time depends on assignment and construction dependencies. Joins, travel, cooling, and startup add time. This is a what-if calculation, not a pen measurement.</p><div class="control"><label>Assumed drawing speed<input id="speed-assumption" aria-label="Assumed drawing speed" type="range" min="1" max="10" step="0.5" value="${process.timing_assumption.speed_m_s*1000}"></label></div><p>The 30-minute target is evaluated against the calibrated complete schedule, not aggregate drawing work.</p>`;
+    $('#criteria-panel').innerHTML = `<h2>A practical pen check</h2><p>Begin with a bed line and join, an upright stroke, a bridge, and a curved stroke. Use those results to set the pen envelope. This preview does not infer printer-style overhang rules or require stopping at every crossing.</p><table><thead><tr><th>Capability</th><th>Current evidence</th></tr></thead><tbody>${criteria.map(([key,label])=>`<tr><td>${label}</td><td>${process.settings[key] == null ? 'Not measured — no hard limit' : `${Number(process.settings[key])*1000} mm (${process.settings.calibrated ? 'calibrated' : 'assumed, advisory only'})`}</td></tr>`).join('')}<tr><td>Start at the bed or existing material</td><td>Checked during construction planning</td></tr><tr><td>Keep the path above the bed</td><td>Geometric constraint</td></tr></tbody></table><h2>Drawing workload at an assumed speed</h2><p>At an assumed <strong id="speed-value">${process.timing_assumption.speed_m_s*1000} mm/s</strong>, this sketch needs <strong id="draw-time">${(process.timing_assumption.deposition_only_s/60).toFixed(1)} minutes</strong> of aggregate drawing across the pens. Parallel elapsed time depends on assignment and construction dependencies. Joins, travel, cooling, and startup add time. This is a what-if calculation, not a pen measurement.</p><div class="control"><label>Assumed drawing speed<input id="speed-assumption" aria-label="Assumed drawing speed" type="range" min="1" max="10" step="0.5" value="${process.timing_assumption.speed_m_s*1000}"></label></div><p>Complete modeled duration also includes travel, joining, and cooling. No fabrication-time target is imposed.</p>`;
     $('#speed-assumption').addEventListener('input',()=>{const speed = Number($<HTMLInputElement>('#speed-assumption').value); $('#speed-value').textContent = `${speed} mm/s`; $('#draw-time').textContent = `${(m.total_length_m*1000/speed/60).toFixed(1)} minutes`;});
     return;
   }
@@ -666,6 +745,27 @@ async function renderStage(id: string) {
     const supported=structureVariant==='backbone'&&run.artifacts.includes('backbone_construction.json');
     const constructionFile=supported?'backbone_construction.json':'construction_plan.json';
     const [plan,graph] = await Promise.all([json<Construction>(url(constructionFile)),json<StrokeGraph>(url(supported?'backbone_graph.json':'stroke_graph.json'))]);
+    let sectionSchedule:CoordinatedPlan|null=null;
+    if(run.artifacts.includes('offline_dual_arm_plan.json')) {
+      const saved=await checkedArtifact<CoordinatedPlan>('offline_dual_arm_plan.json');
+      if(saved.section_schedule||saved.partial_section_schedule) {
+        sectionSchedule=saved;
+        const source=new Map(plan.actions.map(a=>[a.id,a]));
+        plan.actions=saved.actions.filter(a=>!a.auxiliary).map(a=>{
+          const original=source.get(a.stroke_id);
+          if(!original)throw Error(`Missing source section ${a.stroke_id}`);
+          let segments=original.segments;
+          if(original.closed && a.start_visit) {
+            const boundary=original.junction_visits?.[a.start_visit]?.segment_boundary;
+            if(boundary===undefined)throw Error(`Missing closed-contour start for ${a.stroke_id}`);
+            segments=[...segments.slice(boundary),...segments.slice(0,boundary)];
+          }
+          const start=a.start_anchor ?? (a.reverse?original.end:original.start);
+          return {...original,start,end:original.closed?start:a.reverse?original.start:original.end,
+            segments:a.reverse?segments.slice().reverse().map(s=>s.slice().reverse()):segments};
+        });
+      }
+    }
     if (request !== stageRequest) return;
     if (!plan.actions.length) {
       empty('No construction order found',plan.status.replaceAll('_',' ').toLowerCase());
@@ -675,8 +775,8 @@ async function renderStage(id: string) {
     viewer.setCurves(plan.actions);
     viewer.model.position.z = graph.candidate_to_build?.[2]?.[3] ?? 0;
     viewer.setSource($<HTMLInputElement>('#overlay').checked,true);
-    $('#badge').textContent = supported?'Intact contours · automatic supports':'Order preview · geometry only';
-    $('#metrics').innerHTML = `<h2>Construction preview</h2><div class="metric big"><strong>${plan.actions.length}</strong><span class="metric-label">Directed drawing strokes</span></div>${metric('Grounded prefixes','Verified topology')}${metric('Every member drawn','Exactly once')}${metric('Robot motion','Not planned')}${metric('Pen / stiffness','Unverified')}<p class="description">Starts use the bed or existing material. A closed contour can start at an available junction. This is a geometric order, not a physically validated robot program.</p><a class="download" href="${url(constructionFile)}" target="_blank">Open construction preview ↗</a>`;
+    $('#badge').textContent = sectionSchedule?'Saved section order':supported?'Intact contours · automatic supports':'Order preview · geometry only';
+    $('#metrics').innerHTML = `<h2>Construction preview</h2><div class="metric big"><strong>${plan.actions.length}</strong><span class="metric-label">Directed drawing strokes</span></div>${metric('Order source',sectionSchedule?'Saved robot schedule':'Geometry search')}${metric('Robot motion',sectionSchedule?'See motion validation':'Not planned')}${metric('Material / pen','Uncalibrated')}<p class="description">Starts use the bed or existing material. A closed contour can start at an available junction. This is a geometric order, not a physically validated robot program.</p><a class="download" href="${url(constructionFile)}" target="_blank">Open construction preview ↗</a>`;
     $('#graph-controls').classList.remove('hidden');
     $('#graph-controls').innerHTML = `<h2>Replay the build</h2><div class="control"><label>Completed strokes <span id="build-count"></span></label><input id="build-step" aria-label="Completed construction strokes" type="range" min="0" max="${plan.actions.length}" value="0"></div><div class="playback-buttons"><button id="build-previous">Previous</button><button id="build-play">Play</button><button id="build-next">Next</button></div><p class="description" id="build-detail"></p><p class="description">Playback is schematic; it does not represent printing speed or cooling time. The dot marks the latest stroke’s starting anchor.</p>`;
     const drawStep = (step:number) => {
@@ -686,7 +786,7 @@ async function renderStage(id: string) {
       viewer.setLimit(step); viewer.select(step-1);
       const action = plan.actions[step-1];
       viewer.setJunctions(action ? graph.nodes.filter(n=>n.id === action.start) : [],true);
-      $('#build-detail').textContent = action ? `${action.id}: ${(action.length_m*1000).toFixed(1)} mm. Starts ${action.depends_on.length ? `from material drawn in step ${action.depends_on[0]+1}` : 'on the bed'}. ${action.existing_join_nodes.length} existing junctions along this stroke.` : 'Begin with a bare build surface.';
+      $('#build-detail').textContent = action && sectionSchedule ? `${action.id} · ${action.stage} · source ${action.parent_curve}. Starts at ${action.start}. ${(action.length_m*1000).toFixed(1)} mm.` : action ? `${action.id}: ${(action.length_m*1000).toFixed(1)} mm. Starts ${action.depends_on.length ? `from material drawn in step ${action.depends_on[0]+1}` : 'on the bed'}. ${action.existing_join_nodes?.length ?? 0} existing junctions along this stroke.` : 'Begin with a bare build surface.';
     };
     const stop = () => { if (playback) clearInterval(playback); playback=null; $('#build-play').textContent='Play'; };
     $('#build-step').addEventListener('input',()=>{stop();drawStep(Number($<HTMLInputElement>('#build-step').value));});
@@ -699,7 +799,7 @@ async function renderStage(id: string) {
       playback=setInterval(()=>{const next=Number($<HTMLInputElement>('#build-step').value)+1;drawStep(next);if(next>=plan.actions.length)stop();},500);
     });
     drawStep(0);
-    $('#note-text').textContent = supported ? 'A fixed-catalogue solver selects start supports and an intact-contour order. Forward replay checks grounded completed-stroke prefixes and member coverage. Robot motion, cooling, and stability during extrusion remain unverified.' : 'Backward search removes a possible last stroke while retaining grounded earlier material. Forward replay checks anchors and member coverage. Robot motion, cooling, and intermediate stiffness remain unverified.';
+    $('#note-text').textContent = sectionSchedule ? 'This is the section order saved in the complete robot schedule. Use Robot motion to inspect timed travel, cooling, and pen events; this stepper only shows geometry.' : supported ? 'A fixed-catalogue solver selects start supports and an intact-contour order. Forward replay checks grounded completed-stroke prefixes and member coverage. Robot motion, cooling, and stability during extrusion remain unverified.' : 'Backward search removes a possible last stroke while retaining grounded earlier material. Forward replay checks anchors and member coverage. Robot motion, cooling, and intermediate stiffness remain unverified.';
     $('#input-summary').textContent = 'Connected material graph and continuous pen contours.';
     $('#output-summary').textContent = `${plan.actions.length} directed strokes with explicit starting dependencies.`;
     $('#next-summary').textContent = 'Search robot paths and pen-off transits while preserving alternative construction choices.';
@@ -1224,17 +1324,27 @@ function renderCellCandidates(data:CellDrawingVariants, arms:CellArmView[]) {
   change(true);
 }
 
-function renderCellSchedule(plan:CoordinatedPlan,arms:CellArmView[]) {
+function renderCellSchedule(plan:CoordinatedPlan,arms:CellArmView[],motionReuse?:MotionReuse|null) {
+  if(!playbackReady(plan)){
+    $('#title').textContent='Build planned · verification pending';
+    $('#subtitle').textContent='Playback becomes available after separate full-robot verification passes.';
+    $('#badge').textContent='Awaiting full-robot verification';
+    $('#note-text').textContent='The viewer only animates saved trajectories. Verification runs separately.';
+    $('#metrics').insertAdjacentHTML('afterbegin',metric('Scheduled strokes',`${plan.actions.filter(a=>!a.auxiliary).length} / ${plan.requested_strokes}`)+metric('Independent verification',escape(replayProgressLabel(plan))));
+    $('#output-summary').textContent='Complete saved schedule; playback awaits verification.';
+    $('#next-summary').textContent='Run the separate full-robot verifier, then reload this result.';
+    return;
+  }
   const single=plan.resource_mode==='single';
   const full=plan.full_schedule||plan.status==='COORDINATED_GEOMETRIC_PREVIEW';
   const playLabel=single?(full?'Play full one-arm build':'Play one-arm prefix'):'Play both arms';
   const pauseLabel=single?'Pause one-arm build':'Pause both arms';
   if(single)$('#title').textContent=full?'One pen. The complete sculpture.':'One pen · prepared prefix';
-  const total=plan.modeled_duration_s, complete=!plan.replay_in_progress&&plan.replay?.status==='CERTIFIED_GEOMETRIC_REPLAY';
+  const total=plan.modeled_duration_s, state=replayState(plan), complete=state==='full', verified=state!=='unverified';
   const replayLabel=replayProgressLabel(plan);
   const scheduled=new Set(plan.actions.filter(a=>!a.auxiliary).map(a=>a.stroke_id)).size;
   $('#subtitle').textContent='Inspect saved robot trajectories and pen commands on one clock, with their independent replay status.';
-  $('#note-text').textContent=complete?'The saved complete trajectory passed modeled geometric replay. Physical fabrication remains unverified.':'This is diagnostic playback of the saved trajectory. It does not establish collision clearance or physical feasibility.';
+  $('#note-text').textContent=complete?'The saved complete trajectory passed modeled geometric replay. Physical fabrication remains unverified.':verified?'This prefix passed modeled geometric replay. The remaining sculpture is not yet planned.':'This is diagnostic playback of the saved trajectory. It does not establish collision clearance or physical feasibility.';
   $('#input-summary').textContent='Saved per-arm trajectories, independent pen events and the matching replay report when available.';
   const minutes=(value:number)=>(value/60).toFixed(1)+' min';
   const rows=plan.actions.flatMap(action=>action.trajectory.edges.map(edge=>({action,edge,start:action.start_s+edge.start_s,end:action.start_s+edge.end_s})));
@@ -1245,8 +1355,8 @@ function renderCellSchedule(plan:CoordinatedPlan,arms:CellArmView[]) {
   const events=deposition.flatMap(row=>[{time:row.start,delta:1},{time:Math.min(total,row.end),delta:-1}]).sort((a,b)=>a.time-b.time);
   let active=0, previous=0, concurrent=0;
   for(const event of events){if(active>1)concurrent+=event.time-previous;active+=event.delta;previous=event.time;}
-  $('#metrics').insertAdjacentHTML('afterbegin',`<h2>Synchronized trajectory</h2>${metric('Scheduled strokes',`${scheduled} / ${plan.requested_strokes}`)}${metric('Replay completed strokes',`${plan.completed_strokes} / ${plan.requested_strokes}`)}${metric(full||complete?'Modeled duration':'Planned prefix duration',minutes(total))}${metric('Concurrent drawing',minutes(concurrent))}${metric('Replay intervals checked',String(plan.checked_intervals))}${metric('Independent replay',escape(replayLabel))}<p class="description">${complete?'Complete geometric replay passed; physical feasibility remains unverified.':full?'Full planned trajectory for inspection. Playback is not evidence that collision replay passed.':'Partial planned trajectory; the complete sculpture is not scheduled yet.'}</p><div class="motion-controls"><label>Shared job time <span id="dual-clock"></span><input type="range" id="dual-seek" aria-label="${single?'One-arm job time':'Two-arm job time'}" min="0" max="${total}" value="0" step="0.05"></label><button id="dual-play">Play both arms</button><label>Playback speed<select id="dual-rate" aria-label="${single?'One-arm playback speed':'Two-arm playback speed'}"><option value="1">1×</option><option value="10" selected>10×</option><option value="30">30×</option></select></label></div><div id="dual-state"></div><a class="download" href="${url(plan.file_name??'dual_arm_plan.json')}" target="_blank">Open coordinated plan ↗</a>`);
-  $('#badge').textContent=complete?(single?'One-arm geometric replay passed':'Two-arm geometric replay passed'):full?'Full schedule · replay '+(plan.replay_in_progress?'running':plan.replay?.status==='REPLAY_REJECTED'?'rejected':'unverified'):'Partial trajectory · replay unverified';
+  $('#metrics').insertAdjacentHTML('afterbegin',`<h2>Synchronized trajectory</h2>${metric('Scheduled strokes',`${scheduled} / ${plan.requested_strokes}`)}${metric('Replay completed strokes',`${plan.completed_strokes} / ${plan.requested_strokes}`)}${metric(full||complete?'Modeled duration':'Planned prefix duration',minutes(total))}${metric('Concurrent drawing',minutes(concurrent))}${metric('Replay intervals checked',String(plan.checked_intervals))}${metric('Independent replay',escape(replayLabel))}<p class="description">${complete?'Complete geometric replay passed; physical feasibility remains unverified.':verified?`Verified prefix: ${plan.completed_strokes} of ${plan.requested_strokes} drawing actions. The complete sculpture is not yet scheduled.`:full?'Full planned trajectory for inspection. Playback is not evidence that collision replay passed.':'Partial planned trajectory; the complete sculpture is not scheduled yet.'}</p><div class="motion-controls"><label>Shared job time <span id="dual-clock"></span><input type="range" id="dual-seek" aria-label="${single?'One-arm job time':'Two-arm job time'}" min="0" max="${total}" value="0" step="0.05"></label><button id="dual-play">Play both arms</button><label>Playback speed<select id="dual-rate" aria-label="${single?'One-arm playback speed':'Two-arm playback speed'}"><option value="1">1×</option><option value="10" selected>10×</option><option value="30">30×</option></select></label></div><div id="dual-state"></div><a class="download" href="${url(plan.file_name??'dual_arm_plan.json')}" target="_blank">Open coordinated plan ↗</a>`);
+  $('#badge').textContent=complete?(single?'One-arm geometric replay passed':'Two-arm geometric replay passed'):verified?`Verified prefix · ${plan.completed_strokes}/${plan.requested_strokes} actions`:full?'Full schedule · replay '+(plan.replay_in_progress?'running':plan.replay?.status==='REPLAY_REJECTED'?'rejected':'unverified'):'Partial trajectory · replay unverified';
   $('#metrics').insertAdjacentHTML('beforeend','<button class="mode-button" id="schedule-view">Focus sculpture</button>');
   $('#schedule-view').addEventListener('click',()=>{
     const close=$('#schedule-view').textContent==='Focus sculpture';
@@ -1255,8 +1365,8 @@ function renderCellSchedule(plan:CoordinatedPlan,arms:CellArmView[]) {
     $('#schedule-view').textContent=close?'Show full robot cell':'Focus sculpture';
   });
   const panel=$('#timing-panel');panel.classList.remove('hidden');
-  const colors:Record<string,string>={DRAW:'#b77636',TRAVEL:'#367ca5',APPROACH:'#759aaa',WITHDRAW:'#759aaa',RETURN:'#367ca5',PARK:'#367ca5',JOIN:'#657c68',PEN_START_WAIT:'#a88a65',PEN_STOP_WAIT:'#a88a65',WAIT:'#d9dcd6'};
-  panel.innerHTML=`<h2>${single?'One-arm build timeline':'Two arms on one job clock'}</h2>${plan.initial_pose_repairs?.precondition?`<p><strong>Start pose:</strong> ${escape(arms.length===1?'Start the robot at its saved staged pose':plan.initial_pose_repairs.precondition)}. Moving into those poses is outside this preview.</p>`:''}<p>${arms.length===1?'The robot pose and growing strokes use the same timestamp.':'Both robot poses and growing strokes use the same timestamp.'} Select a timeline phase to inspect its start. Gray intervals hold the previous pose. Startup and shutdown remain unmeasured; cooling is a development assumption.</p>${arms.map(arm=>`<h3>${escape(arm.id)}</h3><div class="timing-track" role="group" aria-label="${escape(arm.id)} shared timeline" style="position:relative">${coordinatedTimeline(plan,arm.id).map(r=>{const duration=r.end_s-r.start_s;const durationLabel=duration<0.001?'under 1 ms':duration<1?`${(duration*1000).toFixed(1)} ms`:`${duration.toFixed(1)} s`;const label=`${r.kind.replaceAll('_',' ')} · ${r.stroke_id??'Holding pose'} · ${r.start_s.toFixed(3)}–${r.end_s.toFixed(3)} s (${durationLabel})`;return `<button class="timeline-phase" type="button" data-job-time="${r.start_s}" aria-label="${escape(label)}" title="${escape(label)}" style="position:absolute;top:0;bottom:0;border:0;padding:0;cursor:pointer;left:${100*r.start_s/Math.max(total,1e-9)}%;width:${100*(r.end_s-r.start_s)/Math.max(total,1e-9)}%;background:${colors[r.kind]??'#888'}"></button>`;}).join('')}</div>`).join('')}<div class="timing-legend">${['DRAW','TRAVEL','APPROACH','JOIN','WAIT'].map(kind=>`<span><i style="background:${colors[kind]}"></i>${kind.toLowerCase()}</span>`).join('')}</div><p>${plan.actions.some(a=>a.trajectory.clock==='continuous_drawing_mixed_clock')?'Drawing uses continuous cubic motion through numerical samples. Stops remain at pen-operation boundaries.':'Timing stops at geometric waypoints to preserve checked paths. Pen flow through those stops is uncalibrated.'} Pen/mount geometry and hot-strand behavior remain unmeasured.</p>${plan.failures.length?`<details><summary>Rejected motion alternatives (${plan.failures.length})</summary>${plan.failures.slice(0,12).map(f=>`<p>${escape(f.arm)} · ${escape(f.stroke_id)}: ${escape(f.phase)} / ${escape(f.status)}</p>`).join('')}</details>`:''}`;
+  const colors:Record<string,string>={DRAW:'#b77636',TRAVEL:'#367ca5',APPROACH:'#759aaa',WITHDRAW:'#759aaa',RETURN:'#367ca5',PARK:'#367ca5',JOIN:'#657c68',PEN_START_WAIT:'#a88a65',PEN_STOP_WAIT:'#a88a65',WAIT:'#d9dcd6',VERTEX_COOL:'#aac8b0',INDEX_TURN:'#8957a3',TABLE_SETTLE:'#ab91bd'};
+  panel.innerHTML=`<h2>${single?'One-arm build timeline':'Two arms on one job clock'}</h2>${plan.initial_pose_repairs?.precondition?`<p><strong>Start pose:</strong> ${escape(arms.length===1?'Start the robot at its saved staged pose':plan.initial_pose_repairs.precondition)}. Moving into those poses is outside this preview.</p>`:''}<p>${arms.length===1?'The robot pose and growing strokes use the same timestamp.':'Both robot poses and growing strokes use the same timestamp.'} Select a timeline phase to inspect its start. Gray intervals hold the previous pose. Startup and shutdown remain unmeasured; cooling is a development assumption.</p>${arms.map(arm=>`<h3>${escape(arm.id)}</h3><div class="timing-track" role="group" aria-label="${escape(arm.id)} shared timeline" style="position:relative">${coordinatedTimeline(plan,arm.id).map(r=>{const duration=r.end_s-r.start_s;const durationLabel=duration<0.001?'under 1 ms':duration<1?`${(duration*1000).toFixed(1)} ms`:`${duration.toFixed(1)} s`;const label=`${r.kind.replaceAll('_',' ')} · ${r.stroke_id??'Holding pose'} · ${r.start_s.toFixed(3)}–${r.end_s.toFixed(3)} s (${durationLabel})`;return `<button class="timeline-phase" type="button" data-job-time="${r.start_s}" aria-label="${escape(label)}" title="${escape(label)}" style="position:absolute;top:0;bottom:0;border:0;padding:0;cursor:pointer;left:${100*r.start_s/Math.max(total,1e-9)}%;width:${100*(r.end_s-r.start_s)/Math.max(total,1e-9)}%;background:${colors[r.kind]??'#888'}"></button>`;}).join('')}</div>`).join('')}<div class="timing-legend">${['DRAW','TRAVEL','APPROACH','JOIN','WAIT',...(plan.actions.some(a=>a.trajectory.edges.some(e=>e.kind==='VERTEX_COOL'))?['VERTEX_COOL']:[])].map(kind=>`<span><i style="background:${colors[kind]}"></i>${kind.toLowerCase().replaceAll('_',' ')}</span>`).join('')}</div><p>${plan.actions.some(a=>a.trajectory.clock==='continuous_drawing_mixed_clock')?'Drawing stays connected through numerical samples. Required source corners and cooling holds stop motion without a pen withdrawal.':'Timing stops at geometric waypoints to preserve checked paths. Pen flow through those stops is uncalibrated.'} Pen/mount geometry and hot-strand behavior remain unmeasured.</p>${plan.failures.length?`<details><summary>Rejected motion alternatives (${plan.failures.length})</summary>${plan.failures.slice(0,12).map(f=>`<p>${escape(f.arm)} · ${escape(f.stroke_id)}: ${escape(f.phase)} / ${escape(f.status)}</p>`).join('')}</details>`:''}`;
   if(plan.comparison){
     const comparison=plan.comparison;
     panel.insertAdjacentHTML('beforeend',`<h3>One arm / two arms</h3><p>Same sculpture, staged poses, cell and process assumptions. The unused arm remains parked for the one-arm run.</p><table><thead><tr><th>Run</th><th>Completed</th><th>Modeled duration</th><th>Replay</th></tr></thead><tbody>${Object.entries(comparison.results).map(([name,row])=>`<tr><td>${name==='single_arm'?'One arm':'Two arms'}</td><td>${row.completed_strokes} / ${row.requested_strokes}</td><td>${row.modeled_duration_s===null?'Incomplete':minutes(row.modeled_duration_s)}</td><td>${escape(row.replay_status.replaceAll('_',' ').toLowerCase())}</td></tr>`).join('')}</tbody></table><p>${comparison.speedup===null?'A speedup comparison needs two complete, replay-checked schedules.':`Modeled speedup: ${comparison.speedup.toFixed(2)}×. Unknown setup times and uncalibrated pen behavior are excluded.`}</p>`);
@@ -1278,6 +1388,11 @@ function renderCellSchedule(plan:CoordinatedPlan,arms:CellArmView[]) {
   const draw=(time:number)=>{
     time=Math.max(0,Math.min(total,time));seek.value=String(time);
     const details:string[]=[];
+    const tableAngle=tableAngleAt(plan,time);
+    if(plan.turntable){
+      viewer.setTurntableAngle(tableAngle);
+      details.push(metric('Turntable angle',`<span id="table-angle" data-radians="${tableAngle}">${(tableAngle*180/Math.PI).toFixed(1)}°</span>`));
+    }
     for(const arm of arms){
       const moves=plan.actions.filter(a=>a.arm===arm.id);
       const motion=moves.find(a=>a.start_s<=time&&time<a.end_s);
@@ -1288,10 +1403,18 @@ function renderCellSchedule(plan:CoordinatedPlan,arms:CellArmView[]) {
       const feedEvent=plan.events?.filter(event=>event.arm===arm.id&&event.time_s<=time).at(-1);
       const feeding=plan.events?feedEvent?.command==='FEED_ON':['PEN_START_WAIT','JOIN','DRAW'].includes(kind);
       details.push(`<h2>${escape(arm.id)}</h2>${metric('Action',kind.replaceAll('_',' '))}${metric('Requested feed',feeding?'ON':'OFF')}<p class="description">${motion?escape(motion.stroke_id):'Holding previous pose'}</p>`);
+      if(motion?.parent_curve)details.push(metric('Source section',`${escape(motion.parent_curve)} [${motion.source_interval?.join(', ')??''}]`)+metric('Build stage',escape(motion.stage??''))+metric('Material role',escape(motion.role??'')));
     }
+    const rotateDeposit=(point:number[],index?:number)=>{
+      if(!plan.turntable||index===undefined)return point;
+      const axis=plan.turntable.world_from_axis;
+      const x=point[0]-axis[0][3],y=point[1]-axis[1][3];
+      const angle=tableAngle-index*Math.PI/2,c=Math.cos(angle),s=Math.sin(angle);
+      return [axis[0][3]+c*x-s*y,axis[1][3]+s*x+c*y,point[2]];
+    };
     viewer.setDepositedPaths(deposition.filter(r=>r.start<=time).map(r=>{
-      if(r.end<=time)return [r.p0,r.p1];
-      return [r.p0,viewer.setCellArmPose(r.action.arm,coordinatedPose(r.action,time))];
+      if(r.end<=time)return [rotateDeposit(r.p0,r.edge.table_index),rotateDeposit(r.p1,r.edge.table_index)];
+      return [rotateDeposit(r.p0,r.edge.table_index),viewer.setCellArmPose(r.action.arm,coordinatedPose(r.action,time))];
     }));
     $('#dual-clock').textContent=`${minutes(time)} / ${minutes(total)}`;
     $('#dual-state').innerHTML=details.join('');
@@ -1318,7 +1441,15 @@ function renderCellSchedule(plan:CoordinatedPlan,arms:CellArmView[]) {
     });
   }
   $('#output-summary').textContent=`${scheduled} of ${plan.requested_strokes} strokes scheduled; ${complete?'geometric replay passed':full?'full trajectory, validation not passed':'partial trajectory'}.`;
-  $('#next-summary').textContent='Complete scheduling and independent replay, then calibrate pen flow and physical support.';
+  $('#next-summary').textContent=complete?'Calibrate pen flow, cooling and physical support before hardware execution.':'Complete scheduling and independent replay, then calibrate pen flow and physical support.';
+  if(motionReuse) {
+    $('#title').textContent=motionReuse.label;
+    renderMotionReuse($('#motion-reuse-panel'),motionReuse,stroke=>{
+      stop();draw(stroke.draw_start_s);
+      viewer.setActivePath(stroke.source_points_m,true);
+      viewer.focusPoints(stroke.source_points_m);
+    });
+  }
   draw(0);
 }
 
@@ -1468,6 +1599,7 @@ async function loadRun(id: string) {
   $('#scale-label').textContent = `Object: ${manifest.bounds_m[1].map((v,i)=>((v-manifest.bounds_m[0][i])*100).toFixed(1)).join(' × ')} cm`;
   await selectStage('asset');
   await loadModel(modelMode);
+  if(request===runRequest && (run.workbench_collection==='motion_reuse'||(run.workbench_primary&&run.artifacts.includes('offline_dual_arm_plan.json'))))await selectStage('motion');
 }
 
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => {
@@ -1476,16 +1608,41 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => bu
   loadModel(modelMode).catch(showError);
 }));
 $('#run-select').addEventListener('change', () => loadRun($<HTMLSelectElement>('#run-select').value).catch(showError));
+function displayedRuns() {
+  return runScope==='all' ? allRuns : allRuns.filter(value=>runScope==='reuse'?value.workbench_collection==='motion_reuse':value.workbench_primary&&value.workbench_collection!=='motion_reuse');
+}
+function renderRunChoices(selected?:string, includeOpened=false) {
+  const currentCount=allRuns.filter(value=>value.workbench_primary&&value.workbench_collection!=='motion_reuse').length;
+  const reuseCount=allRuns.filter(value=>value.workbench_collection==='motion_reuse').length;
+  $<HTMLSelectElement>('#run-scope').innerHTML=`${currentCount?`<option value="current">Current builds (${currentCount})</option>`:''}${reuseCount?`<option value="reuse">Motion cache (${reuseCount})</option>`:''}<option value="all">All runs (${allRuns.length})</option>`;
+  $<HTMLSelectElement>('#run-scope').value=runScope;
+  const visible=displayedRuns();
+  const opened=includeOpened && runScope==='current' ? allRuns.find(value=>value.id===selected && !value.workbench_primary) : undefined;
+  $<HTMLSelectElement>('#run-select').innerHTML=visible.map(value=>`<option value="${escape(value.id)}">${escape(runLabel(value))}</option>`).join('')
+    +(opened?`<optgroup label="Opened older run"><option value="${escape(opened.id)}">${escape(runLabel(opened))}</option></optgroup>`:'');
+  if(selected && (opened || visible.some(value=>value.id===selected)))$<HTMLSelectElement>('#run-select').value=selected;
+}
+$('#run-scope').addEventListener('change',()=>{
+  runScope=$<HTMLSelectElement>('#run-scope').value as 'current'|'reuse'|'all';
+  const selected=run?.id;
+  renderRunChoices(selected);
+  const next=$<HTMLSelectElement>('#run-select').value;
+  if(next && next!==selected)loadRun(next).catch(showError);
+});
 async function start() {
-  const runs = (await json<Run[]>('/api/runs')).filter(r => r.stages.asset.status === 'complete').sort((a,b) => Number(!!b.workbench_primary)-Number(!!a.workbench_primary) || b.created_at.localeCompare(a.created_at));
-  $<HTMLSelectElement>('#run-select').innerHTML = runs.map(r => `<option value="${escape(r.id)}">${escape(runLabel(r))}</option>`).join('');
-  if (!runs.length) { empty('No model runs yet', 'Run the asset pipeline to create the first model.'); return; }
+  allRuns = (await json<Run[]>('/api/runs')).filter(r => r.stages.asset.status === 'complete').sort((a,b) => Number(!!b.workbench_primary)-Number(!!a.workbench_primary) || b.created_at.localeCompare(a.created_at));
+  if (!allRuns.length) { renderRunChoices();empty('No model runs yet', 'Run the asset pipeline to create the first model.'); return; }
   let savedId: string | null = null;
   try { savedId = localStorage.getItem('pen-art-selected-run'); } catch { /* Storage may be disabled. */ }
   const requested=new URLSearchParams(location.search);
-  const initial = runs.find(r => r.id === requested.get('run')) ?? runs.find(r => r.id === savedId) ?? runs.find(r => r.workbench_primary) ?? runs[0];
+  const explicit=allRuns.find(value=>value.id===requested.get('run'));
+  if(!allRuns.some(value=>value.workbench_primary))runScope='all';
+  if(explicit?.workbench_collection==='motion_reuse')runScope='reuse';
+  const initial=explicit ?? displayedRuns().find(value=>value.id===savedId) ?? displayedRuns()[0];
+  renderRunChoices(initial.id,true);
   await loadRun(initial.id);
-  if(requested.get('stage')==='motion')await selectStage('motion');
+  const requestedStage=requested.get('stage');
+  if(requestedStage && requestedStage!==activeStage && stages.some(stage=>stage.id===requestedStage))await selectStage(requestedStage);
   setInterval(async () => {
     if (!run || stageLoads) return;
     const id = run.id;

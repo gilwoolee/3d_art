@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import type { IndexedTable } from './timing';
 
-export interface Curve { id: string; segments: number[][][]; role?: string; color?:number; diameter_m?: number; length_m: number; closed?: boolean }
+export interface Curve { id: string; segments: number[][][]; role?: string; stage?:string; color?:number; diameter_m?: number; length_m: number; closed?: boolean }
+export const curveColors:Record<string,number>={framework:0x52745a,artistic:0xb77a3f,connector:0x537b8a,brace:0x8c695d,base:0x52745a,support:0x52745a};
+export function displayRole(curve:Curve):string {
+  if(curve.role&&['connector','brace','base','support'].includes(curve.role))return curve.role;
+  return curve.stage==='framework'?'framework':'artistic';
+}
 export interface Junction { id: string; position: number[]; ground: boolean }
 export interface Deformation { id: string; positions_m: number[][]; displacements_m: number[][] }
 export interface ToolBody {
@@ -10,6 +16,7 @@ export interface ToolBody {
   size_m?:number[]; radius_m?:number; length_m?:number; vertices?:number[][]; faces?:number[][];
 }
 export interface ToolModel {configured:boolean; visual_bodies:ToolBody[]; tip_radius_m?:number; calibration_declared?:boolean}
+export interface BuildRiser {type:'box'|'cylinder';height_m:number;size_m?:number[];radius_m?:number}
 
 export interface RobotRig {
   kinematic_root:string; kinematic_tip:string;
@@ -32,6 +39,8 @@ export class Viewer {
   junctions = new THREE.Group();
   deformations = new THREE.Group();
   platform = new THREE.Group();
+  indexedPlate:THREE.Group|null=null;
+  indexedTable:IndexedTable|null=null;
   tool = new THREE.Group();
   toolGeometry = new THREE.Group();
   deposited = new THREE.Group();
@@ -317,7 +326,8 @@ export class Viewer {
     }
   }
 
-  setPlatform(center?: number[], top = 0, table = 0, width = .24, depth = .24) {
+  setPlatform(center?: number[], top = 0, table = 0, width = .24, depth = .24, riser?:BuildRiser) {
+    this.indexedPlate=null;this.indexedTable=null;
     this.clear(this.platform);
     this.clear(this.tool);
     this.setToolModel();
@@ -327,6 +337,49 @@ export class Viewer {
       new THREE.MeshStandardMaterial({color:0xa6b5a3, roughness:.9, transparent:true, opacity:.65}));
     base.position.set(center[0],center[1],top-height/2);
     this.platform.add(base);
+    if(riser) {
+      const stand=this.riserMesh(riser);
+      stand.position.set(center[0],center[1],top+riser.height_m/2);
+      this.platform.add(stand);
+    }
+  }
+
+  private riserMesh(riser:BuildRiser) {
+    const geometry=riser.type==='box'
+      ? new THREE.BoxGeometry(riser.size_m![0],riser.size_m![1],riser.height_m)
+      : new THREE.CylinderGeometry(riser.radius_m,riser.radius_m,riser.height_m,48);
+    if(riser.type==='cylinder')geometry.rotateX(Math.PI/2);
+    return new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color:0x849783,roughness:.9}));
+  }
+
+  setTurntable(table:IndexedTable, riser?:BuildRiser) {
+    this.clear(this.platform);this.indexedTable=table;
+    const axis=new THREE.Matrix4().fromArray(table.world_from_axis.flat()).transpose();
+    const housing=new THREE.Mesh(new THREE.CylinderGeometry(table.housing_radius_m,table.housing_radius_m,table.housing_height_m,48),new THREE.MeshStandardMaterial({color:0x727b78}));
+    housing.rotation.x=Math.PI/2;housing.position.z=-table.plate_thickness_m-table.housing_height_m/2;
+    const base=new THREE.Group();base.matrixAutoUpdate=false;base.matrix.copy(axis);base.add(housing);
+    const plate=new THREE.Group();plate.matrixAutoUpdate=false;
+    const disk=new THREE.Mesh(new THREE.CylinderGeometry(table.plate_radius_m,table.plate_radius_m,table.plate_thickness_m,48),new THREE.MeshStandardMaterial({color:0xa6b5a3,roughness:.9}));
+    disk.rotation.x=Math.PI/2;disk.position.z=-table.plate_thickness_m/2;plate.add(disk);
+    const marker=new THREE.Mesh(new THREE.BoxGeometry(table.plate_radius_m*.65,.002,.001),new THREE.MeshBasicMaterial({color:0x344b44}));
+    marker.position.set(table.plate_radius_m*.65,0,.0006);plate.add(marker);
+    if(riser) {
+      const stand=this.riserMesh(riser);
+      const mount=table.axis_from_build_zero;
+      stand.position.set(mount[0][3],mount[1][3],mount[2][3]-riser.height_m/2);
+      plate.add(stand);
+    }
+    this.platform.add(base,plate);this.indexedPlate=plate;
+    this.setTurntableAngle(table.home_index*Math.PI/2);
+  }
+
+  setTurntableAngle(angle:number) {
+    if(!this.indexedPlate||!this.indexedTable)return;
+    const table=this.indexedTable;
+    const transform=new THREE.Matrix4().fromArray(table.world_from_axis.flat()).transpose()
+      .multiply(new THREE.Matrix4().makeRotationZ(angle));
+    this.indexedPlate.matrix.copy(transform);
+    if(this.cellReference)this.cellReference.matrix.copy(transform.clone().multiply(new THREE.Matrix4().fromArray(table.axis_from_build_zero.flat()).transpose()));
   }
 
   clearSequence() { this.clear(this.deposited); this.clear(this.activePath); this.clear(this.contactRegion); }
@@ -379,7 +432,7 @@ export class Viewer {
         path.add(new THREE.CubicBezierCurve3(points[0], points[1], points[2], points[3]));
       }
       const geometry = new THREE.TubeGeometry(path, Math.min(700, Math.max(24, curve.segments.length * 10)), (curve.diameter_m ?? .001) / 2, 6, curve.closed ?? false);
-      const color = curve.color ?? ({connector:0x537b8a,brace:0x8c695d,base:0x52745a,support:0x52745a} as Record<string,number>)[curve.role ?? ''] ?? 0xb77a3f;
+      const color = curve.color ?? curveColors[displayRole(curve)];
       const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: .65 }));
       mesh.userData = { index, baseColor: color };
       this.curves.add(mesh);
@@ -397,7 +450,7 @@ export class Viewer {
     this.onSelect(this.curveData[index] ?? null);
   }
 
-  setLimit(count: number) { this.limit = count; this.curves.children.forEach((c, i) => c.visible = i < count && !this.hiddenRoles.has(this.curveData[i].role ?? 'artistic')); }
+  setLimit(count: number) { this.limit = count; this.curves.children.forEach((c, i) => c.visible = i < count && !this.hiddenRoles.has(displayRole(this.curveData[i]))); }
   setRoleVisible(role: string, visible: boolean) { if (visible) this.hiddenRoles.delete(role); else this.hiddenRoles.add(role); this.setLimit(this.limit); }
   highlight(ids: string[]) { this.highlighted = new Set(ids); this.select(-1); }
   setJunctions(nodes: Junction[], visible: boolean) {

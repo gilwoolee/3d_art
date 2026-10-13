@@ -22,6 +22,28 @@ class ToolModel:
     metadata: dict
 
 
+def sampled_pen_tilt(arm, positions, maximum_samples=33):
+    """Report actual axial-body tilt at joint samples, not a continuous bound."""
+    indices = np.unique(
+        np.linspace(0, len(positions) - 1, min(len(positions), maximum_samples)).astype(int)
+    )
+    tilts = [
+        float(
+            np.degrees(
+                np.arccos(
+                    np.clip(-arm.robot.forward(positions[i], arm.flange_to_tcp)[2, 2], -1.0, 1.0)
+                )
+            )
+        )
+        for i in indices
+    ]
+    return {
+        "scope": "sampled_joint_poses_not_continuous_bound",
+        "sample_count": len(indices),
+        "tilt_from_vertical_deg_min_max": [min(tilts), max(tilts)],
+    }
+
+
 def positive(value, shape, label):
     values = np.asarray(value, dtype=float)
     if values.shape != shape or not np.isfinite(values).all() or np.any(values <= 0):
@@ -73,24 +95,45 @@ def load_tool(profile, config_directory, robot, flange_to_tcp):
                 attributes["length"] = str(length)
                 visual["length_m"] = length
             SubElement(element, kind, **attributes)
-        elif kind == "mesh":
-            path = (Path(config_directory) / shape["path"]).resolve()
-            scale = positive(shape.get("scale", [1, 1, 1]), (3,), "Mesh scale")
-            raw = path.read_bytes()
-            mesh = trimesh.load_mesh(
-                io.BytesIO(raw), file_type=path.suffix.lstrip("."), process=False
-            )
-            if (
-                not isinstance(mesh, trimesh.Trimesh)
-                or len(mesh.vertices) < 4
-                or not np.isfinite(mesh.vertices).all()
-            ):
-                raise ValueError("Tool mesh must be a finite triangle mesh")
-            hull = trimesh.convex.convex_hull(mesh.vertices * scale)
+        elif kind in {"mesh", "frustum"}:
+            if kind == "frustum":
+                bottom = float(positive(shape["bottom_radius_m"], (), "Frustum base radius"))
+                top = float(positive(shape["top_radius_m"], (), "Frustum tip radius"))
+                length = float(positive(shape["length_m"], (), "Frustum length"))
+                # Circumscribed polygon conservatively encloses the round tapered nose.
+                angles = np.arange(32) * 2 * np.pi / 32
+                vertices = np.concatenate(
+                    [
+                        np.column_stack(
+                            [
+                                radius / np.cos(np.pi / 32) * np.cos(angles),
+                                radius / np.cos(np.pi / 32) * np.sin(angles),
+                                np.full(32, z),
+                            ]
+                        )
+                        for radius, z in ((bottom, -length / 2), (top, length / 2))
+                    ]
+                )
+                hull = trimesh.convex.convex_hull(vertices)
+                visual["type"] = "mesh"
+            else:
+                path = (Path(config_directory) / shape["path"]).resolve()
+                scale = positive(shape.get("scale", [1, 1, 1]), (3,), "Mesh scale")
+                raw = path.read_bytes()
+                mesh = trimesh.load_mesh(
+                    io.BytesIO(raw), file_type=path.suffix.lstrip("."), process=False
+                )
+                if (
+                    not isinstance(mesh, trimesh.Trimesh)
+                    or len(mesh.vertices) < 4
+                    or not np.isfinite(mesh.vertices).all()
+                ):
+                    raise ValueError("Tool mesh must be a finite triangle mesh")
+                hull = trimesh.convex.convex_hull(mesh.vertices * scale)
+                mesh_hashes[name] = hashlib.sha256(raw).hexdigest()
             # Render the same filled convex hull used by the collision checker.
             visual["vertices"] = hull.vertices.tolist()
             visual["faces"] = hull.faces.tolist()
-            mesh_hashes[name] = hashlib.sha256(raw).hexdigest()
             faces = np.column_stack([np.full(len(hull.faces), 3), hull.faces]).ravel()
             geometry = fcl.Convex(
                 np.asarray(hull.vertices, dtype=np.float64), len(hull.faces), faces
@@ -98,7 +141,7 @@ def load_tool(profile, config_directory, robot, flange_to_tcp):
             radius = float(np.max(np.linalg.norm(hull.vertices, axis=1)))
         else:
             raise ValueError(f"Unsupported tool geometry: {kind}")
-        if kind != "mesh":
+        if kind not in {"mesh", "frustum"}:
             geometry, radius = collision_geometry(element)
         bodies.append(Body(f"tool/{name}", robot.tip, origin, geometry, radius, touch))
         visuals.append(visual)

@@ -1,0 +1,45 @@
+{
+  "status": "PASSED",
+  "run": "runs/staged_restart_split_v1",
+  "sections": 4,
+  "source_provenance": {
+    "status": "SOURCE_PROVENANCE_VERIFIED",
+    "coverage": {
+      "status": "EXACT_INTERVAL_COVERAGE",
+      "sources": 3,
+      "represented_intervals": 5
+    },
+    "physical_sections": 4,
+    "physical_members": 4,
+    "shared_intervals": [
+      {
+        "parent_curve": "shared-detail",
+        "source_interval": [
+          0,
+          1
+        ],
+        "stage": "artistic",
+        "members": [
+          "edge0-restart-0.5-before",
+          "edge0-restart-0.5-after"
+        ],
+        "credited_after_section": "section-00001"
+      }
+    ]
+  },
+  "replay": "CERTIFIED_GEOMETRIC_REPLAY",
+  "checked_intervals": 946,
+  "simulation_only": true,
+  "browser_replay": "research/blondie/staged_restart_split_v1_browser_replay.json",
+  "inputs": {
+    "runs/staged_restart_split_v1/stroke_graph.json": "ef61a28f6ab0ce5e61b25b930f05884a6118e5bb1cf03f67c73afbf099dc4aa9",
+    "runs/staged_restart_split_v1/construction_plan.json": "49f2103ef470e71c5c176fcaed41652cbc3a42dd48454119ecea7dd13b46abf4",
+    "runs/staged_restart_split_v1/offline_dual_arm_plan.json": "eb82ad54a27147563f9f7637626951826473e165461226a0d654c43aaace1aca",
+    "runs/staged_restart_split_v1/offline_dual_arm_validation.json": "bdb96c063ce17ddeb23bd19919d7027b6a794b42df1f6d72a5055e700f3007ed",
+    "src/pen_art/planning/sections.py": "5b9a8b4e333f291287637a610466845e2eeeef8e20e8d384360608df813369d3"
+  },
+  "related_artifacts": {
+    "research/blondie/staged_restart_split_v1_browser_replay.json": "13bd4669670f3d8f1183cbbb6fa8abd582ebdd8a3c392c197dcd0e7db0e54f5c",
+    "scripts/check_restart_sections.py": "efded4cb43b3b16161f4b11719874fdeeb2e201fc143020c163e1a49b0155c89"
+  }
+}

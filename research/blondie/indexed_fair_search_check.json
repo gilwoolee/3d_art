@@ -1,0 +1,9 @@
+{
+  "status": "PASSED",
+  "scope": "Staged three-action indexed integration; focused construction test separately forces a blocked source to yield; not completion of generated objects",
+  "actions": 3,
+  "checked_intervals": 536,
+  "browser_wall_seconds": 20.2,
+  "source_sha256": "cf3a59305ca1fa0daad8e18ed0ae7ca166ea1d143414cb139b2d1d8811e83496",
+  "validation_sha256": "e6865fb76d901fa61c5eaeb27af25b46c056f762fd773976b9d9ebd798b9e82c"
+}

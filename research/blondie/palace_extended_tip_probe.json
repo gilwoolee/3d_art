@@ -1,0 +1,463 @@
+{
+  "scope": "Counterfactual static tool poses only; not an approved tool, arm path, or complete-build acceptance. Optional continuous checks cover only the rigid tool and this cubic. Framework-only checks omit current-stroke deposition; full-curve-envelope checks include future stroke material conservatively.",
+  "active_profile_changed": false,
+  "profile_sha256": "1c4547bfe7b1a6f340e24be79cb11e2040f9539438356337650accf052b4bfb4",
+  "graph_sha256": "8bd43ca5c8c3e6296da148fc2e0d62c6175061eab98edb406225abdb28a457bf",
+  "section": "section-01212",
+  "parent_curve": "wir3d-20-0020",
+  "orientations_per_radius": 50000,
+  "sampled_input_sha256": "68f7394aca0b2875f5e33d367e24c8888a551d74a8f7827b9c0e0fdc8b513753",
+  "results": [
+    {
+      "nozzle_shank_radius_m": 0.0025,
+      "tip_extension_m": 0.02,
+      "extension_radius_m": 0.0005,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 154,
+      "exact_tool_checks": 154,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [],
+      "seconds": 9.521983748996718,
+      "continuous_tool_checks": [],
+      "continuous_framework_checks": []
+    },
+    {
+      "nozzle_shank_radius_m": 0.0025,
+      "tip_extension_m": 0.04,
+      "extension_radius_m": 0.0005,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 371,
+      "exact_tool_checks": 371,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [
+        [
+          [
+            -0.42804047034758197,
+            -0.8682797501744737,
+            -0.2507421607579679
+          ],
+          [
+            0.052812656580875195,
+            0.2529380508256809,
+            -0.96603994003839
+          ],
+          [
+            0.9022151511970367,
+            -0.42674654993503947,
+            -0.06241156198213249
+          ]
+        ],
+        [
+          [
+            -0.9030439760458489,
+            -0.33908452466177036,
+            -0.26369160483831355
+          ],
+          [
+            0.23252589505385263,
+            0.13026811823475223,
+            -0.9638267092693484
+          ],
+          [
+            0.3611693307255044,
+            -0.9316930301909947,
+            -0.03879190684683312
+          ]
+        ]
+      ],
+      "seconds": 11.132459304000804,
+      "continuous_tool_checks": [
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 3,
+          "point_clearance_m": 0.0006977870771917481,
+          "depth": 2,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/3"
+          ],
+          "point_world_m": [
+            0.6106891159886902,
+            -0.17513058922645275,
+            0.22349476924211126
+          ]
+        },
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 3,
+          "point_clearance_m": 0.0006975083301630258,
+          "depth": 2,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/3"
+          ],
+          "point_world_m": [
+            0.6106891159886902,
+            -0.17513058922645275,
+            0.22349476924211126
+          ]
+        }
+      ],
+      "continuous_framework_checks": [
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 39,
+          "certified_intervals": 20,
+          "minimum_clearance_lower_bound_m": 0.0010046733222307794,
+          "required_clearance_m": 0.001
+        },
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 25,
+          "certified_intervals": 13,
+          "minimum_clearance_lower_bound_m": 0.0010051547794712211,
+          "required_clearance_m": 0.001
+        }
+      ]
+    },
+    {
+      "nozzle_shank_radius_m": 0.0025,
+      "tip_extension_m": 0.06,
+      "extension_radius_m": 0.0005,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 758,
+      "exact_tool_checks": 9,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [
+        [
+          [
+            -0.22256804362041538,
+            0.8091458224296963,
+            0.5438258029953629
+          ],
+          [
+            -0.18812838525582243,
+            0.5116874232155615,
+            -0.838321949840308
+          ],
+          [
+            -0.9565935273772335,
+            -0.2888927464779779,
+            0.038338028279934155
+          ]
+        ],
+        [
+          [
+            0.0542859753470297,
+            -0.8400380998847848,
+            0.5398046161553107
+          ],
+          [
+            0.0773148171199739,
+            -0.535442661044681,
+            -0.8410253122154507
+          ],
+          [
+            0.9955277253468771,
+            0.0873907745437214,
+            0.03588036496918298
+          ]
+        ],
+        [
+          [
+            -0.3164247138486009,
+            0.7717433629643276,
+            0.5516226809933952
+          ],
+          [
+            -0.24776555981060294,
+            0.4940808322127227,
+            -0.833364481251584
+          ],
+          [
+            -0.9156897006287498,
+            -0.40037021987217447,
+            0.03487204040398456
+          ]
+        ],
+        [
+          [
+            -0.8093691278868435,
+            -0.17788249125656544,
+            0.559713707289761
+          ],
+          [
+            -0.5355146368321378,
+            -0.16776759003011418,
+            -0.8276944541761959
+          ],
+          [
+            0.2411341712869288,
+            -0.9696452212226105,
+            0.04052723032629549
+          ]
+        ]
+      ],
+      "seconds": 10.902930532000028,
+      "continuous_tool_checks": [
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.000757604454296388,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/2"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        },
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.0007460692850158767,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/2"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        },
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.0007765543011426831,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/2"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        },
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.0008000428673072134,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/2"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        }
+      ],
+      "continuous_framework_checks": [
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 13,
+          "certified_intervals": 7,
+          "minimum_clearance_lower_bound_m": 0.0011125233715573567,
+          "required_clearance_m": 0.001
+        },
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 17,
+          "certified_intervals": 9,
+          "minimum_clearance_lower_bound_m": 0.0010203080584914512,
+          "required_clearance_m": 0.001
+        },
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 13,
+          "certified_intervals": 7,
+          "minimum_clearance_lower_bound_m": 0.0011286625861489609,
+          "required_clearance_m": 0.001
+        },
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 13,
+          "certified_intervals": 7,
+          "minimum_clearance_lower_bound_m": 0.001132697212275784,
+          "required_clearance_m": 0.001
+        }
+      ]
+    },
+    {
+      "nozzle_shank_radius_m": 0.0025,
+      "tip_extension_m": 0.1,
+      "extension_radius_m": 0.0005,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 1273,
+      "exact_tool_checks": 4,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [
+        [
+          [
+            -0.6235198142323201,
+            -0.5806822701045612,
+            0.5234798395792402
+          ],
+          [
+            -0.3351637522884142,
+            -0.4063863680062779,
+            -0.8500090464522227
+          ],
+          [
+            0.7063202534344064,
+            -0.7054489500203964,
+            0.05876630415022245
+          ]
+        ],
+        [
+          [
+            -0.48997873182655405,
+            0.696573511487429,
+            0.5241242080382422
+          ],
+          [
+            -0.3463318327598937,
+            0.3962070657981075,
+            -0.850337710929503
+          ],
+          [
+            -0.799984439832935,
+            -0.598168290789245,
+            0.047112545244959336
+          ]
+        ],
+        [
+          [
+            0.4820836108078905,
+            0.6934675267821708,
+            0.5354420430719331
+          ],
+          [
+            0.2657660233846093,
+            0.4666029758983842,
+            -0.8435935536128187
+          ],
+          [
+            -0.8348435859517387,
+            0.5489849289200857,
+            0.04064154049554247
+          ]
+        ],
+        [
+          [
+            -0.22256804362041538,
+            0.8091458224296963,
+            0.5438258029953629
+          ],
+          [
+            -0.18812838525582243,
+            0.5116874232155615,
+            -0.838321949840308
+          ],
+          [
+            -0.9565935273772335,
+            -0.2888927464779779,
+            0.038338028279934155
+          ]
+        ]
+      ],
+      "seconds": 12.219529092999437,
+      "continuous_tool_checks": [
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.0007134524453366972,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/3"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        },
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.0007096424226422175,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/3"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        },
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.0007366924006510268,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/2"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        },
+        {
+          "status": "CLEARANCE_REJECTED",
+          "checked_intervals": 4,
+          "point_clearance_m": 0.0007576331630517334,
+          "depth": 3,
+          "blocker": [
+            "probe/slender_extension",
+            "curve-envelope/2"
+          ],
+          "point_world_m": [
+            0.6106287742100521,
+            -0.17604306523830385,
+            0.22336287095266782
+          ]
+        }
+      ],
+      "continuous_framework_checks": [
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 13,
+          "certified_intervals": 7,
+          "minimum_clearance_lower_bound_m": 0.0011507752076119517,
+          "required_clearance_m": 0.001
+        },
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 13,
+          "certified_intervals": 7,
+          "minimum_clearance_lower_bound_m": 0.0011421914053448522,
+          "required_clearance_m": 0.001
+        },
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 13,
+          "certified_intervals": 7,
+          "minimum_clearance_lower_bound_m": 0.0011336282973891231,
+          "required_clearance_m": 0.001
+        },
+        {
+          "status": "CERTIFIED_TOOL_ONLY_CURVE",
+          "checked_intervals": 13,
+          "certified_intervals": 7,
+          "minimum_clearance_lower_bound_m": 0.0011316969267893872,
+          "required_clearance_m": 0.001
+        }
+      ]
+    }
+  ]
+}

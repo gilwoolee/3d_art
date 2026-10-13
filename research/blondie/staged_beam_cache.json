@@ -1,0 +1,42 @@
+{
+  "status": "FULL_BUILD_VERIFIED",
+  "run": "runs/staged_beam_cache_v1",
+  "simulation_only": true,
+  "physical_status": "unverified",
+  "source_provenance": {
+    "status": "SOURCE_PROVENANCE_VERIFIED",
+    "coverage": {
+      "status": "EXACT_INTERVAL_COVERAGE",
+      "sources": 3,
+      "represented_intervals": 4
+    },
+    "physical_sections": 3,
+    "physical_members": 3,
+    "shared_intervals": [
+      {
+        "parent_curve": "shared-detail",
+        "source_interval": [
+          0,
+          1
+        ],
+        "stage": "artistic",
+        "members": [
+          "edge0"
+        ],
+        "credited_after_section": "section-00000",
+        "deposition_complete_s": 42.51658568715919
+      }
+    ]
+  },
+  "checked_intervals": 590,
+  "modeled_duration_s": 141.68535883118844,
+  "physical_sections": 3,
+  "logical_sources": 3,
+  "feed_on_events": 3,
+  "inputs": {
+    "runs/staged_beam_cache_v1/stroke_graph.json": "0587572ac1e0fcd9bf3fafe7413710140e49b14b77d5555b7f48fc799d912006",
+    "runs/staged_beam_cache_v1/construction_plan.json": "9f6adda6e0e884143a2b250dea4bdf47fae87fceabda210b4553f419db4bc257",
+    "runs/staged_beam_cache_v1/offline_dual_arm_plan.json": "a90f197f40a838b3cd37b42d8ba72baecb7beac9047e56cca433f508b3ee1a5d",
+    "runs/staged_beam_cache_v1/offline_dual_arm_validation.json": "52405b833bb2c565914377e3baf712f31c68d7e913d158083e4a5fae25599d1a"
+  }
+}

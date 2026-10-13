@@ -1,0 +1,15 @@
+{
+  "run": "runs/bottle_sections_v1",
+  "status": "FULL_BUILD_VERIFIED",
+  "simulation_only": true,
+  "physical_status": "unverified",
+  "sections": 28,
+  "modeled_duration_s": 745.1313119126029,
+  "checked_intervals": 5164,
+  "replay_status": "CERTIFIED_GEOMETRIC_REPLAY",
+  "inputs": {
+    "runs/bottle_sections_v1/section_build.json": "f2145f004ff69ecee2e88fe4b422d048689002f423a9337705584f03156984d0",
+    "runs/bottle_sections_v1/offline_dual_arm_plan.json": "d575200e921f6aef413a4b54fe3eafa114a785e1448eb2dc94c857143c995805",
+    "runs/bottle_sections_v1/offline_dual_arm_validation.json": "504053f396dabf8e480e125e8fa6913c6b0cc1d43ef31526ceacc87d244b5467"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "run": "runs/staged_regression_iterative_v1",
+  "status": "FULL_BUILD_VERIFIED",
+  "simulation_only": true,
+  "physical_status": "unverified",
+  "inputs": {
+    "runs/staged_regression_iterative_v1/section_build.json": "40d7fa420a7444ab411aabcb8e1ac406d81821714407ff459ef0771a655b6f22",
+    "runs/staged_regression_iterative_v1/offline_dual_arm_plan.json": "ec146a78940d812d5ac2676b504a5a09989d076b035c8876db8b7136043ba216",
+    "runs/staged_regression_iterative_v1/offline_dual_arm_validation.json": "f06400bd5ebdbc3b74d55bd8d4bf6cd02908b918a2d26c742da9b7eee20c44d5"
+  },
+  "source_order": [
+    {
+      "stroke_id": "section-00000",
+      "parent_curve": "A",
+      "stage": "framework",
+      "source_interval": [
+        0,
+        0.5
+      ]
+    },
+    {
+      "stroke_id": "section-00002",
+      "parent_curve": "A",
+      "stage": "framework",
+      "source_interval": [
+        0.5,
+        1
+      ]
+    },
+    {
+      "stroke_id": "section-00001",
+      "parent_curve": "B",
+      "stage": "artistic",
+      "source_interval": [
+        0,
+        1
+      ]
+    }
+  ],
+  "regression": {
+    "status": "FOUND",
+    "attempts": 3,
+    "structural_states": 4,
+    "forward_stiffness_guide": {
+      "section-00000": 0,
+      "section-00002": 1,
+      "section-00001": 2
+    },
+    "failures": []
+  },
+  "modeled_duration_s": 121.98461626847822,
+  "checked_intervals": 587,
+  "replay_status": "CERTIFIED_GEOMETRIC_REPLAY"
+}

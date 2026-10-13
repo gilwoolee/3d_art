@@ -1,0 +1,37 @@
+{
+  "status": "FINITE_ARTISTIC_OCCLUSION_WITNESS",
+  "simulation_only": true,
+  "target": "section-00602-part-5",
+  "blocker": "section-00602-part-2",
+  "interpretation": "32 sampled tool poses clear the completed framework at the failed point; the earlier portion of the same artistic source blocks all 32. This supports an order-only trial, not a proof of a feasible complete build.",
+  "checks": [
+    {
+      "driver": "runs/palace_restart_dense_axis_v1/diagnostic_driver.py",
+      "driver_sha256": "c953604859821b23b665166c8d00568d002f1698e7b5ec0d7bebe1137d6e0794",
+      "report": "runs/palace_restart_dense_axis_v1/comparison.json",
+      "report_sha256": "0bf84cadead5689d94ba1d33dc76ac5cbba8d35d401be5cb07853711f7850de1",
+      "status": "NO_ACCEPTED_DENSE_RESTART_AXIS"
+    },
+    {
+      "driver": "runs/palace_restart_dense_corridor_v1/diagnostic_driver.py",
+      "driver_sha256": "672f35adc4aaf6f6d056d134d96ac557afa692fbe30063ec1b12c17f0ee8535b",
+      "report": "runs/palace_restart_dense_corridor_v1/comparison.json",
+      "report_sha256": "a0cb04a36741921b51ba7ea54c9d7b773ee0f020b5c37dd2da2e7cbf7c5dd3b7",
+      "status": "NO_ORIENTATION_IN_DENSE_SAMPLE"
+    },
+    {
+      "driver": "runs/palace_restart_dense_axis_v1/obstruction_driver.py",
+      "driver_sha256": "5b73a187f26447f76cc7fac1d31c4f1a6fa9ce5c6cce71bcd788f3d162362ce4",
+      "report": "runs/palace_restart_dense_axis_v1/obstruction.json",
+      "report_sha256": "461dddcad149f2ee8d22cc72de11760d6924a2b58945a01668caf5233a3e2117",
+      "status": "FINITE_OBSTRUCTION_SCREEN"
+    },
+    {
+      "driver": "runs/palace_restart_dense_axis_v1/blocker_driver.py",
+      "driver_sha256": "f6847fd26776ac564a232709e12708d658a94a0c355d7e209062ac556b6a3e97",
+      "report": "research/blondie/palace_art_blockers.json",
+      "report_sha256": "9d7600cd7c18a1408b6846cf96816e44e5def4f961fa71214eb625d429abe990",
+      "status": "ARTISTIC_OCCLUSION_WITNESSES"
+    }
+  ]
+}

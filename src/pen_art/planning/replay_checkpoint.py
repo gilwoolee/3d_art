@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..io import artifact, read_json, sha256, write_json
 from .dual_arm import ScheduleState
+from .process_clock import PROCESS_CLOCK_POLICY
 from .scene import MaterialScene
 
 
@@ -56,6 +57,7 @@ def save_checkpoint(path, context, state, checked_intervals):
         time_s=state.time_s,
         checked_intervals=checked_intervals,
         material_segments=state.payload.segments,
+        table_index=state.table_index,
     )
     row["checksum"] = digest(row)
     write_json(path, row)
@@ -76,9 +78,22 @@ def restore_state(checkpoint, moves, tasks, initial, ground, events):
         if move.proposal.task in tasks:
             done.add(move.proposal.task)
             task = tasks[move.proposal.task]
-            for node in task.deposits:
-                ready[node] = min(ready.get(node, float("inf")), move.end_s + task.cooling_s)
+            path = move.proposal.payload
+            if path.metadata.get("process_clock_policy") == PROCESS_CLOCK_POLICY:
+                # Events were reconstructed against source geometry before restore.
+                values = {}
+                for event in path.metadata["deposition_events"]:
+                    node = event["node"]
+                    values[node] = min(values.get(node, float("inf")), event["ready_at_s"])
+                if not set(task.deposits) <= values.keys():
+                    raise ValueError("Checkpoint material readiness is incomplete")
+                for node in task.deposits:
+                    ready[node] = min(ready.get(node, float("inf")), move.start_s + values[node])
+            else:
+                for node in task.deposits:
+                    ready[node] = min(ready.get(node, float("inf")), move.end_s + task.cooling_s)
     scene = MaterialScene()
+    scene.table_index = checkpoint.get("table_index", 0)
     for segment in checkpoint["material_segments"]:
         scene.add(segment["start"], segment["end"], segment["radius_m"], segment["name"])
     return ScheduleState(

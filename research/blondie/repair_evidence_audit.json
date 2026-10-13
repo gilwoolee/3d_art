@@ -1,0 +1,14 @@
+{
+  "status": "PASSED",
+  "source_plan_sha256": "c11ddd218c7507b422ce56d7042f67223d6bba3a0b0204424fd14c5ee91877eb",
+  "checked_run": "runs/staged_shared_regression_v1",
+  "clock_edges_unchanged": true,
+  "immutable_reports": [
+    {
+      "section": "section-00001",
+      "artifact": "axis_repairs/accepted/section-00001-591c4017c43df9c9abd03b03b90737aa6f873897079ceca58b962d32e2b6f196.json",
+      "sha256": "591c4017c43df9c9abd03b03b90737aa6f873897079ceca58b962d32e2b6f196"
+    }
+  ],
+  "overwritten_working_report_rejection": "passed isolated filesystem check"
+}

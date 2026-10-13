@@ -1,0 +1,87 @@
+{
+  "simulation_only": true,
+  "physical_status": "unverified",
+  "robot_motion_checked": false,
+  "fixtures": [
+    {
+      "fixture": "cube",
+      "source_run": "runs/cube_sections_v1_source",
+      "source_inputs": {
+        "normalized.glb": "288a9fe50926780063b36dbb2f75d0e267c1179369460332cc88d13b1a4efd63",
+        "asset_manifest.json": "f8f42bc3899adf04d083b9adcb04618003d2d908190b60eca193099c1860adf5"
+      },
+      "graph_sha256": "880674648cb4483295fc0b51321294ff69408843bdd0b04b0c6e61b071e6dedc",
+      "construction_sha256": "98a9e1f544634be8929e1ac1fd18610807bd0b63da99c2e7ffe776805ae9f507",
+      "members": 436,
+      "sections": 225,
+      "final_frame_pass": true,
+      "coverage": {
+        "status": "EXACT_INTERVAL_COVERAGE",
+        "sources": 17,
+        "sections": 225
+      },
+      "released_sections": 225,
+      "all_release_states_pass": true
+    },
+    {
+      "fixture": "triangular_prism",
+      "source_run": "runs/prism_sections_v1_source",
+      "source_inputs": {
+        "normalized.glb": "735d8faef9976f44a7fce04d669d801b09b120193ec610fc35ad5cdea0e84188",
+        "asset_manifest.json": "4e053ae973f7392f7091121e76a10db7d54ef51f7ae38a509266e613819430c7"
+      },
+      "graph_sha256": "981c59960e6b131d036a3c35c872d7378ded10500e2054dc51c7f281d6ebf281",
+      "construction_sha256": "3144839e84f4c4aefb8006232511317024fcca6ad260172b6c4c848a327edba7",
+      "members": 314,
+      "sections": 153,
+      "final_frame_pass": true,
+      "coverage": {
+        "status": "EXACT_INTERVAL_COVERAGE",
+        "sources": 17,
+        "sections": 153
+      },
+      "released_sections": 153,
+      "all_release_states_pass": true
+    },
+    {
+      "fixture": "torus",
+      "source_run": "runs/torus_sections_v1_source",
+      "source_inputs": {
+        "normalized.glb": "552ec3cd8d3903cc329ed9727bfbb4b1f3ef6dd7adc6a48da9a97c86a3c4e03f",
+        "asset_manifest.json": "ec218ee17fc893a71ba397485a7018cd481c2c6748ad6c218cd2b1ae4d44506c"
+      },
+      "graph_sha256": "4262d3f41070b0786492d72a7ec7ea2b741571290dd76e32344e6cf59d1e111b",
+      "construction_sha256": "ad2f99454ca5121e04fdc57dd6e339ae913b819bfe699d356b2efe1d95462dce",
+      "members": 792,
+      "sections": 180,
+      "final_frame_pass": true,
+      "coverage": {
+        "status": "EXACT_INTERVAL_COVERAGE",
+        "sources": 15,
+        "sections": 180
+      },
+      "released_sections": 180,
+      "all_release_states_pass": true
+    },
+    {
+      "fixture": "bottle",
+      "source_run": "runs/bottle_sections_v1_source",
+      "source_inputs": {
+        "normalized.glb": "7374ec00c814f4f88d97d23e2fd5683e47a1114b8780a60e1e8c72098777a151",
+        "asset_manifest.json": "cdbe18038444b92d9339b2175099eed419c93ba5c468b9af6a0553591be46a31"
+      },
+      "graph_sha256": "92a7d55af86b3e3763407909bec4ea00b6d4621c232705ed5ec1a31ad5e79b6e",
+      "construction_sha256": "cea036ac0f5e8ade5ce813ca407e03654257731beb9f4790f9bd3d65e12b636b",
+      "members": 1094,
+      "sections": 186,
+      "final_frame_pass": true,
+      "coverage": {
+        "status": "EXACT_INTERVAL_COVERAGE",
+        "sources": 25,
+        "sections": 186
+      },
+      "released_sections": 186,
+      "all_release_states_pass": true
+    }
+  ]
+}

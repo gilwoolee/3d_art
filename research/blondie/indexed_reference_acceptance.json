@@ -1,0 +1,60 @@
+{
+  "status": "PASSED",
+  "scope": "Four reference diagnostics only; generated STL cube, hybrid bottle and Palace remain unverified",
+  "simulation_only": true,
+  "runs": [
+    {
+      "run": "cube_turntable_v1",
+      "source": "reference diagnostic",
+      "completed_sections": 12,
+      "checked_intervals": 3036,
+      "modeled_duration_s": 548.3881029802444,
+      "indexed_turns": 0,
+      "drawing_indices": [
+        0
+      ],
+      "browser_receipt": "research/blondie/cube_turntable_v1_browser_replay.json",
+      "browser_receipt_sha256": "43bfbd151786dee3aea56e0096c8cd5d259d23a144a643f10a1ced042bcbd6b7"
+    },
+    {
+      "run": "prism_turntable_replay_v1",
+      "source": "reference diagnostic",
+      "completed_sections": 9,
+      "checked_intervals": 2296,
+      "modeled_duration_s": 483.6120167577064,
+      "indexed_turns": 6,
+      "drawing_indices": [
+        0
+      ],
+      "browser_receipt": "research/blondie/prism_turntable_replay_v1_browser_replay.json",
+      "browser_receipt_sha256": "0b7c957b9f5692e516e4d8c3417c3cc23fec86ec9a4ec59b0ac5278da8602360"
+    },
+    {
+      "run": "bottle_turntable_v1",
+      "source": "reference diagnostic",
+      "completed_sections": 28,
+      "checked_intervals": 5483,
+      "modeled_duration_s": 875.0913146559828,
+      "indexed_turns": 2,
+      "drawing_indices": [
+        0,
+        1
+      ],
+      "browser_receipt": "research/blondie/bottle_turntable_v1_browser_replay.json",
+      "browser_receipt_sha256": "d653fc93abaf336245dd3de87d57b78c4352e551c381eb6bbeba2fbe144122bf"
+    },
+    {
+      "run": "torus_turntable_v1",
+      "source": "reference diagnostic",
+      "completed_sections": 32,
+      "checked_intervals": 6719,
+      "modeled_duration_s": 1167.6172234676528,
+      "indexed_turns": 0,
+      "drawing_indices": [
+        0
+      ],
+      "browser_receipt": "research/blondie/torus_turntable_v1_browser_replay.json",
+      "browser_receipt_sha256": "0d0445ff4e41802bb28dc9dfe45bd2b0c35bdd951fe496f116ff43143429b15a"
+    }
+  ]
+}

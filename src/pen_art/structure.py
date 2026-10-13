@@ -7,6 +7,7 @@ Rigid welds and small deflections are explicit modeling assumptions, not calibra
 
 import warnings
 from copy import deepcopy
+from functools import lru_cache
 
 import networkx as nx
 import numpy as np
@@ -18,6 +19,63 @@ from scipy.spatial import ConvexHull, QhullError
 from .curves import flatten_curve
 from .graph import straight_edge, topology
 from .io import artifact
+from .strokes import orient_stroke
+
+
+def analyze_member_prefixes(
+    graph, material, action, deposited_members=(), *, reverse=False, start_visit=0
+):
+    """Screen each real material prefix in the requested connected traversal.
+
+    New junctions are not independent anchors. The elastic solve uses only bed
+    constraints and actual deposited material, with no hypothetical tip clamp.
+    These member-boundary samples use cooled properties; they do not qualify
+    continuous thermal behavior or replace timestamp-based anchor readiness.
+    """
+    oriented = orient_stroke(action, reverse=reverse, start_visit=start_visit)
+    deposited = set(deposited_members)
+    available = {node["id"] for node in graph["nodes"] if node["ground"]}
+    available.update(
+        edge[end] for edge in graph["edges"] if edge["id"] in deposited for end in ("start", "end")
+    )
+    report = {
+        "status": "MEMBER_PREFIXES_MODELED_PASS",
+        "modeled_pass": True,
+        "section": action["id"],
+        "member_order": list(oriented["members"]),
+        "checked_prefixes": 0,
+        "support_model": "released_cooled_elastic_member_prefixes",
+        "growing_tip_constraint": False,
+        "limitations": [
+            "Samples real member boundaries, not continuous material growth",
+            "Cooled elastic properties; hot-material behavior remains uncalibrated",
+            "New internal junctions do not become pre-existing cooled anchors",
+        ],
+    }
+    if oriented["start"] not in available or deposited.intersection(oriented["members"]):
+        return {
+            **report,
+            "status": "MEMBER_PREFIX_STRUCTURE_REJECTED",
+            "modeled_pass": False,
+            "failure": "NO_EXISTING_START_ANCHOR"
+            if oriented["start"] not in available
+            else "DUPLICATE_MATERIAL",
+        }
+    for member in oriented["members"]:
+        deposited.add(member)
+        screen = analyze_structure(graph, material, edge_ids=deposited)
+        report["checked_prefixes"] += 1
+        if not screen["modeled_pass"]:
+            return {
+                **report,
+                "status": "MEMBER_PREFIX_STRUCTURE_REJECTED",
+                "modeled_pass": False,
+                "rejected_member": member,
+                "screen": {
+                    key: value for key, value in screen.items() if key not in {"nodes", "edges"}
+                },
+            }
+    return report
 
 
 def beam_element(a, b, diameter, material):
@@ -61,6 +119,26 @@ def beam_element(a, b, diameter, material):
     return k, transform, load, area, inertia, length
 
 
+@lru_cache(maxsize=32768)
+def _cached_beam_element(a, b, diameter, young_modulus, poisson_ratio, density):
+    # Geometry and these three physical constants completely determine an
+    # element. Prefix searches reuse them, while changed material or geometry
+    # gets a different key. Loads, supports and the global solve stay uncached.
+    result = beam_element(
+        np.asarray(a),
+        np.asarray(b),
+        diameter,
+        {
+            "young_modulus_pa": young_modulus,
+            "poisson_ratio": poisson_ratio,
+            "density_kg_m3": density,
+        },
+    )
+    for array in result[:3]:
+        array.setflags(write=False)
+    return result
+
+
 def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_translations=None):
     if material["young_modulus_pa"] <= 0 or not -1 < material["poisson_ratio"] < 0.5:
         raise ValueError("Invalid isotropic elastic material parameters")
@@ -88,6 +166,7 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
         ],
         settings=material,
         point_translation_constraints=sorted(fixed_translations or []),
+        solver="equilibrated_lu_with_extended_precision_residual_refinement",
     )
     if not edges:
         return {
@@ -130,8 +209,13 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
     total_mass = 0.0
     mass_center = np.zeros(3)
     for a, b, edge in elements:
-        k, transform, local_load, area, inertia, length = beam_element(
-            positions[a], positions[b], edge["diameter_m"], material
+        k, transform, local_load, area, inertia, length = _cached_beam_element(
+            tuple(positions[a]),
+            tuple(positions[b]),
+            edge["diameter_m"],
+            material["young_modulus_pa"],
+            material["poisson_ratio"],
+            material["density_kg_m3"],
         )
         dofs = np.r_[np.arange(6 * a, 6 * a + 6), np.arange(6 * b, 6 * b + 6)]
         global_k = transform.T @ k @ transform
@@ -156,7 +240,7 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
         # Ideal point contact holds position; it does not clamp rotation or create a weld.
         index = indices[key]
         free[6 * index : 6 * index + 3] = False
-    displacement = np.zeros(count)
+    displacement = np.zeros(count, dtype=np.longdouble)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", MatrixRankWarning)
@@ -170,12 +254,21 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
                 balanced = (diags(scaling) @ reduced @ diags(scaling)).tocsc()
                 factor = splu(balanced)
                 solution = scaling * factor.solve(scaling * force[free])
-                for _ in range(3):
-                    error = force[free] - reduced @ solution
+                # Very short joined spans can make double-precision residual
+                # subtraction dominate gravity loads. Retain extra precision
+                # for the residual and correction sum; the factorization stays
+                # sparse double precision. A failed residual still rejects the
+                # solve, with exactly the same acceptance threshold.
+                accurate = reduced.astype(np.longdouble)
+                solution = solution.astype(np.longdouble)
+                for _ in range(12):
+                    error = force[free] - accurate @ solution
                     if np.linalg.norm(error) <= 1e-8 * max(np.linalg.norm(force[free]), 1e-12):
                         break
-                    candidate = solution + scaling * factor.solve(scaling * error)
-                    if np.linalg.norm(force[free] - reduced @ candidate) >= np.linalg.norm(error):
+                    candidate = solution + scaling * factor.solve(
+                        np.asarray(scaling * error, dtype=float)
+                    )
+                    if np.linalg.norm(force[free] - accurate @ candidate) >= np.linalg.norm(error):
                         break
                     solution = candidate
                 displacement[free] = solution
@@ -189,7 +282,7 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
             "edges": [],
             "nodes": [],
         }
-    residual = stiffness @ displacement - force
+    residual = stiffness.astype(np.longdouble) @ displacement - force
     relative_residual = np.linalg.norm(residual[free]) / max(np.linalg.norm(force[free]), 1e-12)
     if relative_residual >= 1e-5:
         # Never rank braces or draw a deformation field from an unreliable solve.
@@ -203,7 +296,7 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
             "edges": [],
             "nodes": [],
         }
-    translational = displacement.reshape(-1, 6)[:, :3]
+    translational = displacement.reshape(-1, 6)[:, :3].astype(float)
     maximum = float(np.linalg.norm(translational, axis=1).max())
     stresses = {edge["id"]: 0.0 for edge in edges}
     for edge, dofs, k, transform, load, area, inertia, _ in records:

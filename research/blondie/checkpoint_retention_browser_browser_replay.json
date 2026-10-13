@@ -1,0 +1,33 @@
+{
+  "status": "PASSED_BROWSER_REPLAY",
+  "run": "staged_checkpoint_retention_v1",
+  "rate": 10,
+  "horizon_s": 113.26918983808696,
+  "wall_seconds": 13.851,
+  "observed_times_s": [
+    10.0040000000037,
+    20.01,
+    29.5720000000112,
+    40.0030000000076,
+    50.001000000015,
+    60.0030000000078,
+    70.0020000000116,
+    81.0100000000004,
+    91.0020000000117,
+    101.002000000012,
+    111.001000000014,
+    113.269189838087
+  ],
+  "errors": [],
+  "final_clock": "1.9 min / 1.9 min",
+  "badge": "One-arm geometric replay passed",
+  "inputs": {
+    "runs/staged_checkpoint_retention_v1/offline_dual_arm_plan.json": "f0aa78e39120d879644e804ed6125a9e80256b11b7ee2cda5c6e18737fdc48c1",
+    "runs/staged_checkpoint_retention_v1/offline_dual_arm_validation.json": "5f8778578236f57bed6775880097e4f3e739ee162f3caa087a01166bf4b9704c"
+  },
+  "screenshots": [
+    "/home/gilwoo/Workspace/3d_art/research/blondie/checkpoint_retention_browser_full_cell.png",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/checkpoint_retention_browser_completed.png"
+  ],
+  "simulation_only": true
+}

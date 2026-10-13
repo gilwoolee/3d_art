@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "kind": "build_order_preflight",
+  "created_at": "2026-10-11T20:39:59.646146+00:00",
+  "status": "READY_FOR_ORDER_SEARCH",
+  "inputs": {
+    "stroke_graph.json": "91e866531a758365830d1148919b14320e35c3f6d757fe5e6f8876ff703ac848",
+    "fabrication_config.json": "819b401e261ad302f7930c0c0672006de8d2ef7bb85aaee867ffd61ed6a61f05"
+  },
+  "graph_file": "stroke_graph.json",
+  "element_count": 8950,
+  "ground_node_count": 13,
+  "final_structure": {
+    "schema_version": 1,
+    "kind": "structural_screen",
+    "model": "linear_3d_frame",
+    "calibrated": false,
+    "physical_status": "unverified",
+    "boundary_condition": "clamped_print_bed",
+    "limitations": [
+      "Cooled material only",
+      "Rigid welds assumed",
+      "No nozzle forces or thermal distortion",
+      "Linear small deflections"
+    ],
+    "settings": {
+      "calibrated": false,
+      "material_label": "unmeasured development material",
+      "young_modulus_pa": 1000000000,
+      "poisson_ratio": 0.35,
+      "density_kg_m3": 1240,
+      "yield_stress_pa": 15000000,
+      "joint_model": "rigid_unverified",
+      "element_length_m": 0.008,
+      "maximum_displacement_m": 0.001,
+      "maximum_linear_deflection_ratio": 0.1
+    },
+    "point_translation_constraints": [],
+    "solver": "equilibrated_lu_with_extended_precision_residual_refinement",
+    "modeled_pass": true,
+    "maximum_displacement_m": 0.0009990240402153621,
+    "maximum_stress_pa": 2180268.886159553,
+    "linear_model_valid": true,
+    "relative_residual": 8.823365942129587e-10,
+    "resting_com_inside_contacts": true,
+    "mass_kg": 0.03171788156669195,
+    "center_of_mass_m": [
+      0.000665248013184112,
+      0.0006951155663636819,
+      0.0401490459161242
+    ]
+  },
+  "largest_nodal_displacements": [
+    {
+      "id": "hybrid-n07920",
+      "displacement_m": [
+        -0.00020852256835791774,
+        -0.00010333202889453484,
+        -0.0004649016280329755
+      ]
+    },
+    {
+      "id": "hybrid-n07885",
+      "displacement_m": [
+        -0.00016057089735091882,
+        -0.00013979731784757927,
+        -0.0004387744554598348
+      ]
+    },
+    {
+      "id": "n00597",
+      "displacement_m": [
+        -9.953981943283543e-05,
+        -9.971618958214332e-05,
+        -0.0003266098851148583
+      ]
+    },
+    {
+      "id": "n00596",
+      "displacement_m": [
+        -9.937362856682673e-05,
+        -9.966991321266228e-05,
+        -0.00032626989115498093
+      ]
+    },
+    {
+      "id": "n00598",
+      "displacement_m": [
+        -9.972192272744566e-05,
+        -0.00010013618740180152,
+        -0.00032564965100289977
+      ]
+    }
+  ],
+  "smallest_members": [
+    {
+      "id": "member-05795-part0",
+      "length_m": 2.0706328657686964e-05
+    },
+    {
+      "id": "member-05471-part0",
+      "length_m": 2.1626466541062015e-05
+    },
+    {
+      "id": "member-04014-part0",
+      "length_m": 2.1756656665733562e-05
+    },
+    {
+      "id": "member-05854-part0",
+      "length_m": 2.2564107584493895e-05
+    },
+    {
+      "id": "member-03878-part0",
+      "length_m": 2.2729202084234185e-05
+    }
+  ],
+  "actions": [],
+  "robot_feasible": null,
+  "pen_feasible": null,
+  "simulation_only": true,
+  "interpretation": "Fixed final graph passes the configured cooled-frame model; search must still check every construction prefix, extrusion and pen-off transit.",
+  "run": "runs/palace_hybrid_spatial_v1",
+  "centerline_extent_m": [
+    0.12673829785898624,
+    0.13602858734512152,
+    0.09072391426867016
+  ],
+  "material_extent_bound_m": [
+    0.12773829785898624,
+    0.13702858734512152,
+    0.09172391426867016
+  ],
+  "material_assumptions": {
+    "calibrated": false,
+    "material_label": "unmeasured development material",
+    "young_modulus_pa": 1000000000,
+    "poisson_ratio": 0.35,
+    "density_kg_m3": 1240,
+    "yield_stress_pa": 15000000,
+    "joint_model": "rigid_unverified",
+    "element_length_m": 0.008,
+    "maximum_displacement_m": 0.001,
+    "maximum_linear_deflection_ratio": 0.1
+  },
+  "source_provenance": {
+    "status": "SOURCE_PROVENANCE_VERIFIED",
+    "coverage": {
+      "status": "EXACT_INTERVAL_COVERAGE",
+      "sources": 289,
+      "represented_intervals": 1219
+    },
+    "physical_sections": 1218,
+    "physical_members": 8950,
+    "shared_intervals": [
+      {
+        "parent_curve": "contour-3-51",
+        "source_interval": [
+          0.40483673374436147,
+          0.5416560565100249
+        ],
+        "stage": "framework",
+        "members": [
+          "member-04174-part0"
+        ],
+        "credited_after_section": "section-00370"
+      }
+    ]
+  }
+}

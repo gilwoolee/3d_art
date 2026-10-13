@@ -1,0 +1,35 @@
+{
+  "status": "PASSED_BROWSER_REPLAY",
+  "run": "staged_restart_split_v1",
+  "rate": 10,
+  "horizon_s": 178.3702968228825,
+  "wall_seconds": 18.898,
+  "observed_times_s": [
+    10.0020000000112,
+    20.0009999999964,
+    30.0009999999964,
+    40.0000000000001,
+    50.0009999999964,
+    60.0000000000001,
+    70.0009999999963,
+    80.0009999999963,
+    90.0009999999963,
+    100.000999999996,
+    110.004000000003,
+    120.000999999995,
+    130.128000000006,
+    139.999999999999,
+    151.000999999995,
+    160.999999999999,
+    171.000999999995,
+    178.370296822883
+  ],
+  "errors": [],
+  "final_clock": "3.0 min / 3.0 min",
+  "badge": "One-arm geometric replay passed",
+  "inputs": {
+    "runs/staged_restart_split_v1/offline_dual_arm_plan.json": "eb82ad54a27147563f9f7637626951826473e165461226a0d654c43aaace1aca",
+    "runs/staged_restart_split_v1/offline_dual_arm_validation.json": "bdb96c063ce17ddeb23bd19919d7027b6a794b42df1f6d72a5055e700f3007ed"
+  },
+  "simulation_only": true
+}

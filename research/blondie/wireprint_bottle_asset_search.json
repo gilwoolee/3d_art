@@ -1,0 +1,36 @@
+{
+  "status": "EXACT_ORIGINAL_ASSET_NOT_LOCATED",
+  "searched_primary_pages": [
+    "https://hcie.csail.mit.edu/research/wireprint/wireprint.html",
+    "https://hpi.de/baudisch/projects/wireprint.html",
+    "https://interactive3dprinting.infosci.cornell.edu/wireframe.html"
+  ],
+  "finding": "Primary pages provide paper, images and videos but no bottle STL download. The press ZIP is labeled photos, not source geometry.",
+  "local_substitute": {
+    "path": "research/primitive_fixtures/bottle/model_mm.stl",
+    "sha256": "d4f017a00227944d2a3dece80d61f84d4e39f325ca716e7b1a4da1959640727e",
+    "generator": "scripts/generate_primitive_fixtures.py:bottle",
+    "profile_z_radius_m": [
+      [
+        0,
+        0.025
+      ],
+      [
+        0.075,
+        0.025
+      ],
+      [
+        0.1,
+        0.012
+      ],
+      [
+        0.12,
+        0.012
+      ]
+    ],
+    "max_extent_m": 0.12,
+    "identity": "procedurally generated local fixture; not verified as WirePrint paper bottle",
+    "redistribution": "generated within this repository; no external bottle asset downloaded"
+  },
+  "comparison": "14-minute paper value is contextual target only; exact same-geometry comparison remains pending original STL/scale."
+}

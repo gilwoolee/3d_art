@@ -143,13 +143,14 @@ def sampled_operation(kind, positions, robot, offset, step, **metadata):
     }
 
 
-def local_contact_surfaces(contact_z, table_z, platform_z, radius):
+def local_contact_surfaces(
+    contact_z, table_z, platform_z, radius, *, riser_z=None, riser_name="build_riser"
+):
     """Surfaces intersecting the permitted local contact region, in robot Z."""
-    return [
-        name
-        for name, height in (("platform", platform_z), ("table", table_z))
-        if abs(contact_z - height) <= radius
-    ]
+    surfaces = [("platform", platform_z), ("table", table_z)]
+    if riser_z is not None:
+        surfaces.append((riser_name, riser_z))
+    return [name for name, height in surfaces if abs(contact_z - height) <= radius]
 
 
 def contact_validator(
@@ -166,9 +167,10 @@ def contact_validator(
     maximum_depth,
     contact_surfaces=(),
     deadline=float("inf"),
+    optimize_contact_geometry=None,
 ):
     """Keep full arm checks; permit tip contact only inside a local join ball."""
-    clipped = material.outside_ball(contact, contact_radius)
+    clipped = material.contact_view(contact, contact_radius, local=optimize_contact_geometry)
     failures = []
 
     def rejected(scope, result):

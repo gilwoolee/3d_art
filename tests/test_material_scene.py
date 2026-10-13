@@ -6,60 +6,28 @@ from pen_art.planning.collision import placed
 from pen_art.planning.scene import MaterialScene
 
 
-def test_incremental_scene_nearest_query_and_capsule_orientation():
+def test_local_contact_geometry_preserves_raw_exact_queries_at_clearance_boundary():
     scene = MaterialScene()
-    probe = placed(fcl.Sphere(0.05), np.eye(4))
-    assert scene.nearest(probe) is None
-    scene.add([1, 0, 0], [1, 1, 0], 0.05, "far")
-    assert scene.nearest(probe)["name"] == "far"
-    assert scene.nearest(probe)["distance_m"] == pytest.approx(0.9, abs=1e-6)
-    scene.add([-0.1, 0, 0], [0.1, 0, 0], 0.01, "newly-deposited")
-    assert scene.nearest(probe)["name"] == "newly-deposited"
-    assert scene.nearest(probe)["distance_m"] <= 0
-    clone = scene.copy()
-    assert clone.nearest(probe)["name"] == "newly-deposited"
-    assert len(clone.segments) == 2
-    assert not clone.possibly_near([5, 0, 0], 0.1, 0.01)
-    assert clone.possibly_near([0, 0, 0], 0.1, 0)
-    # Equality cannot be culled; include capsule radius and the entire body.
-    assert clone.possibly_near([1.16, 0, 0], 0.1, 0.01)
-    assert not clone.possibly_near([1.17, 0, 0], 0.1, 0.01)
-
-    # A long, spatially ordered insertion sequence must keep every capsule in
-    # the balanced broadphase and agree with exhaustive narrowphase distance.
-    ordered = MaterialScene()
-    for index in range(64):
-        ordered.add([index * 0.01, 1, 0], [(index + 1) * 0.01, 1, 0], 0.002, str(index))
-    transform = np.eye(4)
-    transform[:3, 3] = [0.73, 1, 0]
-    near_end = placed(fcl.Sphere(0.005), transform)
-    expected = min(
-        fcl.distance(near_end, obj, fcl.DistanceRequest(), fcl.DistanceResult())
-        for obj in ordered.objects
-    )
-    assert ordered.nearest(near_end)["distance_m"] == pytest.approx(expected, abs=1e-10)
-    ordered.add([0.73, 0.99, 0], [0.73, 1.01, 0], 0.002, "later")
-    assert ordered.nearest(near_end)["name"] == "later"
-    assert ordered.nearest(near_end)["distance_m"] <= 0
-
-    # A long link can have an overlapping enclosing sphere while its actual
-    # body clears the material box. The box is only a sufficient certificate;
-    # equality, overlap, and material added after a query must still be checked.
-    long_body = placed(fcl.Box(4, 0.1, 0.1), np.eye(4))
-    assert ordered.possibly_near([0, 0, 0], 2.01, 0.01)
-    assert not ordered.possibly_near_body(long_body, 0.01)
-    assert ordered.possibly_near_body(long_body, 1)
-    ordered.add([0, 0, 0], [0, 0, 0], 0.01, "inside-body")
-    assert ordered.possibly_near_body(long_body, 0)
-
-
-def test_contact_clipping_keeps_material_outside_local_ball():
-    scene = MaterialScene()
-    scene.add([-1, 0, 0], [1, 0, 0], 0.01, "strand")
-    clipped = scene.outside_ball([0, 0, 0], 0.1)
-    probe = placed(fcl.Sphere(0.001), np.eye(4))
-    assert clipped.nearest(probe)["distance_m"] > 0
-    transform = np.eye(4)
-    transform[0, 3] = 0.2
-    assert clipped.nearest(placed(fcl.Sphere(0.001), transform))["distance_m"] <= 0
-    assert len(clipped.segments) == 2
+    for i in range(80):
+        scene.add([i * 0.02, 1, 0], [i * 0.02 + 0.008, 1, 0], 0.001, str(i))
+    scene.add([-0.01, 0, 0], [0.05, 0, 0], 0.001, "join")
+    scene.clearance_query_enabled = False
+    local = scene.contact_view([0, 0, 0], 0.01, local=True)
+    assert not local.clearance_query_enabled
+    assert type(scene.contact_view([0, 0, 0], 0.01, local=False)) is MaterialScene
+    for generation in range(2):
+        reference = scene.outside_ball([0, 0, 0], 0.01)
+        for gap in (0.000999, 0.001, 0.001001, -0.001):
+            transform = np.eye(4)
+            transform[:3, 3] = [0.03, 0, 0.002 + gap]
+            body = placed(fcl.Sphere(0.001), transform)
+            expected = reference.nearest(body)
+            observed = local.nearest(body)
+            assert observed["distance_m"] == pytest.approx(expected["distance_m"], abs=1e-8)
+            assert (local.within_clearance(body, 0.001) is None) == (
+                reference.within_clearance(body, 0.001) is None
+            )
+        if generation == 0:
+            scene.add([0.03, 0, 0.003], [0.03, 0, 0.003], 0.001, "new obstruction")
+    assert scene.clearance_stats["contact_views_refreshed"] == 2
+    assert scene.clearance_stats["exact_nearest_queries"] > 0

@@ -1,4 +1,4 @@
-"""Generate host-local Flexiv assets without modifying historical run checkpoints."""
+"""Prepare one Flexiv arm with a provisional straight flange-centered pen."""
 
 import argparse
 from pathlib import Path
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("research/planning_cell"))
     parser.add_argument(
-        "--profile", type=Path, default=Path("configs/cell/one_flexiv_right_angle_lean.yaml")
+        "--profile", type=Path, default=Path("configs/cell/one_flexiv_straight.yaml")
     )
     parser.add_argument("--repository", type=Path, default=Path("external/flexiv_description"))
     args = parser.parse_args()

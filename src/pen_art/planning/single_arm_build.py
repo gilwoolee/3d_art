@@ -717,15 +717,15 @@ def main():
         required=True,
         help="One-arm cell run with selected allocation; starts empty or resumes its saved prefix",
     )
-    parser.add_argument("--profile", default="configs/cell/one_flexiv_right_angle_lean.yaml")
+    parser.add_argument("--profile", default="configs/cell/one_flexiv_straight.yaml")
     args = parser.parse_args()
     build = SingleArmBuild(args.run, args.profile)
     try:
         build.run_remaining()
         if build.state["status"] == "ALL_STROKES_PREPARED_REPLAY_PENDING":
-            from .full_build_export import export_and_replay
+            from .full_build_export import export_full_build
 
-            export_and_replay(build)
+            export_full_build(build)
     except Exception as exc:
         # Keep an unexpected terminal exception distinguishable from a live
         # planner. Preserve the accepted prefix and propagate the traceback.

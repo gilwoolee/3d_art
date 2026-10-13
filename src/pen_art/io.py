@@ -26,12 +26,13 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
-def write_json(path: Path, data: dict) -> None:
+def write_json(path: Path, data: dict, *, compact=False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w") as file:
-            json.dump(data, file, indent=2, allow_nan=False)
+            json.dump(data, file, indent=None if compact else 2,
+                      separators=(",", ":") if compact else None, allow_nan=False)
             file.write("\n")
         os.replace(temporary, path)
     finally:

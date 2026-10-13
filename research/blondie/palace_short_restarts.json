@@ -1,0 +1,86 @@
+{
+  "status": "EXACT_SPLITS_AND_RELEASE_SCREENS_VERIFIED",
+  "run": "runs/palace_hybrid_short_restarts_v1",
+  "original_members": 8950,
+  "members": 8956,
+  "replacement_members": 8,
+  "added_junctions": 6,
+  "added_ground_anchors": 0,
+  "added_support_material": false,
+  "maximum_sampled_curve_difference_m": 3.665822065867408e-17,
+  "source_provenance": {
+    "status": "SOURCE_PROVENANCE_VERIFIED",
+    "coverage": {
+      "status": "EXACT_INTERVAL_COVERAGE",
+      "sources": 289,
+      "represented_intervals": 1225
+    },
+    "physical_sections": 1224,
+    "physical_members": 8956,
+    "shared_intervals": [
+      {
+        "parent_curve": "contour-3-51",
+        "source_interval": [
+          0.40483673374436147,
+          0.5416560565100249
+        ],
+        "stage": "framework",
+        "members": [
+          "member-04174-part0"
+        ],
+        "credited_after_section": "section-00370"
+      }
+    ]
+  },
+  "final_maximum_displacement_m": 0.000999024040219951,
+  "early_releases": [
+    {
+      "section": "section-00005-part-0",
+      "modeled_pass": true,
+      "maximum_displacement_m": 3.0929374595581097e-06
+    },
+    {
+      "section": "section-00005-part-1",
+      "modeled_pass": true,
+      "maximum_displacement_m": 3.0929374595581097e-06
+    },
+    {
+      "section": "section-00005-part-2",
+      "modeled_pass": true,
+      "maximum_displacement_m": 3.092937459557786e-06
+    },
+    {
+      "section": "section-00005-part-3",
+      "modeled_pass": true,
+      "maximum_displacement_m": 4.3121208426540346e-06
+    },
+    {
+      "section": "section-00006-part-0",
+      "modeled_pass": true,
+      "maximum_displacement_m": 4.3121208426540346e-06
+    },
+    {
+      "section": "section-00006-part-1",
+      "modeled_pass": true,
+      "maximum_displacement_m": 4.3121208426540346e-06
+    },
+    {
+      "section": "section-00006-part-2",
+      "modeled_pass": true,
+      "maximum_displacement_m": 4.3121208426540346e-06
+    },
+    {
+      "section": "section-00006-part-3",
+      "modeled_pass": true,
+      "maximum_displacement_m": 4.348938981838695e-06
+    }
+  ],
+  "robot_build_complete": false,
+  "inputs": {
+    "runs/palace_hybrid_spatial_v1/stroke_graph.json": "91e866531a758365830d1148919b14320e35c3f6d757fe5e6f8876ff703ac848",
+    "runs/palace_hybrid_short_restarts_v1/stroke_graph.json": "6e73dd79753e6bda6d3c603421a73bdf50e15b7685384dcfbdb3595a20898800",
+    "runs/palace_hybrid_short_restarts_v1/construction_plan.json": "fee0a8105584d2d6d0fd3ef23b9eb4c6ab707386f5afb98d98fc77483eb5c342",
+    "runs/palace_hybrid_short_restarts_v1/restart_preflight.json": "cb4cef0d129e273161adcd16016d030dd3b03147cdf4c336f586ab65f1d2ec80",
+    "runs/palace_hybrid_short_restarts_v1/trial_reason.json": "acb07138920a44ffbd0728d201f73b325ca3084a52ad12a4bb3873e6cbf63cde"
+  }
+}

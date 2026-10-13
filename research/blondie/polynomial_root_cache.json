@@ -1,0 +1,44 @@
+{
+  "status": "PASS",
+  "range_cases": 3280,
+  "ranges": {
+    "uncached": {
+      "seconds": 0.20089311400079168,
+      "result_sha256": "bb3a7a855013e174e76d035057710088ff124d391fe7856ed94b8661666e3f78"
+    },
+    "cached": {
+      "seconds": 0.09534943899961945,
+      "result_sha256": "bb3a7a855013e174e76d035057710088ff124d391fe7856ed94b8661666e3f78"
+    }
+  },
+  "replays": {
+    "uncached": {
+      "run": "runs/staged_root_cache_uncached_v3",
+      "seconds": 23.023066699999617,
+      "checked_intervals": 590,
+      "validation_sha256": "52405b833bb2c565914377e3baf712f31c68d7e913d158083e4a5fae25599d1a"
+    },
+    "cached": {
+      "run": "runs/staged_root_cache_cached_v3",
+      "seconds": 16.037847829000384,
+      "checked_intervals": 590,
+      "validation_sha256": "52405b833bb2c565914377e3baf712f31c68d7e913d158083e4a5fae25599d1a"
+    }
+  },
+  "cache": {
+    "hits": 116805,
+    "misses": 15096,
+    "maxsize": 32768,
+    "currsize": 15096
+  },
+  "simulation_only": true,
+  "scope": "Exact bounds and complete replay match; timings are local under concurrent jobs, not a full-build speed claim.",
+  "inputs": {
+    "runs/staged_beam_cache_v1/offline_dual_arm_plan.json": "a90f197f40a838b3cd37b42d8ba72baecb7beac9047e56cca433f508b3ee1a5d",
+    "src/pen_art/timing.py": "0926b6d08f95165e4aca4a4ba7368960ad2463be7ea7a796567e4d244db96565",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/check_polynomial_root_cache.py": "4159b650c238577f0d6a4ded1a9c87f02b60092448c6101f5cb00108869aa25e"
+  },
+  "browser_receipt": "research/blondie/root_cache_browser_browser_replay.json",
+  "browser_checker_sha256": "f4bcf2bc6562f521a17d8693571465b098ee10c4848a278713afc9521c3cee74",
+  "browser_identity_negative_check": "runs/root_cache_v2_identity_rejection.log"
+}

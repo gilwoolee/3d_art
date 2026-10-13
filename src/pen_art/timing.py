@@ -6,6 +6,7 @@ No artifact from this module is an executable hardware program.
 """
 
 import argparse
+from functools import lru_cache
 from importlib.metadata import version
 from pathlib import Path
 
@@ -24,9 +25,17 @@ class TimingParameterizationError(ValueError):
     """A valid geometric path did not receive a certified finite clock."""
 
 
+@lru_cache(maxsize=32768)
+def _stationary_roots(kind, coefficients, domain, window):
+    # Subdivision changes the interval, not the polynomial's stationary points.
+    # Snapshot coefficients and coordinate mapping so later edits cannot reuse
+    # roots from a different polynomial. Keep only immutable cached results.
+    return tuple(kind(coefficients, domain=domain, window=window).deriv().roots())
+
+
 def polynomial_range(poly, start, end):
     """Extrema of a scalar polynomial on a closed interval, including endpoints."""
-    roots = poly.deriv().roots()
+    roots = _stationary_roots(type(poly), tuple(poly.coef), tuple(poly.domain), tuple(poly.window))
     points = [start, end] + [
         float(root.real) for root in roots if abs(root.imag) < 1e-8 and start < root.real < end
     ]

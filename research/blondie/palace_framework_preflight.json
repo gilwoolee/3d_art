@@ -1,0 +1,63 @@
+{
+  "simulation_only": true,
+  "physical_status": "unverified",
+  "robot_motion_checked": false,
+  "revisions": [
+    {
+      "run": "runs/palace_hybrid_v3",
+      "graph_sha256": "0b48ff92759de4dfdafc8a8de61fff3a084b815c06b33f4f9e187a5b1725ec7b",
+      "screen_sha256": "359352dcc955c09050ccdb39d855a24568a311a74781907c2020b96accefe837",
+      "base_reinforcement": null,
+      "modeled_pass": false,
+      "failure": null,
+      "maximum_displacement_m": 0.04198280938772837,
+      "maximum_stress_pa": 17953542.874277025,
+      "relative_residual": 1.0682134521592329e-07
+    },
+    {
+      "run": "runs/palace_hybrid_v4",
+      "graph_sha256": "5966e882a25dd23ab4eece1148f9b5dae91e24f8bb70b69c56b64df78026d906",
+      "screen_sha256": "200233c512b9b3c5a516b3ed2ca5613febca06ad924754c64c39ec1eda55eb02",
+      "base_reinforcement": {
+        "reason": {
+          "initial_maximum_displacement_m": 0.038095022310270295,
+          "initial_maximum_stress_pa": 17260403.303286288
+        },
+        "added_members": [
+          "bed-reinforcement-n00155",
+          "bed-reinforcement-n00010",
+          "bed-reinforcement-n00106"
+        ],
+        "target_contour_height_m": 0.009980162793905843
+      },
+      "modeled_pass": false,
+      "failure": null,
+      "maximum_displacement_m": 0.0017518001676531442,
+      "maximum_stress_pa": 3487568.2626429684,
+      "relative_residual": 3.1407457769039177e-09
+    },
+    {
+      "run": "runs/palace_hybrid_v5_source",
+      "graph_sha256": "a764bf8cb22f952c9dcfa8b0d505137b53c7723b2904d8c1f984ff63afd40f44",
+      "screen_sha256": "e4bc0900deddf0085e472edaec27ea72a207b6bdc9d94a712a53b0e5ef946f28",
+      "base_reinforcement": {
+        "reason": {
+          "initial_maximum_displacement_m": 0.038095022310270295,
+          "initial_maximum_stress_pa": 17260403.303286288
+        },
+        "added_members": [
+          "bed-reinforcement-n00155",
+          "bed-reinforcement-n00010",
+          "bed-reinforcement-n00106",
+          "bed-reinforcement-n00833"
+        ],
+        "target_contour_height_m": 0.009980162793905843
+      },
+      "modeled_pass": true,
+      "failure": null,
+      "maximum_displacement_m": 0.0008921392543908606,
+      "maximum_stress_pa": 2230242.691128919,
+      "relative_residual": 7.441496556624259e-10
+    }
+  ]
+}

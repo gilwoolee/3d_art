@@ -341,14 +341,14 @@ def plan_cell(
         if remaining <= 0:
             return finish("PLANNING_TIME_BUDGET")
         if single_arm_restarts:
-            from .full_build_export import export_and_replay
+            from .full_build_export import export_full_build
             from .single_arm_build import SingleArmBuild
 
             finish("REALIZING_SINGLE_ARM_RESTARTS")
             builder = SingleArmBuild(output, profile)
             builder.run_remaining()
             if builder.state["status"] == "ALL_STROKES_PREPARED_REPLAY_PENDING":
-                export_and_replay(builder)
+                export_full_build(builder)
             return finish(
                 builder.state["status"],
                 prepared_strokes=len(builder.state["completed_strokes"]),

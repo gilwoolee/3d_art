@@ -1,0 +1,169 @@
+{
+  "at": "2026-10-11T21:55:29.589070+00:00",
+  "cube": {
+    "run": "runs/cube_wireprint_diverse_v1",
+    "status": "REPLAY_REPORTING_EXCEPTION",
+    "completed_sections": 90,
+    "required_sections": 225,
+    "passed_previous_failure": "section-00032",
+    "graph_sha256": "96d11926a9c335515090c0cf8cdabd653fc31978e438acf44011e3d53bbcb5c5",
+    "construction_sha256": "98a9e1f544634be8929e1ac1fd18610807bd0b63da99c2e7ffe776805ae9f507",
+    "live_pid": null,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00089"
+  },
+  "palace_forward": {
+    "status": "SUPERSEDED",
+    "completed_sections": 9,
+    "required_sections": 1218,
+    "run": "runs/palace_hybrid_diverse_v1",
+    "live_pid": null,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00004"
+  },
+  "palace_backward": {
+    "status": "REGRESSION_RUNNING",
+    "required_sections": 1218,
+    "run": "runs/palace_hybrid_backward_diverse_v1",
+    "completed_sections": 0,
+    "live_pid": 324773,
+    "progress_kind": "accepted_suffix",
+    "last_reported_suffix_sections": 1
+  },
+  "bottle_wir3d": {
+    "geometry_optimization_complete": true,
+    "semantic_optimization_running": false,
+    "log": "runs/bottle_hybrid_source/wir3d_bundle/logs/curves-20.log",
+    "status": "complete",
+    "exported_curves": 29
+  },
+  "all_generated_builds_complete": false,
+  "simulation_only": true,
+  "cube_spatial": {
+    "run": "runs/cube_wireprint_spatial_v1",
+    "status": "PROPOSED_ORDER_RUNNING",
+    "completed_sections": 80,
+    "required_sections": 225,
+    "live_pid": 1228236,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00079"
+  },
+  "palace_spatial": {
+    "run": "runs/palace_hybrid_spatial_v1",
+    "status": "PROPOSED_ORDER_RUNNING",
+    "completed_sections": 9,
+    "required_sections": 1218,
+    "live_pid": 1099997,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00004"
+  },
+  "palace_backward_spatial": {
+    "run": "runs/palace_hybrid_backward_spatial_v1",
+    "status": "REGRESSION_RUNNING",
+    "completed_sections": 0,
+    "required_sections": 1218,
+    "live_pid": 1132556,
+    "progress_kind": "accepted_suffix",
+    "last_reported_suffix_sections": 2
+  },
+  "bottle_hybrid": {
+    "run": "runs/bottle_hybrid_v1",
+    "status": "PROPOSED_ORDER_RUNNING",
+    "completed_sections": 62,
+    "required_sections": 273,
+    "live_pid": 1228341,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00061"
+  },
+  "bottle_backward": {
+    "run": "runs/bottle_hybrid_backward_v1",
+    "status": "REGRESSION_RUNNING",
+    "completed_sections": 0,
+    "required_sections": 273,
+    "live_pid": 1205070,
+    "progress_kind": "accepted_suffix",
+    "last_reported_suffix_sections": 3
+  },
+  "palace_restart": {
+    "run": "runs/palace_hybrid_restart_v1",
+    "status": "PROPOSED_ORDER_RUNNING",
+    "completed_sections": 10,
+    "required_sections": 1219,
+    "live_pid": 1207014,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00005"
+  },
+  "previous_goal_turn_classification": "Verified wait: revalidated live builder PIDs before and after four bounded 45-second waits. The generated cube advanced from 62 to 66 accepted sections, the Palace art-order suffix from 5 to 6, the grouped-restart suffix from 2 to 3, and the supported-order preparation from 200 to 220 sections. Bottle remains at a best prefix of 52 while actively testing alternate motion branches. No build completion or infeasibility is claimed.",
+  "palace_restart_order": {
+    "run": "runs/palace_hybrid_restart_order_v1",
+    "status": "PROPOSED_ORDER_RUNNING",
+    "completed_sections": 10,
+    "required_sections": 1219,
+    "live_pid": 1220725,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00005"
+  },
+  "palace_short_restarts": {
+    "run": "runs/palace_hybrid_short_restarts_v1",
+    "status": "PROPOSED_ORDER_RUNNING",
+    "completed_sections": 10,
+    "required_sections": 1224,
+    "live_pid": 1228408,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00005-part-0"
+  },
+  "palace_neighbor_order": {
+    "run": "runs/palace_hybrid_neighbor_order_v1",
+    "status": "PROPOSED_ORDER_RUNNING",
+    "completed_sections": 8,
+    "required_sections": 1218,
+    "live_pid": 1229830,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00003"
+  },
+  "palace_spaced": {
+    "run": "runs/palace_hybrid_spaced_1200um_v1",
+    "status": "PROPOSED_ORDER_STRUCTURE_REJECTED",
+    "completed_sections": 6,
+    "required_sections": 603,
+    "live_pid": null,
+    "progress_kind": "best_forward_prefix",
+    "best_prefix_last_section": "section-00001"
+  },
+  "palace_spaced_backward": {
+    "run": "runs/palace_hybrid_spaced_1200um_backward_v1",
+    "status": "REGRESSION_RUNNING",
+    "completed_sections": 0,
+    "required_sections": 603,
+    "live_pid": 1235719,
+    "progress_kind": "accepted_suffix",
+    "last_reported_suffix_sections": 2
+  },
+  "palace_art_restarts": {
+    "run": "runs/palace_hybrid_art_restarts_v1",
+    "status": "REGRESSION_RUNNING",
+    "completed_sections": 0,
+    "required_sections": 885,
+    "live_pid": 1246047,
+    "progress_kind": "accepted_suffix",
+    "last_reported_suffix_sections": 6
+  },
+  "palace_art_order": {
+    "run": "runs/palace_hybrid_art_order_v1",
+    "status": "REGRESSION_RUNNING",
+    "completed_sections": 0,
+    "required_sections": 885,
+    "live_pid": 1253486,
+    "progress_kind": "accepted_suffix",
+    "last_reported_suffix_sections": 6
+  },
+  "palace_grouped_restart": {
+    "run": "runs/palace_hybrid_grouped_restart_v1",
+    "status": "REGRESSION_RUNNING",
+    "completed_sections": 0,
+    "required_sections": 883,
+    "live_pid": 1265463,
+    "progress_kind": "accepted_suffix",
+    "last_reported_suffix_sections": 4
+  }
+}

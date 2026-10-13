@@ -1,0 +1,17 @@
+{
+  "status": "PASSED_SOURCE_VIEWS",
+  "views": [
+    {
+      "stage": "asset",
+      "url": "http://127.0.0.1:8765/?run=cube_stl_turntable_v2&stage=asset",
+      "metrics": "Model overview\n0.00 M\nSOURCE TRIANGLES\nProcessing triangles\n12\nDimensions\n80 × 80 × 80 mm\nTexture\nNone\nUp direction\nZ in build frame\nOpen asset manifest ↗"
+    },
+    {
+      "stage": "graph",
+      "url": "http://127.0.0.1:8765/?run=cube_stl_turntable_v2&stage=graph",
+      "metrics": "Continuous pen strokes\n225\nPROPOSED PEN STROKES\nMaterial graph members\n436\nMaterial components\n1\nGround contacts\n16\nObject dimensions\n8.0 × 8.0 × 8.0 cm\nTotal drawing length\n6.14 m\nAdded material\n0.00 m\n\nEach contour stays continuous through incidental intersections. Graph members track connections; they are not separate pen starts. Ordering can add intentional cooling pauses.\n\nOpen continuous strokes ↗"
+    }
+  ],
+  "errors": [],
+  "scope": "Solid mesh and generated framework, not print acceptance"
+}

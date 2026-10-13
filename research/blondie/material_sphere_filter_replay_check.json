@@ -1,0 +1,17 @@
+{
+  "status": "PASSED",
+  "checked_intervals": 5483,
+  "completed_strokes": 28,
+  "indexed_turns": 2,
+  "final_table_index": 0,
+  "validation_sha256": "5fc2ab6563bfc5b10438476804c5e793a6c0a624408e6368f683502b18ffd50d",
+  "plan_sha256": "329ffe1dcd0c7c91c7dae9418dc3c12aceba27ed88979225748c8d13a065ca13",
+  "source_sha256": {
+    "src/pen_art/planning/scene.py": "6eb67387aa1ac1ecc353e0fb229616c3ffc9f4a5790cc83c10427611693a4ca0",
+    "src/pen_art/planning/collision.py": "5235c65914acd8caff3bb89c01e85b7380e2475b54a55eee3387125da0bd02f0",
+    "src/pen_art/planning/axis_repair.py": "75baab415bb2bd49e54b9f0b762756ae24319ffae43f9b54a20fd3bd6f1ea323",
+    "src/pen_art/planning/axis_corridor.py": "5d107dee60ebe576bad60e6ffb9201e87bd976106b911d27a55382075ac33e07",
+    "src/pen_art/planning/constant_axis.py": "6795d7771c93d916ba3573000310eedb2fdb8862981a45f2aaaf7120421679b2"
+  },
+  "scope": "Fresh complete reference replay with conservative cell-sphere filtering; same plan as the prior complete 10x browser check"
+}

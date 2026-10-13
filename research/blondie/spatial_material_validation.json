@@ -1,0 +1,29 @@
+{
+  "status": "PASSED",
+  "scope": "Spatial material query regression and local Palace drawing; not a complete generated build",
+  "simulation_only": true,
+  "focused_tests": {
+    "command": ".venv/bin/python -m pytest -q tests/test_material_scene.py tests/test_collision.py tests/test_transit.py tests/test_coordinated_motion.py",
+    "passed": 18
+  },
+  "fresh_replay": {
+    "run": "runs/staged_spatial_bounds_v1",
+    "status": "CERTIFIED_GEOMETRIC_REPLAY",
+    "intervals": 545
+  },
+  "browser_replay": {
+    "rate": 10,
+    "errors": []
+  },
+  "inputs": {
+    "src/pen_art/planning/scene.py": "540fb5344de686fdc6a624a2866b18491b0c29a17fb990059b6b6be68277dcc2",
+    "src/pen_art/planning/collision.py": "f891972011b29956731b8fd03e314e1370a1e39def8bf13af53921995bd7e25b",
+    "tests/test_material_scene.py": "110a1d196d2d482a8029a4b00ada50f7037763f65bb827b797b76193773cd365",
+    "tests/test_collision.py": "1f81e5fbb104777541f1d6fe3e0226772aac8aa6d695dd578669ee36da9603b8",
+    "research/blondie/material_queries.json": "24f4275c8924c6e2bc1304915c51f2dddefe1dba4bfd38ef12df2c8563196b2a",
+    "research/blondie/palace_collision_profile.json": "c5603ea353eca3cb54986bf638fb69545451015d94f9185e7347b8795fabe7be",
+    "runs/staged_spatial_bounds_v1/offline_dual_arm_plan.json": "f2ea44e1941c4133f88eb7cfdbd33d4abd42ba3f42286d82d7b47cc2fae943a0",
+    "runs/staged_spatial_bounds_v1/offline_dual_arm_validation.json": "ef66127afdc2ba72846b7953a5f215df197fe3b0cd1e70093488d998a01e0c96",
+    "research/blondie/staged_spatial_bounds_v1_browser_replay.json": "025443f2b20a0b0c90de83eb9ff520463efce639d8dba1fb3e175380f8447698"
+  }
+}

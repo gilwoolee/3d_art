@@ -27,17 +27,27 @@ def orientation_lattice(original):
 
 
 def pen_clear(planner, arm, point, rotation, scene, clearance):
+    if monotonic() >= planner.deadline:
+        return False
     target = np.eye(4)
     target[:3, :3], target[:3, 3] = rotation, point
     flange = target @ np.linalg.inv(arm.flange_to_tcp)
     for body in arm.tool.bodies:
-        obj = placed(body.geometry, flange @ body.origin)
+        transform = flange @ body.origin
+        obj = placed(body.geometry, transform)
         if any(
             optimization_distance(obj, other) < clearance for other in planner.obstacles.values()
         ):
             return False
         if scene.possibly_near_body(obj, clearance):
-            nearest = scene.nearest(obj)
+            try:
+                nearest = scene.nearest(
+                    obj,
+                    deadline=planner.deadline,
+                    bounding_sphere=(transform[:3, 3], body.radius),
+                )
+            except TimeoutError:
+                return False  # A sample timeout is not an infeasibility certificate.
             if nearest and nearest["distance_m"] < clearance:
                 return False
     return True

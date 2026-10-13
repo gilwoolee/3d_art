@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-11T20:05:23.549774+00:00",
+  "fixes": [
+    "Preserve one reference IK seed and generate distinct remaining seeds",
+    "Fully checked home waypoint before random transit search",
+    "Bounded continuous-collision collocation repair for section paths"
+  ],
+  "focused_tests": {
+    "passed": 11
+  },
+  "static_clear_ik_targets": 46,
+  "staged_build_status": "FULL_BUILD_VERIFIED",
+  "staged_browser_errors": [],
+  "generated_builds": "still_in_progress",
+  "simulation_only": true,
+  "physical_status": "unverified",
+  "inputs": {
+    "src/pen_art/planning/curobo_adapter.py": "0f789a9f99f7af06c53a86f9dde306c9ed00d0b2cda3c0660f9f99aacec4f577",
+    "src/pen_art/planning/cell_planner.py": "010510c3b8ec9df09fb03e3ec233b099226a7763c99549a0686228113023f7ed",
+    "research/blondie/flexiv_seed_diversity.json": "b57e220691ee2e8abd0521f648a38e2809b4f299a3e03116f1313d4e816e479c",
+    "research/blondie/flexiv_ik_diverse_benchmark.json": "39a1c19806e46184df210520c20992cb3728ba03e7c794ab30e3c654c4c3884e",
+    "research/blondie/home_waypoint_check.json": "45b294c7354789068643dd1f9a1dbbabd2795057ce86a604cab0c9eca84631d3",
+    "research/blondie/staged_shared_diverse.json": "1fa111e7fa7e588ea9c990a10c8c2a97dc20980c8d13567fa08b6f81d9a223f2",
+    "research/blondie/staged_shared_diverse_v1_browser_replay.json": "554008a948003521fa65ee009f39d47cf1cc83bb71fddf8f0f881eabaae99ffb",
+    "research/blondie/cube_interior_collision_repair.json": "2cc90583adede5812bd93221a06e7304f0ca64148b9458516ba9f45181048deb"
+  },
+  "successful_full_search_collision_correction": "research/blondie/cube_interior_collision_repair.json"
+}

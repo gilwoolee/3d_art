@@ -29,7 +29,7 @@ def main():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--verify-inputs", action="store_true")
     parser.add_argument(
-        "--profile", type=Path, default=Path("configs/cell/one_flexiv_right_angle_lean.yaml")
+        "--profile", type=Path, default=Path("configs/cell/one_flexiv_straight.yaml")
     )
     args = parser.parse_args()
     run = args.run

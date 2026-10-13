@@ -1,0 +1,63 @@
+{
+  "at": "2026-10-11T20:15:40.752584+00:00",
+  "run": "runs/cube_wireprint_diverse_v1",
+  "section": "section-00030",
+  "local_motion_status": "ACCEPTED",
+  "included_in_validated_prefix": true,
+  "corrections": [
+    {
+      "correction": 1,
+      "status": "SAMPLED_FREE_AXIS_PROPOSAL",
+      "trigger": {
+        "stroke_id": "section-00030",
+        "arm": "arm_1",
+        "phase": "DRAW",
+        "status": "CLEARANCE_UNRESOLVED",
+        "segment_index": 68,
+        "alpha": 0.12225198745727539,
+        "positions": [
+          0.19471067716926518,
+          -0.8473265179795952,
+          -0.5182569523091436,
+          2.255153452402064,
+          -0.14267165592120065,
+          3.064561235518701,
+          0.2739760634547461
+        ],
+        "pairs": [
+          {
+            "first": "tool/nozzle_shank",
+            "second": "material/arm_1/section-00029/10.386022262725-10.491895319347/3",
+            "distance_m": 0.0010010046955225612,
+            "motion_bound_m": 4.8493275833290585e-09
+          }
+        ],
+        "evaluations": 523,
+        "maximum_depth": 20
+      },
+      "collocation": {
+        "method": "bounded_low_clearance_collocation",
+        "segment_index": 68,
+        "alpha": 0.3211003731460728,
+        "clearance_m": 0.0009806642706403973,
+        "reference_point_m": [
+          0.576230534229334,
+          -0.19,
+          0.21681350343866607
+        ],
+        "first_failure_alpha": 0.12225198745727539,
+        "sample_count": 17,
+        "minimizer_evaluations": 18,
+        "certified": false
+      }
+    }
+  ],
+  "accepted_repair_file": "runs/cube_wireprint_diverse_v1/axis_repairs/accepted/arm_1_section-00030-37be468437fd9d0e3fb395331d9b2354cbcdf8c69ab90213a66300b1e9b5488b.json",
+  "accepted_repair_sha256": "37be468437fd9d0e3fb395331d9b2354cbcdf8c69ab90213a66300b1e9b5488b",
+  "complete_build_verified": false,
+  "simulation_only": true,
+  "inputs": {
+    "runs/cube_wireprint_diverse_v1/stroke_graph.json": "96d11926a9c335515090c0cf8cdabd653fc31978e438acf44011e3d53bbcb5c5",
+    "runs/cube_wireprint_diverse_v1/construction_plan.json": "98a9e1f544634be8929e1ac1fd18610807bd0b63da99c2e7ffe776805ae9f507"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "scope": "Counterfactual static tool poses only; not an approved tool, arm path, continuous curve certificate, or complete-build acceptance.",
+  "active_profile_changed": false,
+  "profile_sha256": "1c4547bfe7b1a6f340e24be79cb11e2040f9539438356337650accf052b4bfb4",
+  "graph_sha256": "8bd43ca5c8c3e6296da148fc2e0d62c6175061eab98edb406225abdb28a457bf",
+  "section": "section-01212",
+  "parent_curve": "wir3d-20-0020",
+  "orientations_per_radius": 50000,
+  "results": [
+    {
+      "nozzle_shank_radius_m": 0.0025,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 0,
+      "exact_tool_checks": 0,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [],
+      "seconds": 6.737226548000763
+    },
+    {
+      "nozzle_shank_radius_m": 0.002,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 0,
+      "exact_tool_checks": 0,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [],
+      "seconds": 6.89964732199951
+    },
+    {
+      "nozzle_shank_radius_m": 0.0015,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 0,
+      "exact_tool_checks": 0,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [],
+      "seconds": 7.151559449997876
+    },
+    {
+      "nozzle_shank_radius_m": 0.001,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 1,
+      "exact_tool_checks": 1,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [],
+      "seconds": 7.7612698070006445
+    },
+    {
+      "nozzle_shank_radius_m": 0.0005,
+      "unchanged_barrel_radius_m": 0.012,
+      "necessary_screen_survivors": 88,
+      "exact_tool_checks": 88,
+      "sampled_curve_points": 12,
+      "constant_tool_rotations_passing_sampled_points": [],
+      "seconds": 8.931511079001211
+    }
+  ]
+}

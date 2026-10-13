@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "kind": "build_order_preflight",
+  "created_at": "2026-10-11T20:39:55.896310+00:00",
+  "status": "READY_FOR_ORDER_SEARCH",
+  "inputs": {
+    "stroke_graph.json": "96d11926a9c335515090c0cf8cdabd653fc31978e438acf44011e3d53bbcb5c5",
+    "fabrication_config.json": "819b401e261ad302f7930c0c0672006de8d2ef7bb85aaee867ffd61ed6a61f05"
+  },
+  "graph_file": "stroke_graph.json",
+  "element_count": 436,
+  "ground_node_count": 16,
+  "final_structure": {
+    "schema_version": 1,
+    "kind": "structural_screen",
+    "model": "linear_3d_frame",
+    "calibrated": false,
+    "physical_status": "unverified",
+    "boundary_condition": "clamped_print_bed",
+    "limitations": [
+      "Cooled material only",
+      "Rigid welds assumed",
+      "No nozzle forces or thermal distortion",
+      "Linear small deflections"
+    ],
+    "settings": {
+      "calibrated": false,
+      "material_label": "unmeasured development material",
+      "young_modulus_pa": 1000000000,
+      "poisson_ratio": 0.35,
+      "density_kg_m3": 1240,
+      "yield_stress_pa": 15000000,
+      "joint_model": "rigid_unverified",
+      "element_length_m": 0.008,
+      "maximum_displacement_m": 0.001,
+      "maximum_linear_deflection_ratio": 0.1
+    },
+    "point_translation_constraints": [],
+    "solver": "equilibrated_lu_with_extended_precision_residual_refinement",
+    "modeled_pass": true,
+    "maximum_displacement_m": 3.260668194481813e-05,
+    "maximum_stress_pa": 136130.33171601553,
+    "linear_model_valid": true,
+    "relative_residual": 5.005422807646438e-12,
+    "resting_com_inside_contacts": true,
+    "mass_kg": 0.005976617854217756,
+    "center_of_mass_m": [
+      -3.751377501620371e-08,
+      -1.332601425365434e-08,
+      0.039999961813833106
+    ]
+  },
+  "largest_nodal_displacements": [
+    {
+      "id": "n00225",
+      "displacement_m": [
+        -5.910807743269702e-06,
+        -5.9107987959637085e-06,
+        -3.151698775051743e-05
+      ]
+    },
+    {
+      "id": "n00218",
+      "displacement_m": [
+        5.211305120965417e-06,
+        5.211422437590996e-06,
+        -3.141744707183197e-05
+      ]
+    },
+    {
+      "id": "n00197",
+      "displacement_m": [
+        -4.803550052237362e-06,
+        -4.803535055293712e-06,
+        -3.123296717739976e-05
+      ]
+    },
+    {
+      "id": "n00224",
+      "displacement_m": [
+        -5.2975261155785596e-06,
+        -5.910697000530496e-06,
+        -2.9876644869084554e-05
+      ]
+    },
+    {
+      "id": "n00212",
+      "displacement_m": [
+        -5.91075575832274e-06,
+        -5.297399263216671e-06,
+        -2.987643334501236e-05
+      ]
+    }
+  ],
+  "smallest_members": [
+    {
+      "id": "member-00431",
+      "length_m": 0.0061523076956730765
+    },
+    {
+      "id": "member-00048",
+      "length_m": 0.006152846153846134
+    },
+    {
+      "id": "member-00102",
+      "length_m": 0.006152846153846134
+    },
+    {
+      "id": "member-00156",
+      "length_m": 0.006152846153846134
+    },
+    {
+      "id": "member-00210",
+      "length_m": 0.006152846153846134
+    }
+  ],
+  "actions": [],
+  "robot_feasible": null,
+  "pen_feasible": null,
+  "simulation_only": true,
+  "interpretation": "Fixed final graph passes the configured cooled-frame model; search must still check every construction prefix, extrusion and pen-off transit.",
+  "run": "runs/cube_wireprint_spatial_v1",
+  "centerline_extent_m": [
+    0.08,
+    0.08000000000000002,
+    0.08000000000000002
+  ],
+  "material_extent_bound_m": [
+    0.081,
+    0.08100000000000002,
+    0.08100000000000002
+  ],
+  "material_assumptions": {
+    "calibrated": false,
+    "material_label": "unmeasured development material",
+    "young_modulus_pa": 1000000000,
+    "poisson_ratio": 0.35,
+    "density_kg_m3": 1240,
+    "yield_stress_pa": 15000000,
+    "joint_model": "rigid_unverified",
+    "element_length_m": 0.008,
+    "maximum_displacement_m": 0.001,
+    "maximum_linear_deflection_ratio": 0.1
+  },
+  "source_provenance": {
+    "status": "SOURCE_PROVENANCE_VERIFIED",
+    "coverage": {
+      "status": "EXACT_INTERVAL_COVERAGE",
+      "sources": 17,
+      "represented_intervals": 225
+    },
+    "physical_sections": 225,
+    "physical_members": 436,
+    "shared_intervals": []
+  }
+}

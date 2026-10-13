@@ -1,0 +1,241 @@
+{
+  "scope": "Necessary single-inscribed-sphere clearance screen against the conservative completed framework; sampled directions are not an infeasibility proof and do not check full tool or IK",
+  "section": "section-01212",
+  "directions": 642,
+  "results": [
+    {
+      "body": "tool/lateral_bracket",
+      "local_z_m": -0.040000001,
+      "sphere_radius_m": 0.009999999,
+      "sphere_offset_m": 0.1860779411698227,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.15403729172698521,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/lateral_bracket",
+      "local_z_m": -0.040000001,
+      "sphere_radius_m": 0.009999999,
+      "sphere_offset_m": 0.1860779411698227,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.15167262371835985,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/lateral_bracket",
+      "local_z_m": 0,
+      "sphere_radius_m": 0.009999999,
+      "sphere_offset_m": 0.1691892431568863,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.137605431267735,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/lateral_bracket",
+      "local_z_m": 0,
+      "sphere_radius_m": 0.009999999,
+      "sphere_offset_m": 0.1691892431568863,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.13538941238781452,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/lateral_bracket",
+      "local_z_m": 0.040000001,
+      "sphere_radius_m": 0.009999999,
+      "sphere_offset_m": 0.16070158670654128,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.12917722107186252,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/lateral_bracket",
+      "local_z_m": 0.040000001,
+      "sphere_radius_m": 0.009999999,
+      "sphere_offset_m": 0.16070158670654128,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.1269774686503439,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/pen_body",
+      "local_z_m": -0.078000001,
+      "sphere_radius_m": 0.011999999,
+      "sphere_offset_m": 0.198000001,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.16321917845762307,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/pen_body",
+      "local_z_m": -0.078000001,
+      "sphere_radius_m": 0.011999999,
+      "sphere_offset_m": 0.198000001,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.16083753910369852,
+      "best_direction": [
+        -0.13307110414059134,
+        0.08224246527936231,
+        -0.9876883405951378
+      ]
+    },
+    {
+      "body": "tool/pen_body",
+      "local_z_m": 0,
+      "sphere_radius_m": 0.011999999,
+      "sphere_offset_m": 0.12,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.08840671807742922,
+      "best_direction": [
+        -0.13279247682790246,
+        0.22011702747329243,
+        -0.9663925974024391
+      ]
+    },
+    {
+      "body": "tool/pen_body",
+      "local_z_m": 0,
+      "sphere_radius_m": 0.011999999,
+      "sphere_offset_m": 0.12,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.08523359236248644,
+      "best_direction": [
+        -0.13279247682790246,
+        0.22011702747329243,
+        -0.9663925974024391
+      ]
+    },
+    {
+      "body": "tool/pen_body",
+      "local_z_m": 0.078000001,
+      "sphere_radius_m": 0.011999999,
+      "sphere_offset_m": 0.04199999900000001,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.01709009597260504,
+      "best_direction": [
+        -0.21302286564912978,
+        0.5712516591357086,
+        -0.7926492292592814
+      ]
+    },
+    {
+      "body": "tool/pen_body",
+      "local_z_m": 0.078000001,
+      "sphere_radius_m": 0.011999999,
+      "sphere_offset_m": 0.04199999900000001,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.017127945811091068,
+      "best_direction": [
+        -0.21302286564912978,
+        0.5712516591357086,
+        -0.7926492292592814
+      ]
+    },
+    {
+      "body": "tool/nozzle_shank",
+      "local_z_m": -0.011000000999999999,
+      "sphere_radius_m": 0.002499999,
+      "sphere_offset_m": 0.027500001000000024,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.020177578432631016,
+      "best_direction": [
+        -0.301258879093232,
+        0.9162441751912158,
+        -0.2640827506590655
+      ]
+    },
+    {
+      "body": "tool/nozzle_shank",
+      "local_z_m": -0.011000000999999999,
+      "sphere_radius_m": 0.002499999,
+      "sphere_offset_m": 0.027500001000000024,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.021563007347805863,
+      "best_direction": [
+        -0.3750385674782097,
+        0.8439114746223902,
+        -0.3836137326850478
+      ]
+    },
+    {
+      "body": "tool/nozzle_shank",
+      "local_z_m": 0,
+      "sphere_radius_m": 0.002499999,
+      "sphere_offset_m": 0.016500000000000015,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.010635565104451697,
+      "best_direction": [
+        -0.6156420208736806,
+        0.7838430424199713,
+        -0.08108629344330352
+      ]
+    },
+    {
+      "body": "tool/nozzle_shank",
+      "local_z_m": 0,
+      "sphere_radius_m": 0.002499999,
+      "sphere_offset_m": 0.016500000000000015,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.012150001000000035,
+      "best_direction": [
+        -0.43388856455269476,
+        0.8626684804161862,
+        -0.2598919130077544
+      ]
+    },
+    {
+      "body": "tool/nozzle_shank",
+      "local_z_m": 0.011000000999999999,
+      "sphere_radius_m": 0.002499999,
+      "sphere_offset_m": 0.005499999000000005,
+      "endpoint": 0,
+      "best_sampled_gap_m": 0.0006236240335428375,
+      "best_direction": [
+        -0.16245984811645314,
+        0.9510565162951536,
+        -0.2628655560595668
+      ]
+    },
+    {
+      "body": "tool/nozzle_shank",
+      "local_z_m": 0.011000000999999999,
+      "sphere_radius_m": 0.002499999,
+      "sphere_offset_m": 0.005499999000000005,
+      "endpoint": 1,
+      "best_sampled_gap_m": 0.0011500000000000416,
+      "best_direction": [
+        -0.48444164206066787,
+        0.8649293358632748,
+        0.13120037881301283
+      ]
+    }
+  ]
+}

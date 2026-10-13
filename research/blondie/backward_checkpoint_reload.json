@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "run": "runs/staged_backward_checkpoint_reload_v1",
+  "source": "runs/staged_backward_checkpoint_v1",
+  "revalidated_backward_motions": 3,
+  "checked_intervals": 582,
+  "malformed_index_rejected": true,
+  "simulation_only": true,
+  "inputs": {
+    "/home/gilwoo/Workspace/3d_art/research/blondie/check_backward_checkpoint_reload.py": "b126b66a63f29716fd14771bbefb539fe8be851f41087329153137eaea9bed79",
+    "src/pen_art/planning/section_build.py": "5be388b3938a6cd185f5aee683280fd4660134f2e4295f9060fcbe4da8d98e7f",
+    "runs/staged_backward_checkpoint_reload_v1/backward_checkpoint.json": "20addcae8efce607c3b3bc0ed42d7374f7c020d8d7b4cb2ae68db927c688f896",
+    "runs/staged_backward_checkpoint_reload_v1/offline_dual_arm_plan.json": "6df187621ea42ca60bf6d0e12cace1362faa8b40cf2b6e82c35bd321058b1a89",
+    "runs/staged_backward_checkpoint_reload_v1/offline_dual_arm_validation.json": "f203da71ec234c1b401035b53b70f837a865e8df5c20dc9274d4c139a626b8c5"
+  },
+  "browser_receipt": "research/blondie/backward_checkpoint_reload_browser_browser_replay.json",
+  "existing_tests": {
+    "command": ".venv/bin/python -m pytest -q tests/test_construction_sections.py",
+    "result": "6 passed in 0.78s",
+    "log": "runs/backward_checkpoint_unit_check.log",
+    "sha256": "c706c44da365ed4dd50a8b473b274867d633c3c0bebb74c9ac39bb8ef80d7afa"
+  }
+}

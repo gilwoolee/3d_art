@@ -1,0 +1,42 @@
+{
+  "status": "PASSED_BROWSER_REPLAY",
+  "run": "phase1_connected_zigzag_variation",
+  "rate": 10,
+  "horizon_s": 83.3513822875544,
+  "wall_seconds": 10.715,
+  "observed_times_s": [
+    10.0010000000149,
+    20.0010000000149,
+    30.0030000000447,
+    40.0020000000298,
+    50.0010000000149,
+    60.0010000000149,
+    70.0030000000447,
+    80.0030000000447,
+    83.3513822875544
+  ],
+  "errors": [],
+  "indexed_turns": 2,
+  "observed_table_angles_rad": [
+    1.5281554524718661,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    0.0901825427926799,
+    0
+  ],
+  "final_clock": "1.4 min / 1.4 min",
+  "badge": "One-arm geometric replay passed",
+  "inputs": {
+    "runs/phase1_connected_zigzag_variation/offline_dual_arm_plan.json": "b7892abffd1db4eebc6d978bec97d9ede15cc8f48b528c9d03f61607d8d3e0ec",
+    "runs/phase1_connected_zigzag_variation/offline_dual_arm_validation.json": "b0e1f7c94aa94e6c9907c312316a8d8daf9051138d7d48a7dc22a4c5768f2143"
+  },
+  "screenshots": [
+    "/home/gilwoo/Workspace/3d_art/research/blondie/phase1_connected_zigzag_variation_full_cell.png",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/phase1_connected_zigzag_variation_completed.png"
+  ],
+  "simulation_only": true
+}

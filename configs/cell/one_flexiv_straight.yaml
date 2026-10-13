@@ -1,0 +1,201 @@
+schema_version: 1
+units: m
+simulation_only: true
+placement_confirmed: false
+world_from_build:
+- - 1
+  - 0
+  - 0
+  - 0.45
+- - 0
+  - 1
+  - 0
+  - -0.15
+- - 0
+  - 0
+  - 1
+  - 0.22
+- - 0
+  - 0
+  - 0
+  - 1
+environment:
+  table_z_m: 0.0
+  table_size_m:
+  - 4.0
+  - 4.0
+  - 0.1
+  platform_size_m:
+  - 0.19
+  - 0.19
+  clearance_m: 0.001
+  platform_top_z_m: 0.2
+  build_riser:
+    type: box
+    size_m:
+    - 0.08
+    - 0.08
+    height_m: 0.02
+    calibrated: false
+arms:
+- id: arm_1
+  robot_urdf: ../../research/planning_cell/robot.urdf
+  robot_manifest: ../../research/planning_cell/robot_manifest.json
+  robot_visual: ../../research/planning_cell/robot_reference.glb
+  world_from_base:
+  - - 1
+    - 0
+    - 0
+    - 0
+  - - 0
+    - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+    - 0
+  - - 0
+    - 0
+    - 0
+    - 1
+  flange_to_tcp:
+  - - 1
+    - 0
+    - 0
+    - 0
+  - - 0
+    - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+    - 0.225
+  - - 0
+    - 0
+    - 0
+    - 1
+  tool_geometry:
+    schema_version: 1
+    units: m
+    calibrated: false
+    flange_to_tcp:
+    - - 1
+      - 0
+      - 0
+      - 0
+    - - 0
+      - 1
+      - 0
+      - 0
+    - - 0
+      - 0
+      - 1
+      - 0.225
+    - - 0
+      - 0
+      - 0
+      - 1
+    tip_radius_m: 0.0005
+    bodies:
+    - name: flange_adapter
+      origin:
+      - - 1
+        - 0
+        - 0
+        - 0
+      - - 0
+        - 1
+        - 0
+        - 0
+      - - 0
+        - 0
+        - 1
+        - 0.0075
+      - - 0
+        - 0
+        - 0
+        - 1
+      shape:
+        type: box
+        size_m:
+        - 0.04
+        - 0.04
+        - 0.015
+      allowed_touch_links:
+      - flange
+      - link7
+    - name: pen_body
+      origin:
+      - - 1
+        - 0
+        - 0
+        - 0
+      - - 0
+        - 1
+        - 0
+        - 0
+      - - 0
+        - 0
+        - 1
+        - 0.105
+      - - 0
+        - 0
+        - 0
+        - 1
+      shape:
+        type: cylinder
+        radius_m: 0.012
+        length_m: 0.18
+      allowed_touch_links: []
+    - name: tapered_nose
+      origin:
+      - - 1
+        - 0
+        - 0
+        - 0
+      - - 0
+        - 1
+        - 0
+        - 0
+      - - 0
+        - 0
+        - 1
+        - 0.2085
+      - - 0
+        - 0
+        - 0
+        - 1
+      shape:
+        type: frustum
+        bottom_radius_m: 0.012
+        top_radius_m: 0.0008
+        length_m: 0.027
+      allowed_touch_links: []
+    mounting: straight_flange_centerline
+    assumptions:
+    - Provisional unmeasured straight flange-centered attachment.
+    - 'Estimated tapered nose: radius 12 mm at 30 mm behind TCP, 0.8 mm at 3 mm behind
+      TCP.'
+    - Adapter and barrel dimensions retained; contact tip is separate; product photographs
+      are not dimensional calibration.
+  initial_positions:
+  - -0.17378000112905412
+  - -0.001349269953384689
+  - -0.20655756986612095
+  - 1.5927313424045078
+  - 0.000276799061416584
+  - 0.023255602906319558
+  - -0.3803438248247924
+drawing_pen_tilt_deg: 0.0
+setup_description: One Flexiv arm with provisional straight centered pen, estimated
+  tapered nose, 20 mm object-footprint riser, build origin (0.45,-0.15,0.22)m. Upright
+  fixed tool orientation and maximum 27-degree descending zigzag slope from horizontal.
+  Tool, fixture, placement and process are unmeasured.
+drawing_orientation_policy: fixed
+drawing_pen_tilt_candidates_deg:
+- 0.0
+parking_assumptions:
+- Provisional collision-screened parked posture; TCP at world (0.45,-0.30,0.45)m.
+- Home relocation is a model setup assumption; no hardware motion is commanded.

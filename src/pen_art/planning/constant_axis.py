@@ -46,7 +46,8 @@ def constant_axis_candidates(planner, drawing, material):
             flange = target @ inverse
             feasible = True
             for body in arm.tool.bodies:
-                obj = placed(body.geometry, flange @ body.origin)
+                transform = flange @ body.origin
+                obj = placed(body.geometry, transform)
                 if any(
                     optimization_distance(obj, other) < clearance
                     for other in planner.obstacles.values()
@@ -54,7 +55,7 @@ def constant_axis_candidates(planner, drawing, material):
                     feasible = False
                     break
                 if scene.possibly_near_body(obj, clearance):
-                    nearest = scene.nearest(obj)
+                    nearest = scene.nearest(obj, bounding_sphere=(transform[:3, 3], body.radius))
                     if nearest and nearest["distance_m"] < clearance:
                         feasible = False
                         break

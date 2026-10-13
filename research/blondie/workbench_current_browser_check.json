@@ -1,0 +1,15 @@
+{
+  "status": "PASSED",
+  "current_runs": [
+    "bottle_hybrid_forward_turntable_v1",
+    "cube_stl_forward_turntable_v1",
+    "palace_turntable_v1"
+  ],
+  "total_runs": 173,
+  "default_current_only": true,
+  "all_runs_accessible": true,
+  "explicit_historical_link_preserved": true,
+  "historical_link_keeps_list_short": true,
+  "mobile_selects_fit": true,
+  "errors": []
+}

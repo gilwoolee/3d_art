@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "run": "runs/staged_beam_cache_v1",
+  "simulation_only": true,
+  "cache": {
+    "hits": 64,
+    "misses": 10,
+    "maxsize": 32768,
+    "currsize": 10
+  },
+  "inputs": {
+    "scripts/check_shared_source.py": "bfef6c818b34d2a7ddc8e63390ebbcc83ed1be1a36fb4ea1ca5dac37ccbe57e2",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/check_structure_element_cache_e2e.py": "f62c00dc1d140fcb37dc81378c933440087b22869876fd5c50abb6702790ef64",
+    "src/pen_art/structure.py": "f8a6a8ec3749b9c36027b8396e8115f7e28944c45f3bc4a12ceffcff77de053c"
+  },
+  "baseline_comparison": {
+    "offline_dual_arm_plan.json": {
+      "baseline": "runs/staged_compact_cache_backward_v1/offline_dual_arm_plan.json",
+      "current": "runs/staged_beam_cache_v1/offline_dual_arm_plan.json",
+      "sha256": "a90f197f40a838b3cd37b42d8ba72baecb7beac9047e56cca433f508b3ee1a5d",
+      "identical": true
+    },
+    "offline_dual_arm_validation.json": {
+      "baseline": "runs/staged_compact_cache_backward_v1/offline_dual_arm_validation.json",
+      "current": "runs/staged_beam_cache_v1/offline_dual_arm_validation.json",
+      "sha256": "52405b833bb2c565914377e3baf712f31c68d7e913d158083e4a5fae25599d1a",
+      "identical": true
+    }
+  }
+}

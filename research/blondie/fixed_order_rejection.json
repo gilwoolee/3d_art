@@ -1,0 +1,27 @@
+{
+  "status": "PASSED",
+  "run": "runs/palace_hybrid_spaced_1200um_v1",
+  "revalidated_motions": 6,
+  "rejected_section": "section-00524",
+  "motion_retries_after_structural_rejection": 0,
+  "structure": {
+    "modeled_pass": false,
+    "failure": "UNSUPPORTED_COMPONENT",
+    "unsupported_components": [
+      [
+        "n00181",
+        "n00276"
+      ]
+    ]
+  },
+  "scope": "Reject this fixed order; no claim of infeasibility for other orders.",
+  "simulation_only": true,
+  "inputs": {
+    "/home/gilwoo/Workspace/3d_art/research/blondie/check_fixed_order_rejection.py": "fd9c56ba4059c1130164fa0556268bc8ff949171224f42730ff6c1229b15178a",
+    "src/pen_art/planning/section_build.py": "fcd7a3a3d016f335beeff96f09d4f986542aaa5fcd07fbd9277b2ddc160170b9",
+    "runs/palace_hybrid_spaced_1200um_v1/stroke_graph.json": "78c22e29441c463391da5a8553d79c97092da078d69a67df02c30367fefa8cc4",
+    "runs/palace_hybrid_spaced_1200um_v1/construction_plan.json": "2cb222d2fc4a015a820c3613393f343ab219e3a858e5665e5a814f054d386be1",
+    "runs/palace_hybrid_spaced_1200um_v1/section_build.json": "8aacd2e9e5fd27236eb76accf60df2a713e4aca7358829d3ab5798b0ea3ff4b2",
+    "runs/palace_hybrid_spaced_1200um_v1/forward_checkpoint.json": "43708adcf5d5f01386e7e52720dd3ce4fa65caae1ec1422cb88afdb24a590adc"
+  }
+}

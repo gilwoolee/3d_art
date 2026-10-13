@@ -1,0 +1,35 @@
+{
+  "status": "PASSED_BROWSER_REPLAY",
+  "run": "staged_backward_checkpoint_v1",
+  "rate": 10,
+  "horizon_s": 135.9778494201525,
+  "wall_seconds": 15.816,
+  "observed_times_s": [
+    10.0030000000074,
+    19.0020000000112,
+    30.001000000015,
+    40.0000000000001,
+    50.1030000000076,
+    60.0480000000077,
+    70.0010000000151,
+    81.0010000000151,
+    91.0000000000002,
+    101.003000000007,
+    111.001000000014,
+    122.024000000004,
+    131.248000000007,
+    135.977849420153
+  ],
+  "errors": [],
+  "final_clock": "2.3 min / 2.3 min",
+  "badge": "One-arm geometric replay passed",
+  "inputs": {
+    "runs/staged_backward_checkpoint_v1/offline_dual_arm_plan.json": "6df187621ea42ca60bf6d0e12cace1362faa8b40cf2b6e82c35bd321058b1a89",
+    "runs/staged_backward_checkpoint_v1/offline_dual_arm_validation.json": "f203da71ec234c1b401035b53b70f837a865e8df5c20dc9274d4c139a626b8c5"
+  },
+  "screenshots": [
+    "/home/gilwoo/Workspace/3d_art/research/blondie/backward_checkpoint_browser_full_cell.png",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/backward_checkpoint_browser_completed.png"
+  ],
+  "simulation_only": true
+}

@@ -1,0 +1,42 @@
+{
+  "status": "PASSED_BROWSER_REPLAY",
+  "run": "phase1_connected_zigzag_cold",
+  "rate": 10,
+  "horizon_s": 83.33296036218259,
+  "wall_seconds": 10.579,
+  "observed_times_s": [
+    10.0010000000149,
+    20.0010000000149,
+    30.0020000000298,
+    40.0020000000298,
+    50.0010000000149,
+    60.0020000000298,
+    70.0020000000298,
+    80.0010000000149,
+    83.3329603621826
+  ],
+  "errors": [],
+  "indexed_turns": 2,
+  "observed_table_angles_rad": [
+    1.5281554524718661,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    1.5707963267948966,
+    0.08851808558995544,
+    0
+  ],
+  "final_clock": "1.4 min / 1.4 min",
+  "badge": "One-arm geometric replay passed",
+  "inputs": {
+    "runs/phase1_connected_zigzag_cold/offline_dual_arm_plan.json": "558f2bd643e17f31e0937b3653afca08fea72c621ab6d72d65554ff5e12e7b77",
+    "runs/phase1_connected_zigzag_cold/offline_dual_arm_validation.json": "0ffe2e199911ba17d456423e48031f4123b9060840cf840d2ef1326f81218108"
+  },
+  "screenshots": [
+    "/home/gilwoo/Workspace/3d_art/research/blondie/phase1_connected_zigzag_cold_full_cell.png",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/phase1_connected_zigzag_cold_completed.png"
+  ],
+  "simulation_only": true
+}

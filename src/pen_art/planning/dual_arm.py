@@ -17,6 +17,10 @@ class StrokeTask:
     anchors: frozenset[str]
     deposits: frozenset[str]
     cooling_s: float = 0.0
+    parent_curve: str | None = None
+    source_interval: tuple[float, float] | None = None
+    stage: str | None = None
+    members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,10 @@ class ScheduleState:
     history: tuple[ScheduledMotion, ...] = ()
     payload: object = field(default=None, compare=False, repr=False)
 
+    @property
+    def table_index(self):
+        return getattr(self.payload, "table_index", 0)
+
     def ready_nodes(self):
         return frozenset(node for node, ready in self.support_ready if ready <= self.time_s)
 
@@ -81,7 +89,18 @@ def tasks_from_construction(construction, graph, cooling_s=0.0):
         anchors = deposits if action["closed"] else frozenset([action["start"], action["end"]])
         if not anchors or not anchors <= deposits:
             raise ValueError("Every alternative anchor must lie on its stroke")
-        tasks.append(StrokeTask(action["id"], anchors, deposits, cooling_s))
+        tasks.append(
+            StrokeTask(
+                action["id"],
+                anchors,
+                deposits,
+                cooling_s,
+                action.get("parent_curve"),
+                tuple(action["source_interval"]) if "source_interval" in action else None,
+                action.get("stage"),
+                tuple(action["members"]),
+            )
+        )
     ground = frozenset(node["id"] for node in graph["nodes"] if node["ground"])
     return tuple(tasks), ground
 

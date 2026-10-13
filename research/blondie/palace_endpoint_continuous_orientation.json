@@ -1,0 +1,93 @@
+{
+  "status": "NO_CLEAR_ORIENTATION_WITHIN_BUDGET",
+  "section": "section-01212",
+  "framework_only": true,
+  "elapsed_seconds": 24.774433974002022,
+  "evaluations": 9708,
+  "attempts": [
+    {
+      "iterations": 150,
+      "minimum_gap_m": 6.7856838659052244e-06,
+      "cost": 1.0266032504190816
+    },
+    {
+      "iterations": 150,
+      "minimum_gap_m": -7.290333754658216e-05,
+      "cost": 2.235424322548813
+    },
+    {
+      "iterations": 150,
+      "minimum_gap_m": -0.00016612289395522166,
+      "cost": 2.44728955956571
+    },
+    {
+      "iterations": 150,
+      "minimum_gap_m": -0.000404543912064504,
+      "cost": 3.0697273974010413
+    },
+    {
+      "iterations": 19,
+      "minimum_gap_m": -1e-09,
+      "cost": 1.040402040001
+    },
+    {
+      "iterations": 14,
+      "minimum_gap_m": -1e-09,
+      "cost": 1.040402040001
+    },
+    {
+      "iterations": 31,
+      "minimum_gap_m": -1e-09,
+      "cost": 1.040402040001
+    },
+    {
+      "iterations": 60,
+      "minimum_gap_m": -1e-09,
+      "cost": 1.040402040001
+    },
+    {
+      "iterations": 31,
+      "minimum_gap_m": -1e-09,
+      "cost": 1.6361509435636734
+    },
+    {
+      "iterations": 150,
+      "minimum_gap_m": 9.51437126932164e-06,
+      "cost": 1.0210812058712344
+    },
+    {
+      "iterations": 17,
+      "minimum_gap_m": -1e-09,
+      "cost": 1.040402040001
+    },
+    {
+      "iterations": 30,
+      "minimum_gap_m": -1e-09,
+      "cost": 1.040402040001
+    }
+  ],
+  "best_rotation": [
+    [
+      -0.08435752575705135,
+      -0.9390317833352908,
+      -0.333321343052455
+    ],
+    [
+      -0.5769775590324218,
+      -0.22669586214445736,
+      0.784669282219949
+    ],
+    [
+      -0.8123919646458458,
+      0.2585116940734502,
+      -0.5226767641727899
+    ]
+  ],
+  "best_minimum_gap_m": 9.572141949438334e-06,
+  "point": [
+    0.6105765993431403,
+    -0.17723989100339146,
+    0.22314807072138584
+  ],
+  "scope": "Bounded full-tool orientation optimization at one source endpoint against the completed conservative framework and platform; no arm IK, full path, or infeasibility claim"
+}

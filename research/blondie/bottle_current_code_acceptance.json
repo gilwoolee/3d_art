@@ -1,0 +1,10 @@
+{
+  "status": "PASSED",
+  "scope": "Complete indexed reference bottle replay and full browser playback after capsule-reuse changes; not the 29-curve hybrid",
+  "checked_intervals": 5483,
+  "indexed_turns": 2,
+  "final_table_index": 0,
+  "browser_receipt_sha256": "923704b66dfed8199d3105bd2fa18937bd2ad8a041c0c870deb5c0f63979591e",
+  "validation_sha256": "3735c2a9db32b03aa9ca3133d019297731573698552b956565711420f5d8b9b2",
+  "plan_sha256": "329ffe1dcd0c7c91c7dae9418dc3c12aceba27ed88979225748c8d13a065ca13"
+}

@@ -1,0 +1,14 @@
+{
+  "run": "staged_shared_diverse_v1",
+  "rate": 10,
+  "horizon_s": 141.68535883118844,
+  "wall_seconds": 15.797,
+  "observed_times_s": [
+    50.0009999999963,
+    100.000999999996,
+    141.685358831188
+  ],
+  "errors": [],
+  "final_clock": "2.4 min / 2.4 min",
+  "badge": "One-arm geometric replay passed"
+}

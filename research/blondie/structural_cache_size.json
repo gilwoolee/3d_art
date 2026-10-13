@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "scope": "Serialization size only; not a measured runtime or peak-memory benchmark",
+  "source": "runs/palace_hybrid_spaced_1200um_source/structural_screen.json",
+  "source_sha256": "f103718cb8324a826910ac0e99fe1258c2d6e7090a39f86e6f42637a33eb8b05",
+  "full_serialized_bytes": 4694995,
+  "compact_serialized_bytes": 1288,
+  "all_non_geometry_fields_preserved": true,
+  "full_graph_report_retained_by_search": true,
+  "inputs": {
+    "src/pen_art/planning/section_build.py": "8a5964e72cefa99db745e706fd0a756aba448805159ddc6d4b685e0a87078b8c",
+    "src/pen_art/planning/regression.py": "89a94c2121e2da620173322687b5b3790316b8f8b1fbe7939365b280a78569ff"
+  }
+}

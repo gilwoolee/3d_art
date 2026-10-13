@@ -91,7 +91,8 @@ def create_app(root: Path):
         for name, expected in document.get("inputs", {}).items():
             source = (directory / name).resolve()
             if (
-                not re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+                not re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", name)
+                or any(part in {".", ".."} for part in Path(name).parts)
                 or not source.is_relative_to(directory)
                 or not source.is_file()
                 or sha256(source) != expected

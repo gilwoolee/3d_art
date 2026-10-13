@@ -1,0 +1,60 @@
+{
+  "status": "PASSED_BROWSER_REPLAY",
+  "run": "staged_indexed_fair_v1",
+  "rate": 10,
+  "horizon_s": 178.13303750003203,
+  "wall_seconds": 20.2,
+  "observed_times_s": [
+    10.0009999999776,
+    20.0009999999776,
+    30.0019999999926,
+    41.0009999999778,
+    51.0009999999778,
+    60.0009999999778,
+    72.000999999978,
+    82.000999999978,
+    92.000999999978,
+    102.000999999978,
+    111.000999999978,
+    124.001999999994,
+    134.000999999978,
+    144.001999999993,
+    154.000999999977,
+    164.000999999977,
+    175.005,
+    178.133037500032
+  ],
+  "errors": [],
+  "indexed_turns": 0,
+  "observed_table_angles_rad": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "final_clock": "3.0 min / 3.0 min",
+  "badge": "One-arm geometric replay passed",
+  "inputs": {
+    "runs/staged_indexed_fair_v1/offline_dual_arm_plan.json": "0d8380a74bd33da5382c80c16f85ff375dccdaed2ddf4472e7da63a3cfed0cb6",
+    "runs/staged_indexed_fair_v1/offline_dual_arm_validation.json": "e6865fb76d901fa61c5eaeb27af25b46c056f762fd773976b9d9ebd798b9e82c"
+  },
+  "screenshots": [
+    "/home/gilwoo/Workspace/3d_art/research/blondie/staged_indexed_fair_v1_full_cell.png",
+    "/home/gilwoo/Workspace/3d_art/research/blondie/staged_indexed_fair_v1_completed.png"
+  ],
+  "simulation_only": true
+}

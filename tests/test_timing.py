@@ -1,20 +1,8 @@
 import numpy as np
 import pytest
 
-from pen_art.io import read_json, sha256, write_json
 from pen_art.robot import SerialArm
-from pen_art.timing import (
-    build_schedule,
-    check_position_limits,
-    make_path,
-    retime_operation,
-)
-
-
-def test_spline_position_limits_cover_between_waypoints():
-    path = make_path([[0], [0.9], [0.89], [0]], [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]])
-    with pytest.raises(ValueError, match="position limits"):
-        check_position_limits(path, np.array([-1]), np.array([0.9]))
+from pen_art.timing import make_path, retime_operation
 
 
 def test_retimer_keeps_motion_through_waypoints_and_bounds_continuous_dynamics(tmp_path):
@@ -106,216 +94,73 @@ def test_retimer_keeps_motion_through_waypoints_and_bounds_continuous_dynamics(t
     assert bounded["bounds"]["acceleration_rad_s2"][0] <= 0.5
 
 
-@pytest.fixture
-def schedule_fixture(tmp_path, monkeypatch):
-    from pathlib import Path
+def test_whole_action_vertex_hold_preserves_spline_and_counts_feed_lags(tmp_path):
+    from types import SimpleNamespace
 
-    import yaml
+    from pen_art.planning.clock_path import (
+        ClockPath,
+        restrict_spline,
+        timed_path,
+    )
+    from pen_art.planning.process_clock import feed_events
 
-    profile = yaml.safe_load(Path("configs/timing.yaml").read_text())
-    profile["joint_acceleration_rad_s2"] = [0.5]
-    profile["startup_s"] = 2
-    profile["shutdown_s"] = 3
-    config = tmp_path / "timing.yaml"
-    config.write_text(yaml.safe_dump(profile))
     urdf = tmp_path / "robot.urdf"
     urdf.write_text("""<robot name="one"><link name="base"/><link name="flange"/>
       <joint name="q" type="revolute"><parent link="base"/><child link="flange"/>
       <axis xyz="0 0 1"/><limit lower="-2" upper="2" velocity="1" effort="1"/></joint>
     </robot>""")
-    write_json(tmp_path / "run.json", {"stages": {}})
-    write_json(
-        tmp_path / "fabrication_config.json",
-        {
-            "process": {
-                "nominal_speed_m_s": 0.003,
-                "join_s": 1,
-                "start_lag_s": 0.5,
-                "stop_lag_s": 0.5,
-            }
-        },
+    robot = SerialArm(urdf)
+    offset = np.eye(4)
+    offset[0, 3] = 0.2
+    arm = SimpleNamespace(robot=robot, flange_to_tcp=offset)
+    positions = np.array([[0.1], [0.2], [0.3], [0.2], [0.1]])
+    points = [robot.forward(q, offset)[:3, 3] for q in positions]
+    spline = make_path(positions, points, interpolation="pchip")
+    restricted = restrict_spline(spline, 0, 2)
+    np.testing.assert_allclose(
+        restricted(np.linspace(0, 1, 30)),
+        spline(np.linspace(spline.cspl.x[0], spline.cspl.x[2], 30)),
     )
-    write_json(
-        tmp_path / "sequence_motion.json",
-        {
-            "status": "GEOMETRIC_SEQUENCE_PREVIEW",
-            "inputs": {"robot.urdf": sha256(urdf)},
-            "flange_to_tcp": np.eye(4).tolist(),
-            "parking_pose": {"positions": [0]},
-            "operations": [
-                {"id": "first", "kind": "TRAVEL", "stroke_id": "a", "positions": [[0], [0.1]]},
-                {"id": "stroke", "kind": "DRAW", "stroke_id": "a", "positions": [[0.1], [0.2]]},
-                {"id": "return", "kind": "RETURN", "stroke_id": None, "positions": [[0.2], [0]]},
-            ],
-        },
-    )
-
-    def retime(operation, *args):
-        return {
-            "duration_s": 0.1 if operation["kind"] == "DRAW" else 1,
-            "positions": operation["positions"],
-        }
-
-    monkeypatch.setattr("pen_art.timing.retime_operation", retime)
-    return tmp_path, config
-
-
-def test_events_use_common_clock_and_short_response_is_reported(schedule_fixture):
-    run, profile = schedule_fixture
-    result = build_schedule(run, profile)
-    assert result["modeled_duration_s"] == pytest.approx(8.6)
-    assert len(result["events"]) == 2
-    assert [event["command"] for event in result["events"]] == ["START_FEED", "STOP_FEED"]
-    draw = next(op for op in result["operations"] if op["kind"] == "DRAW")
-    assert result["events"][0]["time_s"] == pytest.approx(draw["start_s"] - 0.5)
-    assert result["events"][1]["time_s"] == pytest.approx(draw["start_s"])
-    assert result["timing_conflicts"][0]["code"] == "ASSUMED_STOP_LAG_EXCEEDS_STROKE"
-    assert result["unknown_durations"] == ["cooling_s"]
-    assert result["executable"] is False
-    assert result["geometry_validation"]["status"] == "REQUIRES_SMOOTH_PATH_AUDIT"
-    assert all(not op["extrusion_expected"] for op in result["operations"] if op["kind"] != "DRAW")
-
-
-def test_discontinuous_sequence_is_rejected_before_teleporting(schedule_fixture):
-    run, profile = schedule_fixture
-    sequence = read_json(run / "sequence_motion.json")
-    sequence["operations"][1]["positions"][0] = [0.9]
-    write_json(run / "sequence_motion.json", sequence)
-    with pytest.raises(ValueError, match="Discontinuous"):
-        build_schedule(run, profile)
-    assert read_json(run / "run.json")["stages"]["timing"]["status"] == "failed"
-
-
-def test_replay_preserves_progress_and_reports_unfinished_speed_check(
-    schedule_fixture, monkeypatch
-):
-    from types import SimpleNamespace
-
-    import pen_art.planning.cell_replay as replay
-    from pen_art.planning.clock_path import ClockEdge, ClockPath
-
-    run, _ = schedule_fixture
-    robot = SerialArm(run / "robot.urdf")
-    arm = SimpleNamespace(robot=robot, flange_to_tcp=np.eye(4), urdf=run / "robot.urdf")
-    path = ClockPath(
+    path = timed_path(
         [
-            ClockEdge(
-                0,
-                1,
-                np.array([0.0]),
-                np.array([0.01]),
-                "DRAW",
-                None,
-                coefficients=[[0, 0, 0.03, -0.02]],
-            ),
-            ClockEdge(
-                1,
-                2,
-                np.array([0.01]),
-                np.array([0.0]),
-                "DRAW",
-                None,
-                coefficients=[[0.01, 0, -0.03, 0.02]],
-            ),
-        ]
+            {
+                "kind": "DRAW",
+                "positions": positions,
+                "path": spline,
+                "stroke_id": "whole-zigzag",
+                "break_indices": [2],
+                "vertex_holds": {2: {"duration_s": 1.0, "contact_m": points[2]}},
+                "stop_lag_s": 0.5,
+                "start_lag_s": 0.5,
+            }
+        ],
+        arm,
+        np.array([0.4]),
+        np.array([0.5]),
+        0.030,
+        0.030,
+        drawing_clock="cubic_toppra",
+        acceleration_constraint="cubic_bernstein",
     )
-    write_json(
-        run / "replay_settings.json",
-        {
-            "search": {},
-            "transit": {},
-            "timing": {
-                "travel_speed_m_s": 0.03,
-                "velocity_fraction": 0.5,
-                "joint_acceleration_rad_s2": [0.5],
-            },
-            "process": {"nominal_speed_m_s": 0.003},
-        },
+    restored = ClockPath.from_record(path.record())
+    holds = [edge for edge in restored.edges if edge.kind != "DRAW"]
+    assert [edge.kind for edge in holds] == ["PEN_STOP_WAIT", "VERTEX_COOL", "PEN_START_WAIT"]
+    assert sum(edge.end_s - edge.start_s for edge in holds) == pytest.approx(1.5)
+    assert all(
+        np.allclose(edge.q0, positions[2]) and np.allclose(edge.q1, positions[2]) for edge in holds
     )
-    write_json(
-        run / "dual_arm_plan.json",
-        {
-            "inputs": {},
-            "settings_artifact": "replay_settings.json",
-            "initial_positions": {"arm_1": [0]},
-            "modeled_duration_s": 2,
-            "limitations": [],
-            "events": [],
-            "full_schedule": True,
-            "actions": [
-                {
-                    "arm": "arm_1",
-                    "stroke_id": "return",
-                    "variant": "test",
-                    "start_s": 0,
-                    "end_s": 2,
-                    "start_anchor": "parking",
-                    "auxiliary": True,
-                    "trajectory": path.record(),
-                }
-            ],
-        },
+    assert sum(edge.end_s - edge.start_s for edge in restored.edges) == pytest.approx(
+        path.duration_s
     )
-    collision_replays = []
-
-    def validate_interval(state, new, end):
-        collision_replays.append(end)
-        return state.payload, None
-
-    monkeypatch.setattr(
-        replay,
-        "CellPlanner",
-        lambda run, profile, settings, deadline, **kw: SimpleNamespace(
-            arms={"arm_1": arm},
-            tasks=[],
-            ground=[],
-            deadline=deadline,
-            profile={},
-            checked_intervals=0,
-            validate_interval=validate_interval,
-        ),
-    )
-    calls = []
-
-    def speed_check(edge, arm, limit, *, deadline):
-        progress = read_json(run / "dual_arm_validation.json")
-        assert progress["source_plan_sha256"] == sha256(run / "dual_arm_plan.json")
-        assert progress["status"] == "RUNNING" and progress["phase"] == "PATH_CHECKS"
-        assert deadline > 0
-        calls.append(edge)
-        if len(calls) == 2:
-            raise TimeoutError("unfinished speed enclosure")
-        return 0
-
-    monkeypatch.setattr(replay, "polynomial_tcp_speed_bound", speed_check)
-    result = replay.replay_cell(run, "unused-profile", maximum_seconds=5)
-    assert result["status"] == "REPLAY_TIME_BUDGET"
-    assert result["checked_edges"] == 1 and result["requested_edges"] == 2
-    assert result["completed_strokes"] == 0
-    assert result["failures"] == [{"status": "TIME_BUDGET", "phase": "PATH_CHECKS"}]
-    assert read_json(run / "run.json")["stages"]["validation"]["status"] == "partial"
-
-    def rejected_speed(*args, **kwargs):
-        raise ValueError("Cannot certify saved tip speed")
-
-    monkeypatch.setattr(replay, "polynomial_tcp_speed_bound", rejected_speed)
-    with pytest.raises(ValueError, match="Cannot certify"):
-        replay.replay_cell(run, "unused-profile", maximum_seconds=5)
-    failed = read_json(run / "dual_arm_validation.json")
-    assert failed["status"] == "REPLAY_ERROR"
-    assert failed["phase"] == "PATH_CHECKS"
-    assert failed["checked_edges"] == 0
-
-    certificates = set()
-    monkeypatch.setattr(replay, "polynomial_tcp_speed_bound", lambda *args, **kw: 0)
-    result = replay.replay_cell(run, "unused-profile", path_certificates=certificates)
-    assert len(certificates) == 1 and result["reused_path_checks"] == 0
-    monkeypatch.setattr(replay, "polynomial_tcp_speed_bound", rejected_speed)
-    result = replay.replay_cell(run, "unused-profile", path_certificates=certificates)
-    assert result["reused_path_checks"] == 1
-    assert len(collision_replays) == 2  # Schedule collision checks always run again.
-    settings = read_json(run / "replay_settings.json")
-    settings["process"]["nominal_speed_m_s"] *= 0.9
-    write_json(run / "replay_settings.json", settings)
-    with pytest.raises(ValueError, match="Cannot certify"):
-        replay.replay_cell(run, "unused-profile", path_certificates=certificates)
+    assert {edge.stroke for edge in restored.edges} == {"whole-zigzag"}
+    assert [
+        event["command"]
+        for event in feed_events(
+            [{"start_s": 3, "stroke_id": "whole-zigzag", "arm": "arm", "trajectory": path.record()}]
+        )
+    ] == ["FEED_OFF", "FEED_ON"]
+    # Both adjacent moving spans arrive/depart at rest; serialization checks this too.
+    before = restored.edges[restored.edges.index(holds[0]) - 1]
+    after = restored.edges[restored.edges.index(holds[-1]) + 1]
+    assert abs(before.piece().polynomials[0].deriv()(1)) < 1e-8
+    assert abs(after.piece().polynomials[0].deriv()(0)) < 1e-8

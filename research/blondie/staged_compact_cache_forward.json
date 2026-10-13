@@ -1,0 +1,42 @@
+{
+  "status": "FULL_BUILD_VERIFIED",
+  "run": "runs/staged_compact_cache_forward_v1",
+  "simulation_only": true,
+  "physical_status": "unverified",
+  "source_provenance": {
+    "status": "SOURCE_PROVENANCE_VERIFIED",
+    "coverage": {
+      "status": "EXACT_INTERVAL_COVERAGE",
+      "sources": 3,
+      "represented_intervals": 4
+    },
+    "physical_sections": 3,
+    "physical_members": 3,
+    "shared_intervals": [
+      {
+        "parent_curve": "shared-detail",
+        "source_interval": [
+          0,
+          1
+        ],
+        "stage": "artistic",
+        "members": [
+          "edge0"
+        ],
+        "credited_after_section": "section-00000",
+        "deposition_complete_s": 43.003290092161144
+      }
+    ]
+  },
+  "checked_intervals": 545,
+  "modeled_duration_s": 113.26918983808696,
+  "physical_sections": 3,
+  "logical_sources": 3,
+  "feed_on_events": 3,
+  "inputs": {
+    "runs/staged_compact_cache_forward_v1/stroke_graph.json": "0587572ac1e0fcd9bf3fafe7413710140e49b14b77d5555b7f48fc799d912006",
+    "runs/staged_compact_cache_forward_v1/construction_plan.json": "9f6adda6e0e884143a2b250dea4bdf47fae87fceabda210b4553f419db4bc257",
+    "runs/staged_compact_cache_forward_v1/offline_dual_arm_plan.json": "0e8acc69800c861e18be72403a4a6b5c495fb842e3d435f5e944165a1b3cd86f",
+    "runs/staged_compact_cache_forward_v1/offline_dual_arm_validation.json": "774d512ea25ea333ca6eff8705b59da973c7a69e07b3ab42a7fc03f6aeb11b6b"
+  }
+}

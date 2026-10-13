@@ -1,0 +1,22 @@
+{
+  "status": "PASSED",
+  "cases": [
+    {
+      "full_recheck_accepts": true,
+      "bounded_corrections": 1,
+      "full_recheck_calls": 2
+    },
+    {
+      "full_recheck_accepts": false,
+      "bounded_corrections": 4,
+      "full_recheck_calls": 5
+    },
+    {
+      "resumed_rejected_correction": true,
+      "fresh_preparation_calls": 2,
+      "additional_corrections": 0
+    }
+  ],
+  "source_sha256": "4f8c452b5a667ee5862a8287d89d35989a6023afda7d41148a030e6195777181",
+  "scope": "Dispatch regression with controlled correction and validation outcomes; not physical feasibility"
+}

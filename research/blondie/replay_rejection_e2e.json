@@ -1,0 +1,20 @@
+{
+  "status": "PASSED",
+  "run": "runs/staged_replay_rejection_v1",
+  "test_only_forced_rejection": {
+    "status": "CONTACT_PATH_REJECTED",
+    "arm": "arm_1",
+    "time_s": 0.0,
+    "test_only_forced_rejection": true
+  },
+  "complete_build": "FULL_BUILD_VERIFIED",
+  "independent_replay": "CERTIFIED_GEOMETRIC_REPLAY",
+  "checked_intervals": 555,
+  "simulation_only": true,
+  "inputs": {
+    "runs/staged_replay_rejection_v1/section_build.json": "61d7baf69494784f2c6b86d6a067c64fa85589121ad1fd7de1bff5fb937fa324",
+    "runs/staged_replay_rejection_v1/offline_dual_arm_plan.json": "8d8256eb316a87a21544c5a0f2a03c5b1879236a54503caa836f8bf6f03dd5a0",
+    "runs/staged_replay_rejection_v1/offline_dual_arm_validation.json": "b4ce83786670046b41e0e09aa379a3a8d829132a8c4c17d13e437d4d77a3105f",
+    "src/pen_art/planning/section_build.py": "fb624b87bda8c8aa68b025c531f530f4b8def600896803b1d34d222f163bfae9"
+  }
+}
