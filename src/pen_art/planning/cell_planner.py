@@ -1246,12 +1246,17 @@ class CellPlanner:
         }
 
     def complete_local_drawing(
-        self, state, identity, drawing, local, q_start, *, defer_drawing_check=False
+        self, state, identity, drawing, local, q_start, *, defer_drawing_check=False,
+        chained_in=False, chained_out=False,
     ):
         """Add the scene-dependent approach and withdrawal around a fixed drawing.
 
         The DRAW polynomials come unchanged from ``prepare_local_drawing``;
-        they are never retimed here.
+        they are never retimed here. ``chained_in`` means the previous stroke
+        ended at this one's first joint position with the pen down, so there is
+        no travel, approach, feed start or join. ``chained_out`` means the next
+        stroke takes over the same way, so there is no hold and no withdrawal;
+        a free riser top still gets its cooling hold.
         """
         arm, scene = self.collision_arm(identity), state.payload
         task = drawing["stroke_id"]
@@ -1267,6 +1272,10 @@ class CellPlanner:
             (-arm.robot.forward(q[0], arm.flange_to_tcp)[:3, 2]).tolist(),
             *self.transit["departure_directions"],
         ]
+        if chained_in:
+            approach = np.asarray([q[0]])
+            travel = {"status": "CONNECTED", "positions": np.asarray([q[0]])}
+            approach_directions = []
         for direction in approach_directions:
             if monotonic() >= self.deadline:
                 self.failure(task, identity, "APPROACH", "TIME_BUDGET", attempts=approach_attempts)
@@ -1295,11 +1304,14 @@ class CellPlanner:
             if travel["status"] == "CONNECTED":
                 break
         else:
-            self.failure(
-                task, identity, "APPROACH", "NO_CONNECTED_APPROACH", attempts=approach_attempts
-            )
-            return None
-        if defer_drawing_check and local.get("deposits") is not None:
+            if not chained_in:
+                self.failure(
+                    task, identity, "APPROACH", "NO_CONNECTED_APPROACH", attempts=approach_attempts
+                )
+                return None
+        if chained_out:
+            after, failure = scene, None
+        elif defer_drawing_check and local.get("deposits") is not None:
             # The wire this drawing lays was already enclosed when its deposit
             # was predicted from the same path; withdrawal planning reuses it.
             after, failure = scene.copy(), None
@@ -1342,19 +1354,23 @@ class CellPlanner:
                 **{key: value for key, value in failure.items() if key != "status"},
             )
             return None
-        withdraw = find_departure(
-            arm.robot,
-            arm.flange_to_tcp,
-            q[-1],
-            {
-                **self.transit,
-                "departure_directions": [
-                    (-arm.robot.forward(q[-1], arm.flange_to_tcp)[:3, 2]).tolist(),
-                    *self.transit["departure_directions"],
-                ],
-            },
-            self.lift_check(identity, after, q[-1]),
-            self.deadline,
+        withdraw = (
+            {"status": "SAMPLED_DRAWING_PATH", "positions": [q[-1]]}
+            if chained_out
+            else find_departure(
+                arm.robot,
+                arm.flange_to_tcp,
+                q[-1],
+                {
+                    **self.transit,
+                    "departure_directions": [
+                        (-arm.robot.forward(q[-1], arm.flange_to_tcp)[:3, 2]).tolist(),
+                        *self.transit["departure_directions"],
+                    ],
+                },
+                self.lift_check(identity, after, q[-1]),
+                self.deadline,
+            )
         )
         if withdraw["status"] != "SAMPLED_DRAWING_PATH":
             self.failure(
@@ -1405,6 +1421,25 @@ class CellPlanner:
                     "hold_s": release_cooling,
                 },
             )
+        if chained_in:
+            operations = [op for op in operations
+                          if op["kind"] not in {"TRAVEL", "APPROACH", "PEN_START_WAIT", "JOIN"}]
+        if chained_out:
+            start_lag, stop_lag = self.process["start_lag_s"], self.process["stop_lag_s"]
+            operations = [op for op in operations
+                          if op["kind"] not in {"PEN_STOP_WAIT", "WAIT", "WITHDRAW"}]
+            if vertical_end:
+                # A free riser top is held like any corner: feed off on
+                # arrival, restarted in time for the hold's end.
+                operations.extend(
+                    {"kind": kind, "positions": [q[-1]], "contact_m": end_contact, "hold_s": hold}
+                    for kind, hold in (
+                        ("PEN_STOP_WAIT", stop_lag),
+                        ("VERTEX_COOL", max(0.0, vertex_cooling - stop_lag - start_lag)),
+                        ("PEN_START_WAIT", start_lag),
+                    )
+                    if hold > 0
+                )
         for operation in operations:
             operation["stroke_id"] = task
         geometric = local["timed"] is None
@@ -1461,6 +1496,8 @@ class CellPlanner:
             }
             path.metadata["actual_pen_tilt"] = sampled_pen_tilt(arm, q)
         path.metadata.update(
+            chained_in=bool(chained_in),
+            chained_out=bool(chained_out),
             collision_scope=self.collision_scope,
             requires_full_robot_validation=self.collision_scope == "pen_candidate",
             process_clock_policy=PROCESS_CLOCK_POLICY,

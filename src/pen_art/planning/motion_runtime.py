@@ -254,7 +254,7 @@ class DrawingExperience:
             dtype=float,
         )
 
-    def request(self, points, index, row=None):
+    def request(self, points, index, row=None, chain=None):
         parent = "" if row is None else row.get("parent_curve", "")
         path_kind = next(
             (kind for kind in ("zigzag", "contour") if parent.startswith(kind + "-")), "unknown"
@@ -266,6 +266,13 @@ class DrawingExperience:
             family_id=self.source_object,
             context_hash=self.context_hash,
             path_kind=path_kind,
+            # A chained stroke starts at its predecessor's last joint position
+            # and keeps its pen orientation.
+            **(
+                {}
+                if chain is None
+                else {"q_start": chain["q"], "fixed_tcp_rotation": chain["rotation"]}
+            ),
         )
 
     def budget(self, row):
@@ -432,7 +439,13 @@ class DrawingExperience:
         reference_endpoint="start",
         budget=None,
         skip_parents=(),
+        chain=None,
+        prefer_start=None,
     ):
+        """Adapted drawings for ``row``. ``chain`` names the node, joint position
+        and pen orientation a predecessor ended with; only drawings starting
+        exactly there are offered. ``prefer_start`` only orders the starts.
+        """
         planner, arm = self.build.planner, self.build.arm
         if getattr(planner, "collision_scope", "full_robot") == "pen_candidate":
             arm = planner.collision_arm(arm.identity)
@@ -440,7 +453,12 @@ class DrawingExperience:
         if not getattr(self, "frozen", False) and refresh is not None and refresh():
             self.stats["library_refreshes"] += 1
         budget = self.budget(row) if budget is None else budget
-        for oriented in anchored_strokes(row, available):
+        variants = list(anchored_strokes(row, available))
+        if chain is not None:
+            variants = [oriented for oriented in variants if oriented["start"] == chain["node"]]
+        elif prefer_start is not None:
+            variants.sort(key=lambda oriented: oriented["start"] != prefer_start)
+        for oriented in variants:
             if not budget.available:
                 self.stats["proposal_budget_exhausted"] += 1
                 return
@@ -456,7 +474,7 @@ class DrawingExperience:
             # The retained seed can be much denser than the new source. Share
             # the explicit action allowance with realization instead of
             # clipping adaptation by the source's sample count.
-            request = self.request(points, index, row)
+            request = self.request(points, index, row, chain)
             started = perf_counter()
             records = self.library.retrieve(
                 request,

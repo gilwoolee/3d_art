@@ -65,6 +65,40 @@ def test_coordinator_repairs_blocked_material_and_drops_stale_results(tmp_path):
     assert ("propose", 0, ["parent-0-0"]) in log
     assert [job for job in coordinator.jobs if not job["current"]]
 
+    # A stroke that can start where its predecessor ends is proposed from that
+    # end and drawn without lifting; if that fails it lifts as usual.
+    rows = [
+        {"start": "n0", "end": "n1", "closed": False, "nodes": ["n0", "n1"]},
+        {"start": "n1", "end": "n1", "closed": True, "nodes": ["n1", "n2"]},
+        {"start": "n5", "end": "n6", "closed": False, "nodes": ["n5", "n6"]},
+    ]
+
+    def jobs(schedule):
+        return {(spec["kind"], spec["index"]): spec for spec in schedule.wanted()}
+
+    def offered(end_node, previous=None):
+        return {
+            "status": "OK", "deposit_key": "deposit", "table_index": 0, "end_node": end_node,
+            "q_draw_end": [0.1], "tcp_rotation": np.eye(3).tolist(), "chain_previous": previous,
+        }
+
+    chained = ForwardSchedule(["a", "b", "c"], "binding", rows=rows)
+    assert ("propose", 1) not in jobs(chained) and ("propose", 2) in jobs(chained)
+    chained.apply(jobs(chained)["propose", 0], offered("n1"))
+    second = jobs(chained)["propose", 1]
+    assert second["chain_from"]["node"] == "n1" and second["chain_from"]["q"] == [0.1]
+    assert ("check", 0) not in jobs(chained)
+    chained.apply(second, offered("n1", second["chain_from"]["previous"]))
+    assert jobs(chained)["check", 0]["chained_out"] and jobs(chained)["check", 1]["chained_in"]
+    chained.reject(1, "check", {"status": "REJECTED", "failure": {"status": "COLLISION"}})
+    assert "chain_from" not in jobs(chained)["propose", 1] and chained.slots[1]["unchained"]
+    chained.apply(jobs(chained)["propose", 1], offered("n1"))
+    assert not jobs(chained)["check", 0]["chained_out"]
+    refused = ForwardSchedule(["a", "b", "c"], "binding", rows=rows)
+    refused.apply(jobs(refused)["propose", 0], offered("n1"))
+    refused.apply(jobs(refused)["propose", 1], {"status": "NO_CANDIDATE"})
+    assert refused.slots[1]["attempts"] == 0 and "chain_from" not in jobs(refused)["propose", 1]
+
 
 def table():
     return IndexedTurntable(

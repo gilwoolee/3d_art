@@ -173,6 +173,12 @@ the Palace to 56.0 min (`runs/geomfirst_gf49_*_w24`):
 - At a corner the feed restart is commanded before the 1 s cooling hold ends,
   so the hold is 1.0 s instead of 1.5 s.
 
+**Stroke chaining (later the same day)** removed most of the rest: branching
+shape 31.0 to 18.5 min, Palace 56.6 to 41.9 min, with 120 of 150 and 158 of
+272 joins drawn without lifting the pen. See the
+[stroke chaining plan](2026_1013_stroke_chaining_plan.md). The paragraph below
+describes the state before it.
+
 Not done, and why: withdrawing without a hold from a closed contour, and
 starting the feed during the approach. The planner's state between strokes
 requires all wire to have cooled, and feed commands exist only as hold edges;

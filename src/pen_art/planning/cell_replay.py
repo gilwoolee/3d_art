@@ -847,8 +847,34 @@ def _replay_cell_body(
             tasks[motion.proposal.task].cooling_s,
         ).items():
             ready[node] = min(ready.get(node, float("inf")), motion.start_s + relative)
+    # A chained stroke takes over from its predecessor with the pen down: the
+    # two must name each other, touch in time and meet at one joint position.
+    # It does not wait for the joint to cool, because nothing is re-attached.
+    ordered = sorted(drawings, key=lambda motion: motion.start_s)
+    for first, second in zip(ordered[:-1], ordered[1:], strict=True):
+        leaves = bool(first.proposal.payload.metadata.get("chained_out"))
+        if leaves != bool(second.proposal.payload.metadata.get("chained_in")):
+            raise ValueError("Chained strokes do not agree on their join")
+        if leaves and (
+            abs(first.end_s - second.start_s) > 1e-9
+            or not np.allclose(
+                first.proposal.payload.edges[-1].q1,
+                second.proposal.payload.edges[0].q0,
+                atol=1e-9,
+                rtol=0,
+            )
+            or first.proposal.arm != second.proposal.arm
+        ):
+            raise ValueError("Chained strokes do not meet in time and joint position")
+    if ordered and (
+        ordered[0].proposal.payload.metadata.get("chained_in")
+        or ordered[-1].proposal.payload.metadata.get("chained_out")
+    ):
+        raise ValueError("A chained stroke has no neighbour to chain with")
     for motion in drawings:
-        if ready.get(motion.proposal.start_anchor, float("inf")) > motion.start_s + 1e-9:
+        chained = bool(motion.proposal.payload.metadata.get("chained_in"))
+        available = ready.get(motion.proposal.start_anchor, float("inf"))
+        if not np.isfinite(available) or (not chained and available > motion.start_s + 1e-9):
             raise ValueError("A stroke starts on future or still-cooling material")
         if motion.proposal.start_anchor not in tasks[motion.proposal.task].anchors:
             raise ValueError("Saved start anchor does not belong to its stroke")

@@ -24,7 +24,7 @@ def audit_indexed_clock(table, path, parked, cooling_s):
     """Check index continuity and mutually exclusive arm/plate/pen operation."""
     current = path.edges[0].table_index
     index_angle(current)
-    feeding, settle_pending = False, False
+    feeding, settle_pending = bool(path.metadata.get("chained_in")), False
     last_deposit = -float("inf")
     cycle_drew = False
     turns = 0
@@ -74,7 +74,7 @@ def audit_indexed_clock(table, path, parked, cooling_s):
                 raise ValueError("Drawing with feed off")
             cycle_drew = True
             last_deposit = edge.end_s
-    if settle_pending or feeding:
+    if settle_pending or feeding != bool(path.metadata.get("chained_out")):
         raise ValueError("Clock ends before the table settles or pen stops")
     return {"initial_index": path.edges[0].table_index, "final_index": current, "turns": turns}
 

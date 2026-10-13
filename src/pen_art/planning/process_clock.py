@@ -158,7 +158,9 @@ def audit_process_clock(path, action, process, cooling_s, transform, *, require_
         > 1e-8
     ):
         raise ValueError("Saved release readiness differs from deposited material")
-    feeding = False
+    # A stroke chained to its predecessor takes over with the pen down and
+    # feeding; one chained to its successor hands over the same way.
+    feeding = bool(path.metadata.get("chained_in"))
     for edge in path.edges:
         if edge.kind in ("PEN_START_WAIT", "PEN_STOP_WAIT"):
             lag = process["start_lag_s"] if edge.kind == "PEN_START_WAIT" else process["stop_lag_s"]
@@ -169,8 +171,8 @@ def audit_process_clock(path, action, process, cooling_s, transform, *, require_
             raise ValueError("Drawing with feed off")
         elif edge.kind in ("VERTEX_COOL", "WITHDRAW", "INDEX_TURN") and feeding:
             raise ValueError("Cooling, withdrawal or table movement while feeding")
-    if feeding:
-        raise ValueError("Process clock finishes with feed on")
+    if feeding != bool(path.metadata.get("chained_out")):
+        raise ValueError("Process clock finishes with the wrong feed state for its successor")
     draws = [edge for edge in path.edges if edge.kind == "DRAW"]
     points = np.array([draws[0].tcp0, *[edge.tcp1 for edge in draws]])
     corners, holds, vertical_end = source_vertex_schedule(
@@ -210,6 +212,15 @@ def audit_process_clock(path, action, process, cooling_s, transform, *, require_
     withdraws = [edge for edge in path.edges if edge.kind == "WITHDRAW"]
     if withdraws and withdraws[0].start_s < draws[-1].end_s + required - 1e-8:
         raise ValueError("Pen withdrawal precedes material release readiness")
+    if path.metadata.get("chained_out"):
+        if withdraws:
+            raise ValueError("A stroke chained to its successor must not withdraw")
+        # The pen stays down, so only a free riser top needs its hold.
+        hold = float(process.get("vertex_cooling_s", 1.0)) if vertical_end else 0.0
+        if path.edges[-1].end_s < draws[-1].end_s + hold - 1e-8:
+            raise ValueError("Chained stroke leaves a free riser top before its hold")
+    elif not withdraws and require_release:
+        raise ValueError("An unchained stroke must withdraw")
     return {
         "status": "SOURCE_PROCESS_CLOCK_VERIFIED",
         "vertices": len(corners),

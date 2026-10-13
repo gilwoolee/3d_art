@@ -369,30 +369,38 @@ Long runs on Blondie go in tmux. Wireframe settings live in the source run's
 The structural model treats the strand as 3D pen PLA at 2.5 GPa, a typical
 published value that has not been measured.
 
-Measured on 2026-10-13 with 24 workers and the vertical-riser wireframe. Every
-build listed with times is `FULL_BUILD_VERIFIED` with no timing rejection.
-"Total" is planning plus the separate verification, including setup; wireframe
-generation (seconds to under a minute) is not included.
+Measured on 2026-10-13 with 24 workers. Every build is `FULL_BUILD_VERIFIED`
+with no timing rejection. "Total" is planning plus the separate verification,
+including setup; wireframe generation (seconds to under a minute) is not
+included. Print time is the modeled duration of the saved plan: its waits and
+speed limits are settings, not measurements of a real pen or arm.
 
-| Object | Actions | Collision-free path | Timing | Verification | Total | Peak memory |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Triangular prism | 21 | 3.6 s | 1.0 s | 2.8 s | 8.1 s | 3.3 GB |
-| Bottle | 31 | 3.2 s | 1.4 s | 4.8 s | 10.5 s | 4.4 GB |
-| Cube | 21 | 4.4 s | 1.4 s | 3.5 s | 10.2 s | 3.6 GB |
-| Narrowed cube | 21 | 2.5 s | 1.2 s | 3.6 s | 8.1 s | 3.4 GB |
-| Vase, outer shell only | 33 | 2.9 s | 2.6 s | 7.6 s | 14.5 s | 4.2 GB |
-| Branching shape, 8 mm feature, 1 mm strand | 151 | 5.8 s | 3.1 s | 9.0 s | 20.9 s | 6.5 GB |
-| Palace, 8 mm feature | 271 | 14.6 s | 5.9 s | 14.1 s | 42.6 s | 7.9 GB |
-| Torus | 15 | 4.2 s | 1.9 s | 5.2 s | 12.3 s | 3.5 GB |
+| Object | Strokes | Joins chained | Collision-free path | Timing | Verification | Total | Print time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Triangular prism | 21 | 20 of 20 | 8.1 s | 0.9 s | 4.4 s | 14.3 s | 6.2 min |
+| Bottle | 31 | 30 of 30 | 14.1 s | 1.4 s | 6.0 s | 22.6 s | 7.0 min |
+| Torus | 15 | 8 of 14 | 4.6 s | 1.8 s | 4.9 s | 12.2 s | 7.0 min |
+| Cube | 21 | 20 of 20 | 10.3 s | 1.1 s | 4.1 s | 16.4 s | 9.0 min |
+| Narrowed cube | 21 | 20 of 20 | 9.9 s | 1.1 s | 4.4 s | 16.3 s | 8.9 min |
+| Vase, outer shell only | 33 | 32 of 32 | 15.9 s | 2.4 s | 6.8 s | 26.6 s | 12.6 min |
+| Branching shape, 8 mm feature | 151 | 120 of 150 | 16.3 s | 2.7 s | 7.4 s | 29.5 s | 18.5 min |
+| Palace, 8 mm feature | 273 | 158 of 272 | 26.1 s | 5.3 s | 13.2 s | 52.8 s | 41.9 min |
+
+A stroke that starts where the previous one ended is drawn without lifting the
+pen (`--chain-strokes on`, the default with `--geometry-first`): no withdraw,
+travel, approach, feed start or join dwell, and no hold except the 1 s at a
+free riser top. The wireframe supports this: each zigzag starts where the one
+below ended, and each contour is drawn straight after the zigzags that carry
+it. Verification checks that chained strokes name each other, touch in time
+and meet at one joint position.
 
 A torus rests on a tangent circle, so its inner and outer walls start from two
-rings a fraction of a millimetre apart. Zigzags on an inner wall therefore
-start half a spacing along, so the two walls do not share their feet; with
-shared feet the pen's nose came 0.979 mm from the neighbouring diagonal,
-inside the 1 mm margin. Runs: `runs/geomfirst_gf43_*_w24`, torus
-`runs/geomfirst_gf45_torus_w24`. A violation reported by the pen's spheres is
-confirmed against the exact pen shape at the same pose before an action is
-rejected.
+rings a fraction of a millimetre apart; zigzags on an inner wall start half a
+spacing along so the two walls do not share their feet. A violation reported
+by the pen's spheres is confirmed against the exact pen shape at the same pose
+before an action is rejected. Runs: `runs/geomfirst_gf59_*_w24` and
+`runs/geomfirst_gf60_{branching,palace}_w24`; plan and history:
+[stroke chaining plan](docs/2026_1013_stroke_chaining_plan.md).
 
 What the pipeline does to be fast, where the time goes and what
 limits it:

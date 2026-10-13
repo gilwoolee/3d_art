@@ -285,6 +285,7 @@ class SectionBuild:
         structural_check="action",
         retiming_solver="toppra",
         path_pieces="samples",
+        chain_strokes=False,
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -310,6 +311,9 @@ class SectionBuild:
             settings.update(
                 path_pieces="members", pen_check=PEN_SPHERES_REVISION, pen_sample_m=0.010
             )
+        if chain_strokes:
+            # Strokes that meet end to start are drawn without lifting the pen.
+            settings["chain_strokes"] = True
         timing = yaml.safe_load(Path("configs/timing_continuous_bounded.yaml").read_text())
         timing.pop("target_seconds", None)
         if path_pieces == "members":
@@ -1252,6 +1256,12 @@ def main():
         "and audit faster and draw slower. Default: knots with --geometry-first, else full",
     )
     parser.add_argument(
+        "--chain-strokes",
+        choices=("on", "off"),
+        help="on: a stroke that starts where the previous one ended is drawn without "
+        "lifting the pen. Default: on with --geometry-first, else off",
+    )
+    parser.add_argument(
         "--path-pieces",
         choices=("members", "samples"),
         help="members: one path piece per straight member, the pen checked against wire as "
@@ -1284,6 +1294,8 @@ def main():
     args = parser.parse_args()
     if args.retiming_solver is None:
         args.retiming_solver = "scan" if args.geometry_first else "toppra"
+    if args.chain_strokes is None:
+        args.chain_strokes = "on" if args.geometry_first else "off"
     if args.path_pieces is None:
         args.path_pieces = "members" if args.geometry_first else "samples"
     if args.retiming_grid is None:
@@ -1322,6 +1334,7 @@ def main():
         structural_check=args.structural_check,
         retiming_solver=args.retiming_solver,
         path_pieces=args.path_pieces,
+        chain_strokes=args.chain_strokes == "on",
     )
     try:
         build.run_build(

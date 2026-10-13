@@ -70,7 +70,12 @@ def export_sections(build, witnesses, returned, *, release_witnesses=False):
     for key, move, drawing in witnesses:
         section = build.actions[key]
         path = move.payload
-        clock = max(clock, ready.get(move.start_anchor, float("inf")))
+        # A chained stroke continues from its predecessor with the pen down;
+        # only a stroke that attaches afresh waits for its joint to cool.
+        if not path.metadata.get("chained_in"):
+            clock = max(clock, ready.get(move.start_anchor, float("inf")))
+        elif move.start_anchor not in ready:
+            raise ValueError("Cannot chain a section onto absent material")
         if section["stage"] == "artistic":
             clock = max(clock, framework_ready)
         if not np.isfinite(clock):

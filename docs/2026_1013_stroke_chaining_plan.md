@@ -1,8 +1,34 @@
 # Stroke Chaining Plan
 
 **Date:** 2026-10-13
-**Status:** Phases 0 and 1 done and measured (2026-10-13). Phases 2 to 5 not
-started: no stroke is chained yet and print time is unchanged.
+**Status:** Done and measured (2026-10-13). All eight objects plan and verify
+with chaining.
+
+| Object | Strokes | Joins chained | Path | Timing | Verification | Total | Print time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Triangular prism | 21 | 20 of 20 | 8.1 s | 0.9 s | 4.4 s | 14.3 s | 6.2 min |
+| Bottle | 31 | 30 of 30 | 14.1 s | 1.4 s | 6.0 s | 22.6 s | 7.0 min |
+| Torus | 15 | 8 of 14 | 4.6 s | 1.8 s | 4.9 s | 12.2 s | 7.0 min |
+| Cube | 21 | 20 of 20 | 10.3 s | 1.1 s | 4.1 s | 16.4 s | 9.0 min |
+| Narrowed cube | 21 | 20 of 20 | 9.9 s | 1.1 s | 4.4 s | 16.3 s | 8.9 min |
+| Vase, outer shell only | 33 | 32 of 32 | 15.9 s | 2.4 s | 6.8 s | 26.6 s | 12.6 min |
+| Branching shape, 8 mm feature | 151 | 120 of 150 | 16.3 s | 2.7 s | 7.4 s | 29.5 s | 18.5 min |
+| Palace, 8 mm feature | 273 | 158 of 272 | 26.1 s | 5.3 s | 13.2 s | 52.8 s | 41.9 min |
+
+Print time before chaining, same settings: prism 8.3 min, bottle 10.1, torus
+7.8, cube 11.1, narrowed cube 11.0, vase 15.9, branching shape 31.0, Palace
+56.6. Every join that could chain did chain; one chained candidate (bottle)
+was rejected for a posture change and replaced by an unchained one earlier in
+testing. Planning takes longer because chained strokes are proposed one after
+another: Palace 40.6 s to 52.8 s in total, branching shape 21.1 s to 29.5 s.
+
+What was built, against the plan below: Phases 0 to 4 as written, except that
+checklist item 0.2 was not needed and the build order applies to every
+planning mode. Three places enforced "a stroke starts only on cooled wire"
+(the export, the section schedule audit and the replay); each now waives the
+wait for a chained stroke and requires the joint to exist. Not done: the
+audit-level test in item 4.3 (the scheduler's chaining is tested; the audits
+are exercised by the eight verified builds).
 
 ### Result of Phases 0 and 1
 
@@ -208,31 +234,31 @@ the fast-planning document.
 
 ### Phase 2
 
-- [ ] **2.1** `ForwardSchedule`: for a chainable join, the propose job of k+1
+- [x] **2.1** `ForwardSchedule`: for a chainable join, the propose job of k+1
   reads the candidate of k (its key in the job key); unchained fallback after
   a failure or rejection.
-- [ ] **2.2** `_propose`: fixed `q_start`, pen orientation and table position
+- [x] **2.2** `_propose`: fixed `q_start`, pen orientation and table position
   from the predecessor; closed contour started at the shared node.
-- [ ] **2.3** Report chained and fallen-back joins per build.
+- [x] **2.3** Report chained and fallen-back joins per build.
 
 ### Phase 3
 
-- [ ] **3.1** `complete_local_drawing(chained_in, chained_out)` and the corner
+- [x] **3.1** `complete_local_drawing(chained_in, chained_out)` and the corner
   hold at a riser-top join.
-- [ ] **3.2** `_check` and `_connect`: empty transit for a chained stroke;
+- [x] **3.2** `_check` and `_connect`: empty transit for a chained stroke;
   joint positions at the join equal to 1e-9 rad.
-- [ ] **3.3** `_time`: timing of clocks without approach or withdraw.
+- [x] **3.3** `_time`: timing of clocks without approach or withdraw.
 
 ### Phase 4
 
-- [ ] **4.1** `audit_process_clock`, `audit_indexed_clock`: chained feed state.
-- [ ] **4.2** `cell_replay`: pairing check on the saved plan.
+- [x] **4.1** `audit_process_clock`, `audit_indexed_clock`: chained feed state.
+- [x] **4.2** `cell_replay`: pairing check on the saved plan.
 - [ ] **4.3** Test (folded into an existing one): a chained pair passes; a
   chained-out clock without its partner is rejected.
 
 ### Phase 5
 
-- [ ] **5.1** Runs, README table, fast-planning document, this plan's status.
+- [x] **5.1** Runs, README table, fast-planning document, this plan's status.
 
 ## Validation Commands
 

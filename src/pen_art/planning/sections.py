@@ -243,7 +243,12 @@ def replay_sections(actions, graph, *, cooling_s=2.0):
             raise ValueError("Artistic deposition precedes framework cooling")
         if row["start_s"] < previous_end - 1e-9:
             raise ValueError("Single-arm sections overlap on the clock")
-        if ready.get(row["start_anchor"], float("inf")) > row["start_s"] + 1e-9:
+        # A section chained to its predecessor continues with the pen down, so
+        # its joint must exist but need not have cooled; the pairing itself is
+        # checked on the saved clocks by the replay.
+        chained = bool(row.get("trajectory", {}).get("chained_in"))
+        available = ready.get(row["start_anchor"], float("inf"))
+        if not np.isfinite(available) or (not chained and available > row["start_s"] + 1e-9):
             raise ValueError("Section starts on absent or still-cooling material")
         visits = {visit["node"] for visit in row.get("junction_visits", [])}
         anchors = visits if row.get("closed") else {row["start"], row["end"]}

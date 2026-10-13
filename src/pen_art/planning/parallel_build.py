@@ -166,9 +166,15 @@ class ForwardSchedule:
     discards any result whose assumptions have since been replaced.
     """
 
-    def __init__(self, actions, binding, *, maximum_attempts=6, cold_modes=4):
+    def __init__(self, actions, binding, *, maximum_attempts=6, cold_modes=4, rows=None):
+        """``rows`` gives each action's start node, end node, junction nodes and
+        whether it is a closed loop. With them, a stroke that can start where
+        its predecessor ended is proposed from that predecessor's final joint
+        position, and the pair is drawn without lifting the pen.
+        """
         self.actions, self.binding = list(actions), binding
         self.maximum_attempts, self.cold_modes = maximum_attempts, cold_modes
+        self.rows = rows
         self.slots = [
             {
                 "candidate": None,
@@ -180,6 +186,8 @@ class ForwardSchedule:
                 "cold": 0,
                 "history": [],
                 "unresolved": None,
+                # Set once a chained attempt failed; the stroke then lifts as usual.
+                "unchained": False,
             }
             for _ in self.actions
         ]
@@ -226,14 +234,27 @@ class ForwardSchedule:
         if chain is None:
             return None
         candidate = self.slots[index]["candidate"]
+        # Whether this stroke withdraws depends on how its successor starts.
+        chained_out = False
+        if index + 1 < len(self.actions):
+            following = self.slots[index + 1]["candidate"]
+            if following is None:
+                if self._may_chain(index + 1):
+                    return None
+            else:
+                chained_out = following.get("chain_previous") == candidate["key"]
+        chained_in = bool(candidate.get("chain_previous"))
         return {
             "kind": "check",
             "index": index,
             "candidate": candidate["key"],
             "deposit_key": candidate["deposit_key"],
             "chain": chain[:index],
+            "chained_in": chained_in,
+            "chained_out": chained_out,
             "key": self._key(
-                "check", self.actions[index], candidate["key"], self._prefix_digest(index)
+                "check", self.actions[index], candidate["key"], self._prefix_digest(index),
+                chained_in, chained_out,
             ),
         }
 
@@ -271,6 +292,21 @@ class ForwardSchedule:
         held = self.returned if index == len(self.actions) else self.slots[index]["connect"]
         return held if spec is not None and held and held["key"] == spec["key"] else None
 
+    def _starts(self, index):
+        row = self.rows[index]
+        return set(row["nodes"]) if row["closed"] else {row["start"]}
+
+    def _may_chain(self, index):
+        """Whether action ``index`` could start where its predecessor ends."""
+        if self.rows is None or index <= 0 or index >= len(self.actions):
+            return False
+        slot = self.slots[index]
+        if slot["unchained"] or slot["cache_exhausted"] or slot["unresolved"] is not None:
+            return False
+        previous = self.rows[index - 1]
+        ends = set(previous["nodes"]) if previous["closed"] else {previous["end"]}
+        return bool(ends & self._starts(index))
+
     def _propose_spec(self, index):
         return self._remembered("propose", index, self._derive_propose_spec)
 
@@ -278,8 +314,29 @@ class ForwardSchedule:
         slot = self.slots[index]
         if slot["unresolved"] is not None or slot["candidate"] is not None:
             return None
+        chain = None
+        if self._may_chain(index):
+            previous = self.slots[index - 1]
+            if previous["candidate"] is None:
+                if previous["unresolved"] is None:
+                    return None  # Its starting joint position is not known yet.
+            elif previous["candidate"].get("end_node") in self._starts(index):
+                chain = {
+                    "node": previous["candidate"]["end_node"],
+                    "q": previous["candidate"]["q_draw_end"],
+                    "rotation": previous["candidate"]["tcp_rotation"],
+                    "table_index": previous["candidate"]["table_index"],
+                    "previous": previous["candidate"]["key"],
+                }
         if not slot["cache_exhausted"]:
             mode = {"mode": "cache", "skip": sorted(slot["skip"])}
+            if chain is not None:
+                mode["chain_from"] = chain
+            elif self.rows is not None and index + 1 < len(self.rows):
+                # A loop may start anywhere; start it where the next stroke begins.
+                row, following = self.rows[index], self.rows[index + 1]
+                if row["closed"] and not following["closed"] and following["start"] in row["nodes"]:
+                    mode["prefer_start"] = following["start"]
         else:
             chain = self.chain(index)
             if chain is None:
@@ -343,6 +400,14 @@ class ForwardSchedule:
             }
         )
         if candidate is not None:
+            if candidate.get("chain_previous"):
+                # One failed chained attempt is enough; this stroke lifts as usual.
+                slot["unchained"] = True
+            # Strokes chained after this one started from its joint position.
+            for later in self.slots[index + 1 :]:
+                if later["candidate"] is None or not later["candidate"].get("chain_previous"):
+                    break
+                later["candidate"] = later["check"] = later["connect"] = None
             if candidate["mode"] == "cache" and candidate.get("parent"):
                 slot["skip"].append(candidate["parent"])
             elif candidate["mode"] == "cold":
@@ -377,6 +442,10 @@ class ForwardSchedule:
             slot["history"].append(
                 {"stage": "propose", "status": summary["status"], "detail": summary.get("failure")}
             )
+            if spec.get("chain_from") is not None:
+                # No drawing from the predecessor's joint position: lift instead.
+                slot["unchained"] = True
+                return True
             slot["attempts"] += 1
             # A timeout while adapting says nothing about the other cached
             # seeds, but repeating the identical request would not help either.
@@ -540,9 +609,15 @@ def _propose(context, spec, seconds):
         if model.experience is None:
             return {"status": "NO_CANDIDATE", "failure": {"reason": "no motion library"}}
 
+        chain = spec.get("chain_from")
+
         def candidates():
             budget = ProposalBudget(context["budget"])
-            for table_index in model.experience.preferred_indices(row, model.table.home_index):
+            for table_index in (
+                [chain["table_index"]]
+                if chain is not None
+                else model.experience.preferred_indices(row, model.table.home_index)
+            ):
                 scene = MaterialScene()
                 scene.table_index = table_index
                 for drawing in model.experience.candidates(
@@ -550,9 +625,11 @@ def _propose(context, spec, seconds):
                     available,
                     table_index,
                     scene,
-                    reference_q=build.initial,
+                    reference_q=build.initial if chain is None else np.asarray(chain["q"]),
                     budget=budget,
                     skip_parents=set(spec["skip"]),
+                    chain=chain,
+                    prefer_start=spec.get("prefer_start"),
                 ):
                     yield table_index, drawing, model.retained_move(row, drawing, table_index)
     else:
@@ -607,6 +684,13 @@ def _propose(context, spec, seconds):
             "source": drawing.get("proposal_source", "planner"),
             "variant": drawing.get("variant"),
             "parent": drawing.get("motion_library_parent"),
+            # What a stroke chained after this one starts from.
+            "end_node": drawing.get("end_anchor"),
+            "q_draw_end": np.asarray(drawing["positions"][-1], float).tolist(),
+            "tcp_rotation": np.asarray(drawing["tcp_rotation"], float).tolist(),
+            "chain_previous": (
+                None if spec.get("chain_from") is None else spec["chain_from"]["previous"]
+            ),
         }
     seconds["proposal"] += perf_counter() - started
     return {
@@ -640,6 +724,8 @@ def _check(context, spec, seconds):
             candidate["local"],
             None,
             defer_drawing_check=True,
+            chained_in=spec.get("chained_in", False),
+            chained_out=spec.get("chained_out", False),
         )
         seconds["approach_withdraw"] += perf_counter() - started
         if move is None:
@@ -731,7 +817,14 @@ def _connect(context, spec, seconds):
     scene = _prefix(context).scene_for(spec["chain"], final_index=start_index)
     seconds["material_reconstruction"] += perf_counter() - started
     started = perf_counter()
-    incoming = model.transition(scene, start, start_index, end, end_index)
+    # A chained stroke begins exactly where its predecessor stopped.
+    chained = (
+        spec["start"] is not None
+        and spec["end"] is not None
+        and start_index == end_index
+        and np.array_equal(start, end)
+    )
+    incoming = None if chained else model.transition(scene, start, start_index, end, end_index)
     seconds["transit"] += perf_counter() - started
     if incoming is False:
         return {
@@ -1287,7 +1380,24 @@ def run_parallel_forward(
         )
         return None
     order, root = context["order"], context["root"]
-    schedule = ForwardSchedule([row["id"] for row in order], context["binding"])
+    schedule = ForwardSchedule(
+        [row["id"] for row in order],
+        context["binding"],
+        rows=[
+            {
+                "start": row["start"],
+                "end": row["end"],
+                "closed": bool(row.get("closed")),
+                "nodes": sorted(
+                    {visit["node"] for visit in row.get("junction_visits", [])}
+                    | {row["start"], row["end"]}
+                ),
+            }
+            for row in order
+        ]
+        if context["build"].planner.settings.get("chain_strokes")
+        else None,
+    )
     pending_injections = set(inject_rejections)
 
     def intercept(spec, summary):
