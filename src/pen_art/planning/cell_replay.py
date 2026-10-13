@@ -17,7 +17,13 @@ import numpy as np
 from ..io import artifact, read_json, sha256, stage_update, write_json
 from ..provenance import audit_source_provenance
 from .cell_planner import CellPlanner
-from .clock_path import ClockPath, polynomial_tcp_speed_bound, tcp_tangent_bound
+from .clock_path import (
+    POSTURE_LIMIT_DEG_PER_MM,
+    ClockPath,
+    polynomial_tcp_speed_bound,
+    posture_change,
+    tcp_tangent_bound,
+)
 from .dual_arm import MotionProposal, ScheduledMotion, ScheduleState
 from .process_clock import PROCESS_CLOCK_POLICY, action_ready_times, audit_process_clock
 from .replay_checkpoint import (
@@ -308,6 +314,9 @@ def _replay_cell_body(
                 require_release=saved.get("section_schedule", False) or partial_sections,
             )
         arm = planner.arms[row["arm"]]
+        swing = posture_change(path, arm)
+        if swing:
+            raise ValueError(f"Arm changes posture while the pen works: {swing}")
         key = None
         if path_certificates is not None or not verification_raw:
             key = (
@@ -490,6 +499,11 @@ def _replay_cell_body(
             screen = analyze_structure(
                 planner.graph, material, edge_ids=deposited[index] | set(row["members"])
             )
+            # Keep the deformed shape of the finished object only. Every earlier
+            # release keeps its verdict and extremes; their per-node and
+            # per-member arrays made the report over a gigabyte on a large build.
+            if index < len(sections) - 1:
+                screen = {k: v for k, v in screen.items() if k not in {"nodes", "edges"}}
             return prefixes, screen
 
         pool = audit_pool()
@@ -544,6 +558,7 @@ def _replay_cell_body(
         checked_intervals=0,
         checked_actions=0,
         reused_path_checks=0,
+        posture_limit_deg_per_mm=POSTURE_LIMIT_DEG_PER_MM,
         geometry_proofs_accepted=geometry_proofs,
         geometry_proof_hits={},
         verification_raw=verification_raw,

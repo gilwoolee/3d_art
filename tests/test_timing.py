@@ -250,3 +250,18 @@ def test_timing_must_sweep_exactly_the_checked_geometric_path(tmp_path):
     reached, difference = _clock_onto(stationary, [p(clock) for p in stationary], 0.0)
     assert abs(reached - 0.4) < 1e-9 and difference < 1e-9
     assert _clock_onto(stationary, [p(clock) + 1e-6 for p in stationary], 0.0)[1] > 1e-9
+
+    # The arm must follow the tip while the pen works, never swing with it still.
+    from pen_art.planning.clock_path import ClockEdge, posture_change
+
+    assert posture_change(geometric, arm) is None and posture_change(timed, arm) is None
+    here, tip = np.array([0.3, 0.4]), arm.robot.forward([0.3, 0.4], offset)[:3, 3]
+
+    def still(first, second):
+        return ClockEdge(0.0, 1.0, first, second, "DRAW", "stroke", None, 0.0005, tip, tip)
+
+    swing = posture_change(ClockPath([still(here, here + 0.2)]), arm)
+    assert swing["status"] == "POSTURE_CHANGE" and swing["scope"] == "edge"
+    creep = [still(here + 0.001 * k, here + 0.001 * (k + 1)) for k in range(30)]
+    assert posture_change(ClockPath(creep), arm)["scope"] == "run"
+

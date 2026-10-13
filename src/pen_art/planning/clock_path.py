@@ -84,6 +84,78 @@ def polynomial_tcp_speed_bound(edge, arm, limit, *, deadline=None):
     return visit(0, 1, 0)
 
 
+# While the pen draws, approaches or withdraws, the arm must follow the tip and
+# not change posture: a seven-joint arm can swing its elbow with the tip still.
+# Degrees of the largest joint motion allowed per millimetre of tip travel.
+# Verified builds stay below 0.25; travel between actions is exempt.
+POSTURE_LIMIT_DEG_PER_MM = 1.0
+POSTURE_KINDS = frozenset({"DRAW", "APPROACH", "WITHDRAW"})
+
+
+def posture_change(path, arm, limit_deg_per_mm=POSTURE_LIMIT_DEG_PER_MM):
+    """The first edge or run of edges that changes posture, or None.
+
+    Each edge is held to the limit over at least 0.1 mm of tip travel, and each
+    unbroken run of drawing, approach or withdraw edges to the limit over its
+    whole travel plus 1 mm, so a swing cannot hide in many small edges.
+    """
+    limit = np.radians(limit_deg_per_mm) * 1000
+
+    def finish(run):
+        if run and run["joints"].max() > limit * (run["travel"] + 0.001):
+            return {
+                "status": "POSTURE_CHANGE",
+                "scope": "run",
+                "kind": run["kind"],
+                "first_edge": run["first"],
+                "joint_motion_deg": float(np.degrees(run["joints"].max())),
+                "tip_travel_mm": 1000 * run["travel"],
+                "limit_deg_per_mm": limit_deg_per_mm,
+            }
+        return None
+
+    run = None
+    for index, edge in enumerate(path.edges):
+        if edge.kind not in POSTURE_KINDS:
+            failure, run = finish(run), None
+            if failure:
+                return failure
+            continue
+        if edge.coefficients is None:
+            joints = np.abs(edge.q1 - edge.q0)
+        else:
+            ranges = edge.piece().ranges(0, 1)
+            joints = ranges[:, 1] - ranges[:, 0]
+        ends = [
+            arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] if tcp is None else tcp
+            for q, tcp in ((edge.q0, edge.tcp0), (edge.q1, edge.tcp1))
+        ]
+        travel = float(np.linalg.norm(ends[1] - ends[0]))
+        if joints.max() > limit * max(travel, 0.0001):
+            return {
+                "status": "POSTURE_CHANGE",
+                "scope": "edge",
+                "kind": edge.kind,
+                "first_edge": index,
+                "joint_motion_deg": float(np.degrees(joints.max())),
+                "tip_travel_mm": 1000 * travel,
+                "limit_deg_per_mm": limit_deg_per_mm,
+            }
+        if run is None or run["kind"] != edge.kind:
+            failure = finish(run)
+            if failure:
+                return failure
+            run = {
+                "kind": edge.kind,
+                "first": index,
+                "joints": np.zeros(len(joints)),
+                "travel": 0.0,
+            }
+        run["joints"] += joints
+        run["travel"] += travel
+    return finish(run)
+
+
 @dataclass
 class ClockEdge:
     start_s: float

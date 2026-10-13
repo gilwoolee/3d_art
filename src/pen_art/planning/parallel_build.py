@@ -613,6 +613,7 @@ def _propose(context, spec, seconds):
 
 
 def _check(context, spec, seconds):
+    from .clock_path import posture_change
     from .indexed_build import at_index
 
     build, planner = context["build"], context["build"].planner
@@ -645,6 +646,9 @@ def _check(context, spec, seconds):
             }
     local = at_index(move.payload, table_index)
     local.metadata["drawing_table_index"] = table_index
+    swing = posture_change(local, build.arm)
+    if swing:
+        return {"status": "REJECTED", "failure": swing}
     move = replace(move, payload=local, duration_s=local.duration_s)
     operations = []
     started = perf_counter()
