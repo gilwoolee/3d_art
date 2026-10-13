@@ -468,7 +468,10 @@ class RobotCollisionModel:
                 if certified:
                     QUERY_STATS["reference_certified"] += 1
                 for name1, name2, distance, contact in (
-                    () if certified else self.distances(q, obstacles, deadline=deadline, only=pairs)
+                    ()
+                    # Nothing left unresolved there: no query, not even kinematics.
+                    if certified or pairs == set()
+                    else self.distances(q, obstacles, deadline=deadline, only=pairs)
                 ):
                     if contact:
                         return {

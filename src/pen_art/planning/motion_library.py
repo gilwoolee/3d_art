@@ -503,10 +503,12 @@ class CachedCollisionModel:
         finally:
             self.material_seconds += perf_counter() - started
 
-    def distances(self, positions, obstacles=None, *, deadline=float("inf")):
+    def distances(self, positions, obstacles=None, *, deadline=float("inf"), only=None):
         started = perf_counter()
         try:
-            yield from self._distances(positions, obstacles, deadline=deadline)
+            for row in self._distances(positions, obstacles, deadline=deadline):
+                if only is None or (row[0], row[1]) in only:
+                    yield row
         finally:
             self.self_static_seconds += perf_counter() - started
 
