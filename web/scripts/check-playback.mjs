@@ -32,7 +32,7 @@ try{
   page.on('pageerror',error=>errors.push(error.message));
   // An absent matching verdict must withhold animation, even for a full plan.
   await page.route('**/offline_dual_arm_validation.json',route=>route.fulfill({status:404}));
-  await page.goto(`${base}/?run=${run}&stage=motion`);
+  await page.goto(`${base}/?workbench=1&run=${run}&stage=motion`);
   await page.waitForFunction(()=>document.querySelector('#badge')?.textContent===
     'Awaiting full-robot verification',null,{timeout:120000});
   assert.equal(await page.locator('#dual-play').count(),0);

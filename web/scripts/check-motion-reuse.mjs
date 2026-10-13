@@ -17,7 +17,7 @@ try {
     const page=await browser.newPage({viewport:{width:1500,height:1100}});
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
     const data=await (await fetch(`${base}/api/runs/${id}/artifacts/viewer_motion_reuse.json`)).json();
-    await page.goto(`${base}/?run=${id}`);
+    await page.goto(`${base}/?workbench=1&run=${id}`);
     await page.locator('#reuse-strokes').waitFor();
     assert.equal(await page.locator('#run-scope').inputValue(),'reuse');
     assert.equal(await page.locator('#run-select option').count(),3);

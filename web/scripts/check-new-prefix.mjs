@@ -14,7 +14,7 @@ try {
   const page=await browser.newPage({viewport:{width:1440,height:1100}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const started=Date.now();
-  await page.goto(`http://127.0.0.1:8765/?run=${run}&stage=motion`);
+  await page.goto(`http://127.0.0.1:8765/?workbench=1&run=${run}&stage=motion`);
   const play=page.locator('#robot-play');
   await play.waitFor({state:'visible'});
   await page.waitForFunction(()=>!document.querySelector('#robot-play').disabled);

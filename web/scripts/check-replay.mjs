@@ -63,7 +63,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1500, height: 1100 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${base}/?run=${run}&stage=motion`);
+  await page.goto(`${base}/?workbench=1&run=${run}&stage=motion`);
   await page.locator('#dual-play').waitFor();
   assert.equal(await page.locator('#run-select').inputValue(), run,
     'Viewer must select the requested run');

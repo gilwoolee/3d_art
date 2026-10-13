@@ -29,7 +29,7 @@ try {
   await connection.send('Network.emulateNetworkConditions',{
     offline:false,latency:30,downloadThroughput:10_000_000,uploadThroughput:1_000_000,
   });
-  await page.goto(`${base}/?run=${run}&stage=motion`);
+  await page.goto(`${base}/?workbench=1&run=${run}&stage=motion`);
   await page.waitForFunction(()=>document.querySelector('#playback-load')?.textContent.includes('Downloading motion plan:'),null,{timeout:60000});
   assert(await page.locator('#robot-play').isVisible());
   assert(await page.locator('#robot-play').isDisabled());

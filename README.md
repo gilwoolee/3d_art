@@ -65,8 +65,20 @@ ssh -N -o ExitOnForwardFailure=yes -o ControlMaster=no -o ControlPath=none \
   -L 127.0.0.1:8766:127.0.0.1:8765 blondie
 ```
 
-Open <http://127.0.0.1:8766>. Existing runs and their saved partial/full candidate
-playback remain inspectable, with their original verification status. The viewer
+Open <http://127.0.0.1:8766>, or `http://127.0.0.1:8766/?run=<run id>` for one
+run. The page shows three linked views side by side: the original textured
+model, the wireframe strokes, and the robot's saved motion with one set of play
+controls (30× by default). It states whether the plan it plays is the one the
+separate verification passed. The earlier multi-stage workbench, with its
+diagnostics, is at `/?workbench=1`. To check the page against a saved run in a
+headless browser:
+
+```bash
+(cd web && PATH="$PWD/../tools/node/bin:$PATH" node scripts/check-simple.mjs <run id> out.png)
+```
+
+Existing runs and their saved partial/full candidate playback remain
+inspectable in the workbench, with their original verification status. The viewer
 has no robot execution route. To start it manually on Blondie:
 
 ```bash

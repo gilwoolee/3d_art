@@ -44,3 +44,21 @@
 #run-scope{max-width:170px}
 .reuse-stats{display:flex;flex-wrap:wrap;gap:12px 28px;padding:16px 0;border-block:1px solid var(--line);font-size:12px;color:var(--muted)}.reuse-stats strong{display:block;font-family:'IBM Plex Mono',monospace;font-size:22px;color:var(--ink);margin-bottom:5px}#motion-reuse-panel details{margin:20px 0}#motion-reuse-panel summary{cursor:pointer;font-size:12px}#motion-reuse-panel h2:not(:first-child){margin-top:28px}
 @media(max-width:650px){.topbar{height:auto;min-height:64px;flex-wrap:wrap;gap:10px;padding:12px 18px}.top-right{width:100%;min-width:0}.top-right select{min-width:0;max-width:none}#run-scope{flex:0 0 160px}#run-select{flex:1;width:0}}
+/* The side-by-side viewer: model, strokes and robot motion on one page. */
+.simple{display:flex;flex-direction:column;height:100vh;background:#f3f2ed}
+.simple-bar,.simple-controls{display:flex;align-items:center;gap:14px;padding:10px 18px;background:#fafaf6;border-bottom:1px solid var(--line)}
+.simple-controls{border-bottom:0;border-top:1px solid var(--line)}
+.simple-bar strong{font-size:19px;letter-spacing:-.5px}
+.simple-bar select{max-width:42vw}
+.simple-status{flex:1;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.simple-link{font-size:12px;white-space:nowrap}
+.simple-panels{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px}
+.simple-panels section{display:flex;flex-direction:column;min-height:0;background:#fafaf6;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.simple-panels h2{font-size:13px;font-weight:600;margin:0;padding:10px 14px}
+.simple-panels p{font-size:11px;color:var(--muted);margin:0;padding:8px 14px;min-height:31px}
+.simple-view{flex:1;min-height:0;position:relative}
+.simple-view canvas{display:block;width:100%;height:100%}
+.simple-controls input[type=range]{flex:1}
+.simple-controls button,.simple-controls select{padding:6px 12px;border:1px solid var(--line);border-radius:5px;background:#fff}
+.simple-controls button:disabled{opacity:.5;cursor:default}
+@media(max-width:900px){.simple{height:auto}.simple-panels{grid-template-columns:1fr}.simple-view{height:60vh;flex:none}}
