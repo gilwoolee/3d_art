@@ -1176,17 +1176,16 @@ def main():
     parser.add_argument(
         "--retiming-grid",
         choices=("full", "midpoints", "knots"),
-        default="full",
         help="Clock resolution for new drawings: every spline knot plus midpoints and 101 "
         "samples per part (full), knots and midpoints, or knots only. Coarser grids time "
-        "and audit faster and draw slightly slower",
+        "and audit faster and draw slower. Default: knots with --geometry-first, else full",
     )
     parser.add_argument(
         "--merge-deposits-um",
         type=float,
-        default=0.0,
         help="Describe earlier actions' wire by merged capsules whose radius grows by at "
-        "most this many micrometres; 0 keeps every fine capsule",
+        "most this many micrometres; 0 keeps every fine capsule. Default: 20 with "
+        "--geometry-first, else 0",
     )
     parser.add_argument(
         "--adaptation-waypoint-checks",
@@ -1203,6 +1202,10 @@ def main():
         help="Testing only: reject this action's first accepted parallel check, forcing repair",
     )
     args = parser.parse_args()
+    if args.retiming_grid is None:
+        args.retiming_grid = "knots" if args.geometry_first else "full"
+    if args.merge_deposits_um is None:
+        args.merge_deposits_um = 20.0 if args.geometry_first else 0.0
     if args.workers is not None and (args.gpu or not args.progression_only or args.workers < 1):
         parser.error("--workers needs --progression-only, at least one worker, and no --gpu")
     if args.diffusion_checkpoint is not None and args.motion_library is None:

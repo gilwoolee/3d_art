@@ -1,6 +1,6 @@
 # Geometry-first planning for new objects
 
-2026-10-12. **Status: planned; not implemented or benchmarked.**
+2026-10-12. **Status: in progress; see results below.**
 
 Establish a collision-free, untimed joint path through the whole object first;
 time it once at the end. Alongside that: check fewer, longer path pieces, make
@@ -14,6 +14,31 @@ connected drawing actions, fixed TCP orientation within DRAW, stationary
 This replaces the [cached swept-volume plan](2026_1012_cached_swept_volume_plan.md)
 as the next step. Swept volumes are revisited only if G0 and G7 show that
 arm-versus-material queries remain a large share.
+
+## Results so far (2026-10-12, 16 workers, each verified by the unchanged full-robot replay)
+
+| Build | Chain collision-free | Timing pass | Verification | Total | Modelled print |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cube, timed first (reference) | 179.4 s | inside | about 212 s | 450.7 s | 1,917.9 s |
+| Cube, untimed | 70.4 s | 103.4 s | 190.6 s | 422.8 s | 1,735.6 s |
+| Cube, untimed + merged capsules | 66.7 s | 106.4 s | 179.6 s | 373.5 s | 1,735.6 s |
+| Cube, + knots-only clock | 66.2 s | 23.2 s | 81.6 s | 185.2 s | 2,054.2 s |
+| Narrowed cube, untimed + merged | 90.5 s | 106.9 s | 190.4 s | 410.1 s | not recorded |
+| Prism, untimed + merged | 47.1 s | 54.5 s | 82.9 s | 195.7 s | 1,027.7 s |
+| Prism, + knots-only clock | 39.8 s | 12.6 s | 31.2 s | 90.3 s | 1,401.2 s |
+
+Every action in every untimed build was adapted from a library record on the
+first attempt; none fell back to cold planning. Merged capsules cut the cube's
+wire from 105,954 capsules to about 2,000 and peak memory from 15.4 GB to
+8.0 GB. The knots-only clock gives one timed segment per path piece, so
+verification already runs on the untimed piece count; it lengthens the modelled
+print by 18% on the cube and 36% on the prism. `--geometry-first` now implies
+`--merge-deposits-um 20 --retiming-grid knots`; both can be overridden.
+
+Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
+(not in the original list). Open: G5 (verification still re-derives deposits and
+re-proves orientation on the timed plan), G7, the waypoint-only adaptation
+measurement in G6, timing-failure retry in G4, torus and bottle builds.
 
 ## Evidence
 
