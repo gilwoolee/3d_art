@@ -63,10 +63,47 @@ seams read as open edges), nudges a cut that comes out open by up to 10 um, and
 omits inner contours that begin above the bed (cavity walls); the vase went from
 a rejected 119-action frame sagging 169 mm to a verified 57-action shell.
 
-Not buildable yet: the branching shape (4,396 actions, 83,639 members, structure
-rejected) and the Palace (closed once welded, but still an open contour at layer
-375). In both, thin or overhanging features drive the 27-degree descent rule to
-hundreds of very thin layers. That needs a wireframe policy for thin parts.
+Branching shape and Palace (2026-10-13), both `FULL_BUILD_VERIFIED`, every
+action adapted from the library, no timing rejections:
+
+| Object | Actions | Chain collision-free | Timing | Verification | Total | Peak memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Branching, 8 mm feature, 3 mm layers | 151 | 124.5 s | 26.3 s | 64.2 s | 247.4 s | 6.2 GB |
+| Palace, 8 mm feature, 2.1 mm layers | 366 | 526.5 s | 69.1 s | 177.8 s | 937.0 s | 8.7 GB |
+
+Three things made them buildable:
+
+- **Solidify** (`abstraction/solidify.py`, opt-in through
+  `wireprint.minimum_feature_m` in the fabrication config): the mesh is rebuilt
+  on a 1 mm grid as a closed solid without parts thinner than the feature size.
+  It is a simplification, recorded with its deviation: the Palace keeps 234 of
+  289 cm3 with the surface moved 0.5 mm (median) to 1.9 mm (maximum); at 12 mm
+  its stem is removed and nothing above survives, so 8 mm is the usable size.
+- **Rounded tips end the shape**: a contour smaller than 0.75 of the feature
+  size is left out (`omitted_small_contours`) instead of thinning every layer.
+- **Nearest-point zigzags**: where contours split or merge, and where two
+  consecutive outlines differ enough that equal fractions give a too-steep
+  diagonal, each upper contour stands on the nearest part of the contour beneath
+  (`nearest_point_zigzags`). Equal-fraction pairing at the first fork produced
+  wires the pen could not approach (`NO_CONNECTED_APPROACH` at action 58) and
+  drove the Palace to 0.55 mm layers. The five earlier objects' wireframes are
+  unchanged by this.
+
+Limits of these two results:
+
+- The branching shape sags 2.9 mm in the linear frame model, over the 1 mm
+  limit, so the planner rejects it (`GOAL_STRUCTURE_REJECTED`) with the default
+  settings. The verified build above uses a source whose limit was raised to
+  3 mm for the experiment (`runs/geomfirst_branching_f8_l3_sag3_source`). The
+  material constants are uncalibrated placeholders; whether to brace the shape,
+  thicken the strand or change the limit is undecided. The Palace passes at the
+  default limit (0.33 mm).
+- Both need a requested layer height of 3 mm. From the default 10 mm request the
+  refinement overshoots (Palace 0.9 mm layers, 852 actions).
+- The Palace build ran on the wireframe from one commit earlier, which differs
+  from the current generator's by 2 of 6,881 members.
+- Setup for the Palace takes 159 s and its chain 1.4 s per action; neither has
+  been profiled.
 
 Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
 (not in the original list). Open: G5 (verification still re-derives deposits and
