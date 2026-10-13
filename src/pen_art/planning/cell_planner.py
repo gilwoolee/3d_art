@@ -958,9 +958,16 @@ class CellPlanner:
         vertex_cooling = float(self.process.get("vertex_cooling_s", 1.0))
         if not np.isfinite(vertex_cooling) or vertex_cooling < 0:
             raise ValueError("Vertex cooling must be finite and nonnegative")
+        # Stop where the process audit will look for each corner: at the knot
+        # whose actual tool position is nearest the source vertex. Ideal targets
+        # can name a neighbouring knot when two lie within tracking error.
+        reached = np.array([arm.robot.forward(joints, arm.flange_to_tcp)[:3, 3] for joints in q])
         corners, holds, vertical_end = source_vertex_schedule(
-            self.actions[task], drawing, targets, transform, vertex_cooling
+            self.actions[task], drawing, reached, transform, vertex_cooling
         )
+        for index, hold in holds.items():
+            # The join stays centred on the source vertex itself.
+            hold["contact_m"] = targets[index].tolist()
         draw_operation = {
             "kind": "DRAW",
             "positions": q,
