@@ -23,6 +23,8 @@ arm-versus-material queries remain a large share.
 | Cube, untimed | 70.4 s | 103.4 s | 190.6 s | 422.8 s | 1,735.6 s |
 | Cube, untimed + merged capsules | 66.7 s | 106.4 s | 179.6 s | 373.5 s | 1,735.6 s |
 | Cube, + knots-only clock | 66.2 s | 23.2 s | 81.6 s | 185.2 s | 2,054.2 s |
+| Cube, knots-only clock, stall fix | 66.0 s | 26.7 s | 84.3 s | 191.4 s | 1,796.1 s |
+| Prism, knots-only clock, stall fix | 46.1 s | 13.4 s | 31.6 s | 98.4 s | 1,063.9 s |
 | Narrowed cube, untimed + merged | 90.5 s | 106.9 s | 190.4 s | 410.1 s | not recorded |
 | Prism, untimed + merged | 47.1 s | 54.5 s | 82.9 s | 195.7 s | 1,027.7 s |
 | Prism, + knots-only clock | 39.8 s | 12.6 s | 31.2 s | 90.3 s | 1,401.2 s |
@@ -31,8 +33,9 @@ Every action in every untimed build was adapted from a library record on the
 first attempt; none fell back to cold planning. Merged capsules cut the cube's
 wire from 105,954 capsules to about 2,000 and peak memory from 15.4 GB to
 8.0 GB. The knots-only clock gives one timed segment per path piece, so
-verification already runs on the untimed piece count; it lengthens the modelled
-print by 18% on the cube and 36% on the prism. `--geometry-first` now implies
+verification already runs on the untimed piece count. The first knots-only runs
+lengthened the modelled print by 18% and 36% because one leg per object stalled;
+with stalled legs retimed on a finer grid the cost is 3.5% on both. `--geometry-first` now implies
 `--merge-deposits-um 20 --retiming-grid knots`; both can be overridden.
 
 Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
