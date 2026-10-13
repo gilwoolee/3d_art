@@ -1008,6 +1008,11 @@ def build_binding(build, order, budget):
             else sorted(library.record_key(record) for record in library.records),
             "action_budget_s": budget,
             **({"geometry_first": True} if build.planner.geometry_first else {}),
+            **(
+                {"adaptation_waypoint_checks": True}
+                if getattr(build.planner, "adaptation_waypoint_checks", False)
+                else {}
+            ),
         }
     )
 

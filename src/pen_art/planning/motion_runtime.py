@@ -173,6 +173,10 @@ class DrawingExperience:
         self.learning_context_hash = learning_context(build.arm, build.planner.profile)
         self.stats = Counter()
         self.seconds = Counter()
+        # The final path check is the authority when waypoint checks are chosen.
+        self.library.adaptation_edge_checks = not getattr(
+            build.planner, "adaptation_waypoint_checks", False
+        )
         metadata = read_json(build.run / "run.json")
         self.source_run = str(metadata["cell_source_run"])
         self.source_object = object_identity(self.source_run, metadata)
@@ -464,11 +468,13 @@ class DrawingExperience:
             self.seconds["retrieval"] += retrieval_seconds
             budget.spend(retrieval_seconds)
             self.stats["requests"] += 1
-            for record in records:
+            for position, record in enumerate(records):
                 if not budget.available or monotonic() >= planner.deadline:
                     break
                 if skip_parents and self.parent_key(record) in skip_parents:
                     continue
+                # One stubborn seed must leave time for the remaining ones.
+                share = budget.remaining_seconds / (len(records) - position)
                 started = perf_counter()
                 proposal = self.retained_seed_proposal(record, request)
                 if proposal is not None:
@@ -483,12 +489,13 @@ class DrawingExperience:
                         request,
                         arm,
                         planner.obstacles,
-                        deadline=min(
-                            planner.deadline,
-                            monotonic() + budget.remaining_seconds,
-                        ),
+                        deadline=min(planner.deadline, monotonic() + share),
                         clearance_m=planner.margin,
                     )
+                    if proposal is not None:
+                        self.stats["cache_adaptation_backtracks"] += proposal[
+                            "adaptation_backtracks"
+                        ]
                 adaptation_seconds = perf_counter() - started
                 self.seconds["adaptation"] += adaptation_seconds
                 budget.spend(adaptation_seconds, attempt=True)

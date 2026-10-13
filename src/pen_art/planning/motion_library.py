@@ -28,6 +28,8 @@ FIXED_ORIENTATION_POLICY = "fixed-tcp-orientation-v1"
 ORIENTATION_LIMIT_RAD = 0.003
 # Checks an adaptation candidate passes in order; a failure reports the furthest.
 ADAPTATION_STAGES = ("no_inverse_kinematics", "off_target", "tracking", "collision")
+# Total backing-up steps per candidate, and how far behind the furthest point.
+ADAPTATION_BACKTRACKS, ADAPTATION_BACKTRACK_DEPTH = 24, 8
 VALIDATOR_VERSION = "motion-clearance-lipschitz-v1"
 DRAWING_POLICY_VERSION = "whole-connected-action-v1"
 SELF_STATIC_SCOPE = "SELF_STATIC_ONLY"
@@ -1305,71 +1307,112 @@ class MotionLibrary:
             if request.allowed_orientations
             else original_rotation
         )
-        path = []
-        for i, (point, seed) in enumerate(zip(points, seeds, strict=True)):
-            if monotonic() >= deadline:
-                return failed("deadline", i, points=len(points))
+        edge_checks = getattr(self, "adaptation_edge_checks", True)
+
+        def candidates(i, previous, wide):
+            """Joint candidates for point ``i``; ``wide`` searches harder for alternatives."""
+            point, seed = points[i], seeds[i]
+            fixed = request.q_start if i == 0 else request.q_goal if i == len(points) - 1 else None
+            if fixed is not None:
+                return [np.asarray(fixed)]
             target = arm.robot.forward(seed, arm.flange_to_tcp).copy()
             target[:3, 3] = point
             if rotation is not None:
                 target[:3, :3] = rotation
-            fixed = request.q_start if i == 0 else request.q_goal if i == len(points) - 1 else None
-            proposals = [np.asarray(fixed)] if fixed is not None else [seed]
-            if (
-                fixed is None
-                and np.linalg.norm(pose_error(arm.robot.forward(seed, arm.flange_to_tcp), target))
+            found = [seed]
+            if wide or (
+                np.linalg.norm(pose_error(arm.robot.forward(seed, arm.flange_to_tcp), target))
                 > 1e-5
             ):
-                found = inverse_candidates(
-                    arm.robot,
-                    target,
-                    arm.flange_to_tcp,
-                    [seed, *(path[-1:] or [])],
-                    position_tolerance=0.00005,
-                    orientation_tolerance=0.001,
-                    maximum_evaluations=60,
-                )
-                proposals = [np.asarray(row["positions"]) for row in found]
-            proposals.sort(key=lambda q: np.linalg.norm(q - (path[-1] if path else seed)))
-            selected = None
-            # The furthest check any candidate reached names the failure.
-            stage = "no_inverse_kinematics"
-            for q in proposals:
-                if np.linalg.norm(arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] - point) > 0.0003:
-                    stage = max(stage, "off_target", key=ADAPTATION_STAGES.index)
-                    continue
-                if not path:
-                    if arm.collision.check(q, obstacles, clearance_m, deadline=deadline):
-                        stage = "collision"
-                        continue
-                else:
-                    piece = PolynomialPiece(
-                        Polynomial([a, b - a]) for a, b in zip(path[-1], q, strict=True)
-                    )
-                    tracked = check_tracking(
-                        piece,
+                starts = [seed, *([] if previous is None else [previous])]
+                if wide:
+                    starts.extend(seeds[max(0, i - 1) : i + 2])
+                found = [
+                    np.asarray(row["positions"])
+                    for row in inverse_candidates(
                         arm.robot,
+                        target,
                         arm.flange_to_tcp,
-                        points[i - 1],
-                        point,
-                        rotation,
-                        0.0003,
-                        0.003,
+                        starts,
+                        position_tolerance=0.00005,
+                        orientation_tolerance=0.001,
+                        maximum_evaluations=240 if wide else 60,
                     )
-                    if tracked["status"] != "BOUNDED":
-                        stage = max(stage, "tracking", key=ADAPTATION_STAGES.index)
+                ]
+            reference = seed if previous is None else previous
+            return sorted(found, key=lambda q: np.linalg.norm(q - reference))
+
+        def rejection(i, previous, q):
+            """The check ``q`` fails at point ``i``, or None when it is acceptable."""
+            if np.linalg.norm(arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] - points[i]) > 0.0003:
+                return "off_target"
+            if previous is None or not edge_checks:
+                if arm.collision.check(q, obstacles, clearance_m, deadline=deadline):
+                    return "collision"
+            if previous is None:
+                return None
+            piece = PolynomialPiece(
+                Polynomial([a, b - a]) for a, b in zip(previous, q, strict=True)
+            )
+            tracked = check_tracking(
+                piece, arm.robot, arm.flange_to_tcp, points[i - 1], points[i], rotation,
+                0.0003, 0.003,
+            )
+            if tracked["status"] != "BOUNDED":
+                return "tracking"
+            if edge_checks:
+                checked = arm.collision.check_edge(
+                    previous, q, obstacles, clearance_m, maximum_depth=20, deadline=deadline
+                )
+                if checked["status"] != "CERTIFIED_MODELED_EDGE":
+                    return "collision"
+            return None
+
+        # Depth-first over joint candidates: a dead end backs up over a few
+        # preceding points and retries their alternatives before giving up.
+        path, banned, backtracks = [], {}, 0
+        furthest = {"point": -1}
+        while len(path) < len(points):
+            i, previous = len(path), path[-1] if path else None
+            if monotonic() >= deadline:
+                return failed("deadline", i, points=len(points), backtracks=backtracks)
+            selected, stage = None, "no_inverse_kinematics"
+            seen = list(banned.get(i, ()))
+            # Search wider only where the nearest candidates already failed.
+            for wide in (False, True):
+                for q in candidates(i, previous, wide):
+                    if any(np.allclose(q, other, atol=1e-9, rtol=0) for other in seen):
                         continue
-                    checked = arm.collision.check_edge(
-                        path[-1], q, obstacles, clearance_m, maximum_depth=20, deadline=deadline
-                    )
-                    if checked["status"] != "CERTIFIED_MODELED_EDGE":
-                        stage = "collision"
-                        continue
-                selected = q
-                break
-            if selected is None:
-                return failed(stage, i, points=len(points), candidates=len(proposals))
-            path.append(selected)
+                    seen.append(q)
+                    reason = rejection(i, previous, q)
+                    if reason is None:
+                        selected = q
+                        break
+                    stage = max(stage, reason, key=ADAPTATION_STAGES.index)
+                if selected is not None:
+                    break
+            tried = len(seen) - len(banned.get(i, ()))
+            if selected is not None:
+                path.append(selected)
+                continue
+            if i >= furthest["point"]:
+                furthest = {"point": i, "stage": stage, "candidates": tried}
+            if (
+                not path
+                or backtracks >= ADAPTATION_BACKTRACKS
+                or furthest["point"] - (i - 1) > ADAPTATION_BACKTRACK_DEPTH
+            ):
+                return failed(
+                    furthest["stage"],
+                    furthest["point"],
+                    points=len(points),
+                    candidates=furthest["candidates"],
+                    backtracks=backtracks,
+                )
+            # The predecessor led here; alternatives at ``i`` depend on it.
+            banned.pop(i, None)
+            banned.setdefault(i - 1, []).append(path.pop())
+            backtracks += 1
         provenance = record.get("provenance", {})
         preference = provenance.get("orientation_preference", {})
         seed_preferences = {}
@@ -1390,8 +1433,11 @@ class MotionLibrary:
                 else arm.robot.forward(path[0], arm.flange_to_tcp)[:3, :3]
             ).tolist(),
             "free_tool_orientation": rotation is None,
-            "static_collision_status": "CERTIFIED_MODELED_PATH",
+            "static_collision_status": (
+                "CERTIFIED_MODELED_PATH" if edge_checks else "CHECKED_AT_WAYPOINTS_ONLY"
+            ),
             "tracking_status": "BOUNDED",
+            "adaptation_backtracks": backtracks,
             "table_index": request.table_index,
             "motion_library_parent": digest(record),
             "variant": "cache-adapted",

@@ -250,6 +250,7 @@ class SectionBuild:
         diffusion_checkpoint=None,
         learning_device="cpu",
         geometry_first=False,
+        adaptation_waypoint_checks=False,
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -268,6 +269,7 @@ class SectionBuild:
             run, profile, settings, monotonic() + maximum_seconds, timing_override=timing
         )
         self.planner.geometry_first = geometry_first
+        self.planner.adaptation_waypoint_checks = adaptation_waypoint_checks
         if self.motion_library_path is None and self.planner.turntable is not None:
             self.motion_library_path = Path("runs/motion_library_phase1_upright27_v1")
         if self.motion_library_path is not None and self.planner.turntable is None:
@@ -1162,6 +1164,12 @@ def main():
         help="Check new drawings as untimed paths and time them after the whole chain passes",
     )
     parser.add_argument(
+        "--adaptation-waypoint-checks",
+        action="store_true",
+        help="While adapting a cached path, check collision at waypoints only; the "
+        "final path check remains continuous",
+    )
+    parser.add_argument(
         "--inject-rejection",
         type=int,
         action="append",
@@ -1196,6 +1204,7 @@ def main():
         diffusion_checkpoint=args.diffusion_checkpoint,
         learning_device=args.learning_device,
         geometry_first=args.geometry_first,
+        adaptation_waypoint_checks=args.adaptation_waypoint_checks,
     )
     try:
         build.run_build(
