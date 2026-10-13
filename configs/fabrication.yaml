@@ -18,8 +18,8 @@ graph:
   maximum_braces: 12
 structure:
   calibrated: false
-  material_label: unmeasured development material
-  young_modulus_pa: 1000000000
+  material_label: 3D pen PLA, typical published values, not measured
+  young_modulus_pa: 2500000000
   poisson_ratio: 0.35
   density_kg_m3: 1240
   yield_stress_pa: 15000000
