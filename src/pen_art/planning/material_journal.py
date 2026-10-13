@@ -1,5 +1,6 @@
 """Shared read-only capsule arrays; each worker constructs its own FCL objects."""
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -38,7 +39,9 @@ def write_journal(path, operations):
             descriptors.append(['add', offset, len(values), [r['name'] for r in rows]])
             offset += len(values)
     data_path = path.with_suffix('.npy')
-    temporary = data_path.with_suffix('.tmp')
+    # Two workers can journal identical deposits (strokes that lay nothing new
+    # share one key) at the same moment; each writes its own temporary file.
+    temporary = data_path.with_suffix(f'.{os.getpid()}.tmp')
     with temporary.open('wb') as stream:
         np.save(stream, np.concatenate(arrays) if arrays else np.empty((0, 7)), allow_pickle=False)
     temporary.replace(data_path)

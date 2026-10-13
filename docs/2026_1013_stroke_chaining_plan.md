@@ -1,8 +1,39 @@
 # Stroke Chaining Plan
 
 **Date:** 2026-10-13
-**Status:** Planning. Phases 0 and 1 are being implemented first; nothing below
-is measured unless it says so.
+**Status:** Phases 0 and 1 done and measured (2026-10-13). Phases 2 to 5 not
+started: no stroke is chained yet and print time is unchanged.
+
+### Result of Phases 0 and 1
+
+All eight objects regenerate, plan and verify unchained. Joins where the next
+stroke starts at the node the previous one ended on, a contour counted with one
+node for both of its sides:
+
+| Object | Strokes | Joins that can chain |
+| --- | ---: | ---: |
+| Prism, cube, narrowed cube | 21 each | 20 of 20 |
+| Bottle | 31 | 30 of 30 |
+| Vase | 33 | 32 of 32 |
+| Torus | 15 | 8 of 14 |
+| Branching shape | 151 | 120 of 150 (34 before) |
+| Palace | 273 | 158 of 272 (16 before) |
+
+Two things found on the way, both at the branching shape's split layer:
+
+- Loops that share a lower contour get all their zigzags before any of their
+  contours. A finished sibling contour stood in the pen's way to the feet
+  just beneath it.
+- Only the first zigzag on a contour takes the chained start. A sibling
+  starting at the same foot stood on the first one's riser.
+
+The order is set in the wireframe's order hints, so it applies to every
+planning mode, not only geometry-first. Sources:
+`runs/geomfirst_{prism,bottle,torus,cube,cube_narrow,vase}_vr3_source`,
+`runs/geomfirst_{branchingvr2,palacevr2}_f8_l3_source`; runs
+`runs/geomfirst_gf52_{branching,palace}_w24`, `gf53`/`gf54` for the six.
+
+The rest of this page is the plan as written before that work.
 
 ## Motivation
 
@@ -159,21 +190,21 @@ the fast-planning document.
 
 ### Phase 0
 
-- [ ] **0.1** `wireprint.py` `anchors()`: start foot numbering at the previous
+- [x] **0.1** `wireprint.py` `anchors()`: start foot numbering at the previous
   zigzag's last top on the lower contour (stored per loop while building
   `bridges`); nearest-point mode starts the tops there.
 - [ ] **0.2** Record in the generated graph where each zigzag starts and ends.
-- [ ] **0.3** Existing wireframe test: risers on the cube still vertical and
+- [x] **0.3** Existing wireframe test: risers on the cube still vertical and
   aligned across layers; each zigzag's first node equals the previous
   zigzag's last node on the shared contour.
-- [ ] **0.4** Regenerate all eight sources; structural screen passes.
+- [x] **0.4** Regenerate all eight sources; structural screen passes.
 
 ### Phase 1
 
-- [ ] **1.1** Priorities for the paired order where actions get their
+- [x] **1.1** Priorities for the paired order where actions get their
   `priority` (`sections.py`), enabled with `--geometry-first`.
-- [ ] **1.2** Count chainable joins (shared end and start node) on all eight.
-- [ ] **1.3** Plan and verify all eight with the new order, unchained.
+- [x] **1.2** Count chainable joins (shared end and start node) on all eight.
+- [x] **1.3** Plan and verify all eight with the new order, unchained.
 
 ### Phase 2
 

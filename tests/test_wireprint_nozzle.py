@@ -58,6 +58,26 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     for edges in groups.values():
         final = max(edges, key=lambda edge: edge["source_interval"][-1])
         assert nodes[final["end"]][2] > nodes[final["start"]][2]
+    # Each zigzag starts where the one below ended, so the pen can run from a
+    # zigzag round its contour into the next; the risers then form columns.
+    ordered = sorted(groups, key=lambda name: int(name.split("-")[1]))
+    ends = {}
+    for name in ordered:
+        legs = sorted(groups[name], key=lambda edge: edge["source_interval"][0])
+        ends[name] = (legs[0]["start"], legs[-1]["end"])
+    assert all(ends[a][1] == ends[b][0] for a, b in zip(ordered[:-1], ordered[1:], strict=True))
+    columns = {
+        tuple(np.round(nodes[edge["start"]][:2], 5))
+        for edges in groups.values()
+        for edge in edges
+        if nodes[edge["end"]][2] > nodes[edge["start"]][2]
+    }
+    assert len(columns) == 13
+    hints = {edge["parent_curve"]: edge["order_hint"] for edge in graph["edges"]}
+    drawn = sorted(hints, key=hints.get)
+    assert [name.split("-")[0] for name in drawn[:5]] == [
+        "contour", "zigzag", "contour", "zigzag", "contour"
+    ]
     points = np.asarray(list(nodes.values()))
     np.testing.assert_allclose([points.min(axis=0), points.max(axis=0)], mesh.bounds, atol=1e-9)
     contour_lengths = defaultdict(float)

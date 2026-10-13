@@ -199,7 +199,14 @@ def _mesh_framework_at_height(
             beneath = LineString(down["points"][:, :2])
             overhead = LineString(up["points"][:, :2])
 
-            def anchors(i, count, nearest, up=up, down=down, beneath=beneath, overhead=overhead):
+            # Only one zigzag can begin at the lower contour's chain point; a
+            # sibling starting there would stand on the first one's riser.
+            takes_chain = "chain" in down and down.setdefault("chain_user", ui) == ui
+
+            def anchors(
+                i, count, nearest, up=up, down=down, beneath=beneath, overhead=overhead,
+                chained=takes_chain,
+            ):
                 """Foot, top and next foot of one zigzag: a riser and a diagonal.
 
                 As in WirePrint, the riser goes straight up, or as near to it as
@@ -209,17 +216,29 @@ def _mesh_framework_at_height(
                 outlines differ the tops are spaced evenly on the upper contour
                 and each foot is the nearest point beneath.
                 """
-                # An inner wall can stand on almost the same ring as the outer
-                # wall beside it (a torus resting on the bed). Start its zigzags
-                # half a spacing along, so the two do not share their feet.
-                shift = 0.5 if down["depth"] % 2 else 0.0
-                first, following = (i + shift) / count, (i + 1 + shift) / count
+                # A zigzag starts where the zigzag beneath its lower contour
+                # put its last riser top, so the pen can run from that zigzag
+                # round the contour and straight into this one. With equal
+                # counts the risers then also line up from layer to layer.
+                # Otherwise an inner wall can stand on almost the same ring as
+                # the outer wall beside it (a torus resting on the bed). Start
+                # its zigzags half a spacing along, so they do not share feet.
+                origin = down["chain"] if chained else (0.5 / count if down["depth"] % 2 else 0.0)
                 if nearest:
+                    start = (
+                        overhead.project(
+                            Point(sample_loop(down["points"], origin)[:2]), normalized=True
+                        )
+                        if chained
+                        else origin
+                    )
+                    first, following = start + i / count, start + (i + 1) / count
                     a, c = (
                         beneath.project(Point(sample_loop(up["points"], f)[:2]), normalized=True)
                         for f in (first, following)
                     )
-                    return a, first, c
+                    return (origin if chained and i == 0 else a), first, c
+                first, following = origin + i / count, origin + (i + 1) / count
                 foot = Point(sample_loop(down["points"], first)[:2])
                 top = overhead.project(foot, normalized=True)
                 return first, top, following
@@ -306,7 +325,9 @@ def _mesh_framework_at_height(
                 down["joins"].add(a % 1.0)
                 if c is not None:
                     down["joins"].add(c % 1.0)
-                up["joins"].add(b)
+                up["joins"].add(b % 1.0)
+                # The last riser top, where the next zigzag up will begin.
+                up["chain"] = b % 1.0
                 bridges.append((index, li, ui, a, b, c, step))
                 step += 1
             relations.append(
@@ -369,6 +390,31 @@ def _mesh_framework_at_height(
         by_edge[key] = edge
         edges.append(edge)
 
+    # Build order within a layer: each contour straight after the zigzags that
+    # carry it, starting with a loop that stands on the contour finished last,
+    # so that consecutive strokes meet end to start wherever the shape allows.
+    # Loops that share a lower contour are the exception: a finished contour
+    # would stand in the pen's way to its sibling's feet just beneath, so all
+    # of their zigzags come first and their contours after.
+    turns, last = {}, None
+    for index, loops in enumerate(layers):
+        pairs = [(li, ui) for layer, li, ui, *_ in bridges if layer == index]
+        supported = {ui for li, ui in pairs if li == last}
+        children = {li: {u for parent, u in pairs if parent == li} for li, _ in pairs}
+        sequence, held = [], []
+        for ui in sorted(range(len(loops)), key=lambda ui: (ui not in supported, ui)):
+            parents = sorted({li for li, u in pairs if u == ui}, key=lambda li: (li != last, li))
+            sequence.extend(("zigzag", li, ui) for li in parents)
+            if any(len(children[li]) > 1 for li in parents):
+                held.append(("contour", ui))
+            else:
+                sequence.append(("contour", ui))
+            last = ui
+        for position, stroke in enumerate(sequence + held):
+            turns[(index, *stroke)] = 1000 * index + position
+        if held:
+            last = held[-1][1]
+
     for index, loops in enumerate(layers):
         # Rising/descending strokes stand on the already completed lower contour.
         for layer, li, ui, a, b, c, step in (row for row in bridges if row[0] == index):
@@ -379,7 +425,7 @@ def _mesh_framework_at_height(
                 sample_loop(up, b),
                 name,
                 [2 * step, 2 * step + 1],
-                2 * index - 1,
+                turns[(index, "zigzag", li, ui)],
                 "framework",
             )
             if c is not None:
@@ -388,7 +434,7 @@ def _mesh_framework_at_height(
                     sample_loop(down, c),
                     name,
                     [2 * step + 1, 2 * step + 2],
-                    2 * index - 1,
+                    turns[(index, "zigzag", li, ui)],
                     "framework",
                 )
         for li, loop in enumerate(loops):
@@ -401,7 +447,7 @@ def _mesh_framework_at_height(
                     sample_loop(points, b),
                     f"contour-{index}-{li}",
                     [a, b],
-                    2 * index,
+                    turns[(index, "contour", li)],
                     "framework",
                 )
     return artifact(
