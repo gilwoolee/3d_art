@@ -28,7 +28,12 @@ def pose_error(actual, target):
 def geometric_jacobian(robot, positions, flange_to_tcp):
     """World-frame translational/angular Jacobian evaluated at the pen tip."""
     frames = robot.frames(positions)
-    tcp = (frames[robot.tip] @ rigid_transform(flange_to_tcp))[:3, 3]
+    return _frame_jacobian(
+        robot, frames, (frames[robot.tip] @ rigid_transform(flange_to_tcp))[:3, 3]
+    )
+
+
+def _frame_jacobian(robot, frames, tcp):
     columns = []
     for joint in robot.joint_data:
         if joint["index"] is None:
@@ -54,6 +59,30 @@ def pose_jacobian(robot, positions, offset, target):
     inverse_left = np.eye(3) - 0.5 * skew + coefficient * (skew @ skew)
     jacobian[3:] = inverse_left @ jacobian[3:]
     return jacobian
+
+
+def _newton(robot, target, offset, seed, iterations=12):
+    """Minimum-norm Newton steps from ``seed``; None unless it converges in limits.
+
+    A seed near its solution converges in a few steps and, taking the shortest
+    joint step each time, stays close to the seed. Anything else is left to the
+    bounded solver.
+    """
+    q = seed
+    for _ in range(iterations):
+        frames = robot.frames(q)
+        pose = frames[robot.tip] @ offset
+        error = pose_error(pose, target)
+        if np.linalg.norm(error[:3]) <= 1e-9 and np.linalg.norm(error[3:]) <= 1e-9:
+            return q
+        jacobian = _frame_jacobian(robot, frames, pose[:3, 3])
+        step = jacobian.T @ np.linalg.solve(jacobian @ jacobian.T + 1e-12 * np.eye(6), error)
+        if not np.isfinite(step).all() or np.abs(step).max() > 0.5:
+            return None
+        q = q - step
+        if np.any(q <= robot.lower) or np.any(q >= robot.upper):
+            return None
+    return None
 
 
 def inverse_candidates(
@@ -94,28 +123,30 @@ def inverse_candidates(
                 [pose_jacobian(robot, q, offset, target) * weights[:, None], 1e-4 * np.eye(len(q))]
             )
 
-        result = least_squares(
-            residual,
-            seed,
-            jac=jacobian,
-            bounds=(robot.lower, robot.upper),
-            max_nfev=maximum_evaluations,
-            xtol=1e-9,
-            ftol=1e-9,
-            gtol=1e-8,
-        )
-        error = pose_error(robot.forward(result.x, offset), target)
+        solved = _newton(robot, target, offset, seed)
+        if solved is None:
+            solved = least_squares(
+                residual,
+                seed,
+                jac=jacobian,
+                bounds=(robot.lower, robot.upper),
+                max_nfev=maximum_evaluations,
+                xtol=1e-9,
+                ftol=1e-9,
+                gtol=1e-8,
+            ).x
+        error = pose_error(robot.forward(solved, offset), target)
         if (
             np.linalg.norm(error[:3]) > position_tolerance
             or np.linalg.norm(error[3:]) > orientation_tolerance
         ):
             continue
-        if any(np.linalg.norm(result.x - np.array(s["positions"])) < 1e-3 for s in solutions):
+        if any(np.linalg.norm(solved - np.array(s["positions"])) < 1e-3 for s in solutions):
             continue
-        jacobian = geometric_jacobian(robot, result.x, offset)
+        jacobian = geometric_jacobian(robot, solved, offset)
         solutions.append(
             {
-                "positions": result.x.tolist(),
+                "positions": solved.tolist(),
                 "position_error_m": float(np.linalg.norm(error[:3])),
                 "orientation_error_rad": float(np.linalg.norm(error[3:])),
                 "jacobian_rank": int(np.linalg.matrix_rank(jacobian)),

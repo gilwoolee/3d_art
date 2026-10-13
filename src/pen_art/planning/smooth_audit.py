@@ -42,9 +42,14 @@ class PolynomialPiece:
         )
 
     def derivatives(self, a, b):
+        # Subdivision asks for the same derivatives on many subintervals.
+        derived = getattr(self, "_derived", None)
+        if derived is None:
+            derived = self._derived = tuple(
+                [p.deriv(order) for p in self.polynomials] for order in (1, 2)
+            )
         return tuple(
-            np.array([maximum_absolute(p.deriv(order), a, b) for p in self.polynomials])
-            for order in (1, 2)
+            np.array([maximum_absolute(p, a, b) for p in order]) for order in derived
         )
 
     def subpiece(self, a, b):

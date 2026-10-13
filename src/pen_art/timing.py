@@ -39,7 +39,14 @@ def polynomial_range(poly, start, end):
     points = [start, end] + [
         float(root.real) for root in roots if abs(root.imag) < 1e-8 and start < root.real < end
     ]
-    values = poly(points)
+    if np.array_equal(poly.domain, poly.window):
+        # Horner's rule as numpy evaluates it, without its per-call overhead.
+        x, coefficients = np.asarray(points), poly.coef
+        values = coefficients[-1] + x * 0
+        for coefficient in coefficients[-2::-1]:
+            values = coefficient + values * x
+    else:
+        values = poly(points)
     return float(np.min(values)), float(np.max(values))
 
 
