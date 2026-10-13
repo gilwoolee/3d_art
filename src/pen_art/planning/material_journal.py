@@ -69,3 +69,67 @@ def load_journal(path):
     if end != len(values) or not np.isfinite(values).all():
         raise ValueError('Incomplete or nonfinite capsule journal')
     return operations
+
+
+def _distance_to_segment(points, first, last):
+    axis = last - first
+    squared = float(axis @ axis)
+    if squared < 1e-24:
+        return np.linalg.norm(points - first, axis=1)
+    along = np.clip((points - first) @ axis / squared, 0.0, 1.0)
+    return np.linalg.norm(points - (first + along[:, None] * axis), axis=1)
+
+
+def merge_deposits(operations, budget_m):
+    """Replace runs of connected capsules by one capsule that contains them.
+
+    A merged capsule spans a run's first start to its last end. Its radius is
+    the run's largest radius plus the largest distance of any member endpoint
+    from the new centre line; a capsule's centre line lies no further from that
+    line than its endpoints do, so every member is enclosed. A run ends where
+    this growth would exceed ``budget_m``, at a gap, or at a table turn. The
+    result only ever over-covers the journaled material.
+    """
+    if not np.isfinite(budget_m) or budget_m <= 0:
+        raise ValueError("Deposit merging needs a positive radius budget")
+    merged, rows = [], []
+
+    def flush():
+        if not rows:
+            return
+        values = np.asarray([[*r["start"], *r["end"], r["radius_m"]] for r in rows], float)
+        output, first = [], 0
+        while first < len(values):
+            last, radius = first, float(values[first, 6])
+            while last + 1 < len(values):
+                following = last + 1
+                if np.linalg.norm(values[following, :3] - values[last, 3:6]) > 1e-9:
+                    break
+                members = values[first : following + 1]
+                reach = _distance_to_segment(
+                    members[:, :6].reshape(-1, 3), values[first, :3], values[following, 3:6]
+                ).reshape(-1, 2).max(axis=1)
+                if float(reach.max()) > budget_m:
+                    break
+                last, radius = following, float((members[:, 6] + reach).max())
+            name = rows[first]["name"]
+            output.append(
+                {
+                    "start": values[first, :3].tolist(),
+                    "end": values[last, 3:6].tolist(),
+                    "radius_m": radius,
+                    "name": name if last == first else f"{name}+{last - first}",
+                }
+            )
+            first = last + 1
+        merged.append(("add", output))
+        rows.clear()
+
+    for operation in operations:
+        if operation[0] == "turn":
+            flush()
+            merged.append(tuple(operation))
+        else:
+            rows.extend(operation[1])
+    flush()
+    return merged

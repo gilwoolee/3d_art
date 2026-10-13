@@ -93,6 +93,9 @@ def _parallel_deposit(index):
     planner.validate_interval(
         replace(state, payload=scene), new, b, deposit_only=True, journal=operations
     )
+    from .parallel_build import _merged
+
+    operations = _merged(planner, operations)
     key = deposit_key(operations)
     from .material_journal import write_journal
 
@@ -112,9 +115,16 @@ def _parallel_check(index, chain):
     scene = _LOCAL["prefix"].scene_for(chain)
     before = (planner.checked_intervals, Counter(planner.verification_stats))
     seconds = Counter(planner.verification_seconds)
-    after, failure = planner.validate_interval(replace(state, payload=scene), new, b)
+    operations = []
+    after, failure = planner.validate_interval(
+        replace(state, payload=scene), new, b, journal=operations
+    )
+    from .parallel_build import _merged, deposit_key
+
     return {
         "failure": failure,
+        # What this full check deposited, in the form later checks receive.
+        "deposited": deposit_key(_merged(planner, operations)),
         "before": scene.geometry_prefix(),
         "after": None if failure else after.geometry_prefix(),
         "capsules": None if failure else len(after.objects),
@@ -789,10 +799,17 @@ def _replay_cell_body(
                 for k in range(len(intervals))
             ]
             expected, capsules = state.payload.geometry_prefix(), len(state.payload.objects)
+            merging = bool(planner.settings.get("merge_deposits_m", 0.0))
             for k, future in enumerate(checks):
                 result = future.result()
                 _, b, new = intervals[k]
-                if result["before"] != expected:
+                # Merged journals replace a check's fine wire for its successors,
+                # so compare what the check deposited with the journal they use.
+                if (
+                    result["before"] != expected
+                    if not merging
+                    else not result["failure"] and result["deposited"] != keys[k]
+                ):
                     raise ValueError("Parallel replay material prefix differs from its check")
                 planner.checked_intervals += result["checked_intervals"]
                 planner.verification_stats.update(result["counts"])
@@ -817,6 +834,12 @@ def _replay_cell_body(
                     checked_intervals=planner.checked_intervals,
                 )
                 write_json(run / validation_name, output)
+            if merging and not failed:
+                # The material every later check received, not the last check's own.
+                whole = MaterialPrefix(
+                    planner.turntable, lambda key: _parallel_journal(journal_root, key)
+                ).scene_for([[key, None] for key in keys])
+                expected, capsules = whole.geometry_prefix(), len(whole.objects)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
             rmtree(journal_root, ignore_errors=True)

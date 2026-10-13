@@ -481,7 +481,7 @@ def _journal(context, index, clock, table_index):
     )
     if failure:
         raise ValueError(f"Deposition could not be derived: {failure}")
-    return operations
+    return _merged(build.planner, operations)
 
 
 def _propose(context, spec, seconds):
@@ -620,7 +620,9 @@ def _check(context, spec, seconds):
         seconds["timing_audit"] += perf_counter() - started
         if failure:
             return failure
-    difference = deposit_difference(operations, _deposits(context["root"], spec["deposit_key"]))
+    difference = deposit_difference(
+        _merged(planner, operations), _deposits(context["root"], spec["deposit_key"])
+    )
     if difference is None or difference > 1e-9:
         return {
             "status": "REJECTED",
@@ -639,6 +641,16 @@ def _check(context, spec, seconds):
         "preceding_capsules": len(scene.objects),
         "predicted_deposit_difference_m": difference,
     }
+
+
+def _merged(planner, operations):
+    """Deposits as later actions will see them; an action's own wire stays fine."""
+    budget = planner.settings.get("merge_deposits_m", 0.0)
+    if not budget:
+        return operations
+    from .material_journal import merge_deposits
+
+    return merge_deposits(operations, budget)
 
 
 def _untimed(path):

@@ -251,6 +251,7 @@ class SectionBuild:
         learning_device="cpu",
         geometry_first=False,
         adaptation_waypoint_checks=False,
+        merge_deposits_m=0.0,
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -263,6 +264,9 @@ class SectionBuild:
         self.motion_runtime = None
         settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
         settings.update(maximum_subdivision_depth=20, collision_scope="pen_candidate")
+        if merge_deposits_m:
+            # Saved with the plan, so its verification models the wire identically.
+            settings["merge_deposits_m"] = merge_deposits_m
         timing = yaml.safe_load(Path("configs/timing_continuous_bounded.yaml").read_text())
         timing.pop("target_seconds", None)
         self.planner = CellPlanner(
@@ -1164,6 +1168,13 @@ def main():
         help="Check new drawings as untimed paths and time them after the whole chain passes",
     )
     parser.add_argument(
+        "--merge-deposits-um",
+        type=float,
+        default=0.0,
+        help="Describe earlier actions' wire by merged capsules whose radius grows by at "
+        "most this many micrometres; 0 keeps every fine capsule",
+    )
+    parser.add_argument(
         "--adaptation-waypoint-checks",
         action="store_true",
         help="While adapting a cached path, check collision at waypoints only; the "
@@ -1205,6 +1216,7 @@ def main():
         learning_device=args.learning_device,
         geometry_first=args.geometry_first,
         adaptation_waypoint_checks=args.adaptation_waypoint_checks,
+        merge_deposits_m=args.merge_deposits_um * 1e-6,
     )
     try:
         build.run_build(
