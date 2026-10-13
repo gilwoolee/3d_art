@@ -233,7 +233,52 @@ def dynamics_bounds(pieces, robot):
     return velocity, acceleration
 
 
+# An interior clock knot slower than this share of the fastest marks a stall.
+STALLED_CLOCK_FRACTION = 0.02
+
+
 def retime_operation(
+    operation,
+    robot,
+    offset,
+    velocity_limits,
+    acceleration_limits,
+    speed,
+    period,
+    *,
+    sample_output=True,
+    path=None,
+    continuous_acceleration=False,
+    grid_samples=101,
+    grid_midpoints=True,
+):
+    """Time one path, refining the clock grid only where a coarse one stalls.
+
+    On a coarse grid the solver can return a valid clock that almost stops at
+    an interior knot, taking minutes over a fraction of a millimetre. Such a
+    part is retimed on the next finer grid and the shortest clock is kept.
+    """
+    grids = [(grid_samples, grid_midpoints)]
+    for finer in ((0, True), (101, True)):
+        if finer[0] >= grids[-1][0] and finer[1] >= grids[-1][1] and finer != grids[-1]:
+            grids.append(finer)
+    best = None
+    for samples, midpoints in grids:
+        result = _retime_operation(
+            operation, robot, offset, velocity_limits, acceleration_limits, speed, period,
+            sample_output=sample_output, path=path,
+            continuous_acceleration=continuous_acceleration,
+            grid_samples=samples, grid_midpoints=midpoints,
+        )
+        if best is None or result["duration_s"] < best["duration_s"]:
+            best = result
+        speeds = np.asarray(result["path_clock"]["speeds"])
+        if len(speeds) < 3 or speeds[1:-1].min() >= STALLED_CLOCK_FRACTION * speeds.max():
+            break
+    return best
+
+
+def _retime_operation(
     operation,
     robot,
     offset,
