@@ -538,7 +538,16 @@ def _replay_cell_body(
             ),
         ],
     )
-    write_json(run / validation_name, output)
+    def save(final=False):
+        """Publish progress cheaply; the structural release states can be tens of
+        megabytes and belong only in the finished report.
+        """
+        write_json(
+            run / validation_name,
+            output if final else {k: v for k, v in output.items() if k != "release_states"},
+        )
+
+    save()
     last_write = monotonic()
 
     def budget_result():
@@ -546,7 +555,7 @@ def _replay_cell_body(
             status="REPLAY_TIME_BUDGET",
             failures=[{"status": "TIME_BUDGET", "phase": output["phase"]}],
         )
-        write_json(run / validation_name, output)
+        save(final=True)
         return (output, state) if return_state else output
 
     pool = audit_pool()
@@ -578,7 +587,7 @@ def _replay_cell_body(
         nonlocal last_write
         output["checked_edges"] += 1
         if monotonic() - last_write >= 1:
-            write_json(run / validation_name, output)
+            save()
             last_write = monotonic()
 
     moves = []
@@ -619,7 +628,7 @@ def _replay_cell_body(
         if path_certificates is not None:
             path_certificates.add(audit["key"])
         if monotonic() - last_write >= 1:
-            write_json(run / validation_name, output)
+            save()
             last_write = monotonic()
         proposal = MotionProposal(
             row["stroke_id"],
@@ -683,10 +692,10 @@ def _replay_cell_body(
     last_checkpoint = monotonic()
     output.update(phase="COLLISION_REPLAY")
     output.pop("active_action", None)
-    write_json(run / validation_name, output)
+    save()
     if not moves or horizon == 0:
         output["status"] = "NO_MOTION_TO_REPLAY"
-        write_json(run / validation_name, output)
+        save(final=True)
         return (output, state) if return_state else output
     def advance(state, new, b, scene):
         """State after a verified interval; independent of the collision work."""
@@ -833,7 +842,7 @@ def _replay_cell_body(
                     completed_strokes=len(state.completed),
                     checked_intervals=planner.checked_intervals,
                 )
-                write_json(run / validation_name, output)
+                save()
             if merging and not failed:
                 # The material every later check received, not the last check's own.
                 whole = MaterialPrefix(
@@ -868,7 +877,7 @@ def _replay_cell_body(
             if monotonic() - last_checkpoint >= 30 or b == horizon:
                 save_checkpoint(checkpoint_path, checkpoint_context, state, verified_intervals)
                 last_checkpoint = monotonic()
-            write_json(run / validation_name, output)
+            save()
     mark("collision_replay")
     output["phase_seconds"] = phase_seconds
     if not failed:
@@ -907,7 +916,7 @@ def _replay_cell_body(
             "counts": dict(planner.verification_stats),
             "seconds": dict(planner.verification_seconds),
         }
-    write_json(run / validation_name, output)
+    save(final=True)
     return (output, state) if return_state else output
 
 
