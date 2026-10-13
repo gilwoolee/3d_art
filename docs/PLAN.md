@@ -106,8 +106,11 @@ only under matching context or conservative adaptation bounds. Changed material
 and process conditions still require current checks; cache misses plan the same
 whole action. Active library: `runs/motion_library_phase1_upright27_v1`.
 
-Next collision-reuse work has its own checklist:
-[cached swept-volume plan](2026_1012_cached_swept_volume_plan.md).
+New objects are planned geometry first: a collision-free untimed path for the
+whole object, timed once at the end. Status and results:
+[geometry-first planning plan](2026_1012_geometry_first_planning_plan.md). It
+supersedes the [cached swept-volume plan](2026_1012_cached_swept_volume_plan.md),
+which is not scheduled.
 
 **Phase 2 exists as a research pilot:** dataset generation and one shared
 current-profile diffusion model provide proposals through the same verifier.

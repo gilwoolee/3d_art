@@ -303,6 +303,53 @@ construction, approach/withdrawal, and home return are checked separately with
 Generated datasets, libraries, checkpoints, and reports remain under ignored
 `runs/`; the scripts, schemas, and validators are source files in this repository.
 
+## Geometry-first planning for new objects
+
+`--geometry-first` finds a collision-free path through the whole object without
+a clock, then times it once at the end. A timing failure is reported; it never
+triggers re-planning. The flag implies merged wire capsules
+(`--merge-deposits-um 20`) and one timed segment per path piece
+(`--retiming-grid knots`). The separate full-robot verification is unchanged.
+
+```bash
+.venv/bin/python scripts/benchmark_parallel_build.py \
+  --source-run runs/the_source --profile path/to/profile.yaml \
+  --output runs/new_build --workers 16 --build-option=--geometry-first
+```
+
+Long runs on Blondie go in tmux. Wireframe settings live in the source run's
+`fabrication_config.json` (defaults in `configs/fabrication.yaml`):
+
+| Setting under `wireprint` | Effect |
+| --- | --- |
+| `minimum_feature_m` | Opt-in. Rebuilds the mesh as a closed solid without parts thinner than this (`solidified.glb`), and ends rounded tips at the last printable contour. A simplification, recorded with its deviation. |
+| `layer_height` | Requested layer height. Use 0.003 for solidified shapes; from the default 0.01 the refinement overshoots to sub-millimetre layers. |
+| `heavier_strands_m` | Strand diameters tried in order when the frame fails the structural screen (default 1.5 mm, a tip not yet on hand). The choice is recorded as `strand_escalation` and is also the wire's collision size. |
+
+The structural model treats the strand as 3D pen PLA at 2.5 GPa, a typical
+published value that has not been measured.
+
+Measured with 16 workers, every build `FULL_BUILD_VERIFIED` with no adaptation
+failure and no timing rejection. "Total" is planning plus the separate
+verification; wireframe generation (under a minute) is not included.
+
+| Object | Actions | Collision-free path | Timing | Verification | Total | Peak memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Triangular prism | 29 | 40.8 s | 14.0 s | 25.4 s | 88.3 s | 3.8 GB |
+| Bottle | 55 | 51.3 s | 13.4 s | 37.8 s | 121.8 s | 5.6 GB |
+| Torus | 27 | 71.0 s | 15.4 s | 36.0 s | 137.2 s | 4.1 GB |
+| Cube | 39 | 56.2 s | 26.6 s | 47.4 s | 143.8 s | 4.6 GB |
+| Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
+| Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 116.4 s | 25.3 s | 67.0 s | 237.2 s | 6.2 GB |
+| Palace, 8 mm feature | 366 | 526.5 s | 69.1 s | 177.8 s | 937.0 s | 8.7 GB |
+
+The first six were measured on 2026-10-12, before the material stiffness change
+and the wireframe generator fixes; their wireframes are unchanged by those
+fixes. The Palace ran on a wireframe differing from the current generator's by
+2 of 6,881 members. Details and history:
+[geometry-first planning plan](docs/2026_1012_geometry_first_planning_plan.md).
+
 ## Repository contents
 
 Git tracks source, tests, configs, documentation, reference fixtures, and research

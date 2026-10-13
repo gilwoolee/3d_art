@@ -30,7 +30,7 @@ def descending_angles(graph):
     return np.asarray(angles), groups, nodes
 
 
-def test_cube_reduces_slice_height_keeps_density_and_full_outline():
+def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     mesh = cube()
     graph = mesh_framework(mesh, maximum_descent_angle_deg=27)
     angles, groups, nodes = descending_angles(graph)
@@ -55,9 +55,10 @@ def test_cube_reduces_slice_height_keeps_density_and_full_outline():
         if edge["parent_curve"].startswith("contour-"):
             contour_lengths[edge["parent_curve"]] += edge["length_m"]
     assert all(length == pytest.approx(0.32, abs=5e-6) for length in contour_lengths.values())
+    solidified_fork_drops_the_fin_and_keeps_printable_layers()
 
 
-def test_solidified_fork_drops_the_fin_and_keeps_printable_layers():
+def solidified_fork_drops_the_fin_and_keeps_printable_layers():
     from pen_art.abstraction.solidify import solidify
 
     def part(shape, offset):
