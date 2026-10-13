@@ -13,8 +13,8 @@ library, no adaptation failure and no timing rejection.
 
 | Object | Actions | Start of 2026-10-13 (16 workers) | Now (24 workers) |
 | --- | ---: | ---: | ---: |
-| Palace, 8 mm feature | 366 | 937.0 s | 242.2 s |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 83.0 s |
+| Palace, 8 mm feature | 366 | 937.0 s | 234.0 s |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 75.0 s |
 
 The Palace by stage, as each change landed:
 
@@ -27,6 +27,8 @@ The Palace by stage, as each change landed:
 | Newton inverse kinematics; first polynomial fixes | 24 | 27 s | 127 s | 44 s | 119 s | 320.7 s |
 | Scheduler bookkeeping | 24 | 27 s | 86 s | 44 s | 120 s | 280.6 s |
 | Polynomial pieces from coefficient tables | 24 | 27 s | 79 s | 39 s | 94 s | 242.2 s |
+| Verification accepts planning's speed and coverage proofs | 24 | 27 s | 78 s | 43 s | 90 s | 242.5 s |
+| Collision: re-check only unresolved pairs, reuse measured clearances | 24 | 27 s | 76 s | 43 s | 84 s | 234.0 s |
 
 Thirty-two workers were tried and do not help: Palace 301 s against 281 s with
 24 at the same code state, because the machine has 24 cores. Memory is not the
@@ -34,8 +36,11 @@ limit (16.9 GB peak at 32 workers, 12.9 GB at 24, of 62 GB). The 32-worker
 verification stage overlapped an edit and a test run, so only the planning
 stages of that run are a clean comparison (162 s against 161 s).
 
-Runs: `runs/geomfirst_gf23_{palace,branching}_w24` (current),
-`runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf22` (steps).
+Twenty-four workers is the setting to use on this machine.
+
+Runs: `runs/geomfirst_gf25_{palace,branching}_w24` (current),
+`runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf24` (steps).
+The stage breakdown further down was taken at the 242.2 s step.
 
 ## What the current version does
 
@@ -108,6 +113,40 @@ the Palace went from an unbuildable 1,412 actions to 366.
   completed action. This stage is kept by decision; only its overhead is cut.
 - Runs on the same number of workers; writes progress at most every 5 s and the
   large structural release states only in the final report.
+- With `--accept-geometry-proofs` (decided 2026-10-13) it accepts planning's
+  proofs of joint and tip speed limits and of source coverage for the exact
+  saved clocks. Those audits read only the path, the arm's kinematics, the
+  source curve and the process settings, and each proof is bound to all of
+  them by digest. Collision, orientation, deposits and structure are still
+  checked in full. Without the flag verification is fully independent, as
+  before.
+
+### 6. How densely the robot is collision-checked
+
+The check is continuous, not sampled: at a configuration it measures every
+clearance and certifies the whole interval if each clearance exceeds a bound on
+how far that body can move within it; otherwise it halves the interval. On the
+Palace's verification that is 62,194 edges (median 0.06 degrees of joint motion
+and 0.45 mm of tip travel each), 74,824 path checks and 212,328 evaluated
+configurations: 3.4 per edge, concentrated where the pen is close to wire.
+
+Two things now keep that from costing a full-robot query each time, without
+weakening the proof:
+
+- **Only what is unresolved is re-checked.** When an interval is halved, the
+  halves query only the pairs the whole interval left unresolved, usually the
+  pen against nearby wire. Everything else was already certified for the whole
+  interval.
+- **Measured clearances carry across edges.** Clearances of the arm against
+  itself and the fixed cell, measured at one configuration, certify every later
+  configuration whose bounded motion from it stays inside them. Because the arm
+  barely moves per edge, 75% of the Palace's path checks needed no self or
+  fixed-obstacle query at all.
+
+Self and fixed-obstacle query time in the Palace's verification fell from 156 s
+to 28 s of worker time. The new checker returned the same verdict as the
+previous one on 4,800 random edges (148 of them collisions). The pen against
+deposited wire is checked exactly as densely as before.
 
 ## Where the Palace's 242 s goes now
 
@@ -159,19 +198,55 @@ from removing such overhead without changing any check.
 - **Risk:** low for correctness if outputs are compared against the current
   code, as was done for the polynomial tables.
 
-### B. Verification repeats work planning already did (39% of wall time)
+Other mechanisms that attack the same cost without a compiler:
+
+- **Ask fewer questions.** The collision change of 2026-10-13 is the model:
+  reuse a measured margin instead of re-measuring. The same idea applies to
+  tracking and tip-speed bounds, which subdivide every edge from scratch
+  although neighbouring edges are nearly identical.
+- **Share forward kinematics between audits.** Tracking, orientation, tip speed
+  and collision each evaluate the arm at the same configurations of the same
+  edge. One evaluation per configuration, passed to all of them, removes most
+  repeated calls.
+- **Tighter bounds.** The tip-acceleration bound assumes the worst case for the
+  whole chain. A bound from the actual Jacobian over the interval would certify
+  most edges without subdividing.
+- **Vectorize across intervals in numpy.** Process all pending intervals of an
+  edge as one array operation instead of one Python call each. This is batching
+  without a new dependency and a natural step before compiling.
+- **An existing kinematics library.** Pinocchio provides compiled forward
+  kinematics and Jacobians for a URDF; adopting it replaces the hottest kernel
+  without writing C++.
+- **Drop per-call validation in inner loops.** Each kinematics call re-validates
+  its inputs and each transform is re-checked for rigidity; validating once per
+  edge is enough.
+
+### B. Verification repeats work planning already did
 
 Verification re-derives deposits, re-audits every path and re-screens structure
 that planning checked minutes earlier, by design: it is the independent check.
 
-- **Method 1 (overhead only):** stop round-tripping through 40 MB of JSON
-  between the two commands (binary arrays for clocks), and parse clocks on the
-  workers instead of the coordinator. Loading and source audits are 26 s of
-  mostly single-core time.
-- **Method 2 (needs a decision):** let verification accept planning's path
-  certificates for audits that depend only on the untimed geometry, keeping the
-  full-robot collision replay. This is the open item G5. It trades independence
-  for about 20-40 s on the Palace.
+- **Done: accept planning's speed and coverage proofs**
+  (`--accept-geometry-proofs`). All 366 Palace actions and all 151 branching
+  actions matched all three proofs. The saving is smaller than the 20-40 s first
+  estimated: path checks fell from 13.4 s to 9.0 s on the Palace and from 5.4 s
+  to 2.0 s on the branching shape. The Palace's total did not move (242.5 s
+  against 242.2 s) because planning's timing audit now covers the transit as
+  well, about 4 s more; the branching shape gained 4 s. Two things had to change
+  for the proofs to match: they are bound to a kinematic context that leaves out
+  the collision model, and planning audits the clock exactly as saved, since a
+  speed proof binds every floating-point duration and joining the transit
+  shifts them.
+- **Not accepted, on purpose:** planning's self and fixed-obstacle collision
+  proof. Planning checks the pen only; the full robot is checked in
+  verification.
+- **Still open (overhead only):** loading and source audits are 26 s of mostly
+  single-core time on the Palace: 40 MB of JSON read back and parsed. Binary
+  arrays for clocks would remove most of it. About 25 s more falls outside the
+  named phases and has not been separated.
+- **Still open:** orientation and deposit enclosures are re-derived for the
+  timed clock although the untimed path was checked. The same-sweep certificate
+  could carry those over as it now does for source coverage.
 
 ### C. Library lookup now costs more than adaptation
 
@@ -249,11 +324,12 @@ the Palace's 242 s today.
    the largest part of propose.
 2. Compile and batch the numeric kernels (A): largest total effect, touches
    check, connect, timing audit and verification together.
-3. Binary plan exchange and worker-side clock parsing in verification (B,
-   method 1).
+3. Binary plan exchange in verification, and carrying orientation and deposit
+   enclosures over by the same-sweep certificate (B).
 4. Vectorized or compiled-backend retiming (D).
 5. Batched material collision, CPU first, GPU only if the CPU version leaves it
    the dominant cost (E).
 6. Incremental structural screens (F).
 
-Item B method 2 needs a decision on how independent verification must remain.
+Done since this list was written: accepting planning's speed and coverage
+proofs in verification (B), and the collision density change (section 6).
