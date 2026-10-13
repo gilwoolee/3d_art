@@ -13,8 +13,8 @@ library, no adaptation failure and no timing rejection.
 
 | Object | Actions | Start of 2026-10-13 (16 workers) | Now (24 workers) |
 | --- | ---: | ---: | ---: |
-| Palace, 8 mm feature | 366 | 937.0 s | 234.0 s |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 75.0 s |
+| Palace, 8 mm feature | 366 | 937.0 s | 217.1 s |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 71.8 s |
 
 The Palace by stage, as each change landed:
 
@@ -29,6 +29,8 @@ The Palace by stage, as each change landed:
 | Polynomial pieces from coefficient tables | 24 | 27 s | 79 s | 39 s | 94 s | 242.2 s |
 | Verification accepts planning's speed and coverage proofs | 24 | 27 s | 78 s | 43 s | 90 s | 242.5 s |
 | Collision: re-check only unresolved pairs, reuse measured clearances | 24 | 27 s | 76 s | 43 s | 84 s | 234.0 s |
+| No-posture-change rule (a new check, no rejections) | 24 | 27 s | 77 s | 43 s | 84 s | 235.4 s |
+| Verification report keeps only the final deformed shape (1.2 GB to 8 MB) | 24 | 27 s | 77 s | 43 s | 66 s | 217.1 s |
 
 Thirty-two workers were tried and do not help: Palace 301 s against 281 s with
 24 at the same code state, because the machine has 24 cores. Memory is not the
@@ -38,8 +40,8 @@ stages of that run are a clean comparison (162 s against 161 s).
 
 Twenty-four workers is the setting to use on this machine.
 
-Runs: `runs/geomfirst_gf25_{palace,branching}_w24` (current),
-`runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf24` (steps).
+Runs: `runs/geomfirst_gf27_{palace,branching}_w24` (current),
+`runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf26` (steps).
 The stage breakdown further down was taken at the 242.2 s step.
 
 ## What the current version does
@@ -174,6 +176,46 @@ limit. Verification's named phases: loading and source audits 26 s, clock parse
 and path checks 13 s, deposit journals 6 s, collision replay 23 s. About 25 s
 falls outside those phases (process start, structural screens, writing the
 final report) and has not been separated.
+
+### 7. No posture change while the pen works
+
+Seven joints let the arm swing its elbow with the tip still. On drawing,
+approach and withdraw edges the largest joint motion may not exceed 1 degree
+per millimetre of tip travel (`clock_path.posture_change`): per edge over at
+least 0.1 mm, and per unbroken run of such edges over its travel plus 1 mm.
+Planning rejects a candidate that breaks it and tries another; verification
+rejects the plan. Travel between actions is exempt. Verified builds stay below
+0.25 degrees per millimetre, and neither shape lost a candidate to the rule.
+
+## The Palace at 217 s, and what under 60 s would take
+
+| Stage | Wall | What it is |
+| --- | ---: | --- |
+| Setup | 26.7 s | build-order structural screens, library coverage report, cell setup |
+| Collision-free path | 77.1 s | 1,699 s of worker time: propose 765 (library lookup 364, adaptation 233, drawing proof 105, deposit prediction 53), check 591 (material validation 436, approach and withdraw 123), connect 343 (transit validation 175, source coverage 143) |
+| Timing | 43.2 s | 1,003 s of worker time: retiming 494, audit 366 |
+| Assembly and export | 4.0 s | |
+| Verification | 66.1 s | load and source audits 23.5, path checks 8.3, deposit journals 6.0, collision replay 19.0, other 9.3 |
+
+Worker-time figures are from the 234.0 s run; the later changes did not touch
+those stages. About 3,300 s of worker time and 40 s of single-core time make up
+the total. On 24 cores, 60 s leaves room for roughly 1,000 s of worker time and
+15 s of serial time: a threefold cut in both. Estimates, not measurements:
+
+| Change | Palace | Branching |
+| --- | ---: | ---: |
+| Seed each action from the layer below instead of the library | -12 to -15 s | -4 to -5 s |
+| Vectorized or compiled retiming constraints | -10 to -15 s | -4 to -6 s |
+| Compiled and batched kernels for tracking, speed, clearance and kinematics | -40 to -60 s | -12 to -18 s |
+| Carry deposit enclosures and orientation over by the same-sweep certificate | -8 to -12 s | -3 to -4 s |
+| Binary plan exchange; reuse setup's structural screens in verification | -15 to -20 s | -4 to -5 s |
+| Incremental structural screens and a deferred coverage report in setup | -12 to -18 s | -3 to -4 s |
+
+The branching shape (71.8 s) should pass under 60 s with any two or three of
+these. The Palace needs nearly all of them to land at the upper end of their
+ranges, which would put it around 60-90 s; a firm 60 s also needs either more
+cores or fewer actions. Time is close to linear in the action count (0.59 s per
+action now), and the Palace has 366 because its layers are 2.1 mm.
 
 ## Bottlenecks and what could remove them
 
