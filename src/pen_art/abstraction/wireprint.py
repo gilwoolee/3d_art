@@ -49,16 +49,21 @@ def _mesh_framework_at_height(
     diameter=0.001,
     minimum_anchor_spacing=0.0,
     omit_closing_diagonal=False,
+    slice_simplification=0.00002,
+    minimum_contour=0.0,
+    maximum_branch_descent_deg=None,
 ):
-    if min(layer_height, zigzag_spacing, diameter) <= 0:
-        raise ValueError("Positive layer, zigzag, and diameter values are required")
+    if min(layer_height, zigzag_spacing, diameter, slice_simplification) <= 0:
+        raise ValueError("Positive layer, zigzag, diameter and simplification are required")
+    if not np.isfinite(minimum_contour) or minimum_contour < 0:
+        raise ValueError("Minimum contour size must be finite and nonnegative")
     if not np.isfinite(minimum_anchor_spacing) or minimum_anchor_spacing < 0:
         raise ValueError("Minimum anchor spacing must be finite and nonnegative")
     low, high = mesh.bounds[:, 2]
     if high <= low:
         raise ValueError("Mesh must have positive height")
     heights = np.linspace(low, high, int(np.ceil((high - low) / layer_height)) + 1)
-    layers, repairs = [], []
+    layers, repairs, omitted_small = [], [], 0
     for layer, height in enumerate(heights):
         # Stay beyond trimesh's plane/vertex tolerance at the extrema. Projecting
         # these contours to the end plane moves them by at most one micron.
@@ -81,7 +86,7 @@ def _mesh_framework_at_height(
             if np.linalg.norm(points[0] - points[-1]) > 1e-6:
                 raise ValueError(f"Open contour at layer {layer}; repair the input mesh")
             original = LineString(points[:, :2])
-            simplified = original.simplify(0.00002)
+            simplified = original.simplify(slice_simplification)
             if not Polygon(simplified).is_valid:
                 # Node real crossings into simple rings, retaining every unique
                 # boundary segment. Buffer-based repair can erase small features.
@@ -114,6 +119,12 @@ def _mesh_framework_at_height(
             if not polygon.is_valid:
                 raise ValueError(f"Self-intersecting slice at layer {layer}")
             if polygon.area < 1e-12:
+                continue
+            # A rounded tip narrows to nothing, and a contour too small to carry
+            # zigzags within the descent angle would thin every layer of the
+            # object. End the shape at the last contour of printable size.
+            if polygon.length < np.pi * minimum_contour:
+                omitted_small += 1
                 continue
             # Consistent counterclockwise winding and a repeatable geometric seam.
             signed = np.sum(xy[:-1, 0] * xy[1:, 1] - xy[1:, 0] * xy[:-1, 1])
@@ -151,7 +162,7 @@ def _mesh_framework_at_height(
             kept.append(up)
         layers[index] = kept
 
-    relations, bridges, spacing_adjustments = [], [], []
+    relations, bridges, spacing_adjustments, omitted_steep = [], [], [], 0
     for index in range(1, len(layers)):
         lower, upper = layers[index - 1], layers[index]
         pairs = []
@@ -217,6 +228,19 @@ def _mesh_framework_at_height(
                 # access. With one anchor this also avoids retracing the riser.
                 if (minimum_anchor_spacing or omit_closing_diagonal) and i == count - 1:
                     c = None
+                # Where contours split or merge, equal fractions pair unrelated
+                # points and a diagonal can come out nearly vertical at any
+                # layer height. Leave that one out; its riser still stands.
+                if (
+                    c is not None
+                    and maximum_branch_descent_deg is not None
+                    and (sum(u == ui for _, u in pairs) > 1 or sum(p == li for p, _ in pairs) > 1)
+                ):
+                    fall = sample_loop(up["points"], b) - sample_loop(down["points"], c)
+                    steepness = np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2])))
+                    if steepness > maximum_branch_descent_deg:
+                        omitted_steep += 1
+                        c = None
                 down["joins"].add(a % 1.0)
                 if c is not None:
                     down["joins"].add(c % 1.0)
@@ -328,12 +352,15 @@ def _mesh_framework_at_height(
         contour_events=relations,
         contour_repairs=repairs,
         omitted_cavity_contours=omitted_cavities,
+        omitted_small_contours=omitted_small,
+        omitted_steep_branch_diagonals=omitted_steep,
         anchor_spacing_adjustments=spacing_adjustments,
         generation={
             "layer_height_m": layer_height,
             "zigzag_spacing_m": zigzag_spacing,
             "strand_diameter_m": diameter,
-            "slice_simplification_m": 0.00002,
+            "slice_simplification_m": slice_simplification,
+            "minimum_contour_m": minimum_contour,
             "junction_merge_m": 0.00002,
             "minimum_anchor_spacing_m": minimum_anchor_spacing,
         },
@@ -366,6 +393,8 @@ def mesh_framework(
     diameter=0.001,
     minimum_anchor_spacing=0.0,
     maximum_descent_angle_deg=None,
+    slice_simplification=0.00002,
+    minimum_contour=0.0,
 ):
     """Generate unchanged-scale contours with nozzle-aware descending chords.
 
@@ -402,6 +431,12 @@ def mesh_framework(
             diameter=diameter,
             minimum_anchor_spacing=minimum_anchor_spacing,
             omit_closing_diagonal=maximum_descent_angle_deg is not None,
+            slice_simplification=slice_simplification,
+            minimum_contour=minimum_contour,
+            # A degree of margin covers the later 20 micron junction merge.
+            maximum_branch_descent_deg=None
+            if maximum_descent_angle_deg is None
+            else maximum_descent_angle_deg - 1,
         )
         layer_z = sorted({node["position"][2] for node in graph["nodes"]})
         effective_height = max(np.diff(layer_z), default=0.0)
@@ -459,20 +494,36 @@ def generate(run, **settings):
     config_path = run / "fabrication_config.json"
     config = read_json(config_path) if config_path.exists() else {}
     configured = config.get("wireprint", {})
+    solidified = None
+    if configured.get("minimum_feature_m"):
+        # Opt-in simplification for shapes whose thin parts cannot be wire-printed.
+        from .solidify import solidify
+
+        mesh, solidified = solidify(mesh, configured["minimum_feature_m"])
+        mesh.export(run / "solidified.glb")
     known = {
         "layer_height",
         "zigzag_spacing",
         "diameter",
         "minimum_anchor_spacing",
         "maximum_descent_angle_deg",
+        "slice_simplification",
+        "minimum_contour",
     }
     parameters = {
         "maximum_descent_angle_deg": 27.0,
         "diameter": config.get("graph", {}).get("strand_diameter_m", 0.001),
     }
+    if solidified is not None:
+        # The rebuilt surface follows a grid: its contours carry grid-sized
+        # steps and its tips are rounded. Neither is detail of the source.
+        parameters["slice_simplification"] = solidified["pitch_m"] / 4
+        parameters["minimum_contour"] = 0.75 * solidified["minimum_feature_m"]
     parameters.update({key: value for key, value in configured.items() if key in known})
     parameters.update(settings)
     graph = mesh_framework(mesh, **parameters)
+    if solidified is not None:
+        graph["generation"]["solidify"] = solidified
     inputs = [source_file, "asset_manifest.json"]
     if config_path.exists():
         inputs.append("fabrication_config.json")
