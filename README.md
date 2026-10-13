@@ -357,29 +357,32 @@ Long runs on Blondie go in tmux. Wireframe settings live in the source run's
 The structural model treats the strand as 3D pen PLA at 2.5 GPa, a typical
 published value that has not been measured.
 
-Measured with 16 workers unless a row says otherwise, every build `FULL_BUILD_VERIFIED` with no adaptation
-failure and no timing rejection. "Total" is planning plus the separate
-verification; wireframe generation (under a minute) is not included.
+Measured on 2026-10-13 with 24 workers and the vertical-riser wireframe. Every
+build listed with times is `FULL_BUILD_VERIFIED` with no timing rejection.
+"Total" is planning plus the separate verification, including setup; wireframe
+generation (seconds to under a minute) is not included.
 
 | Object | Actions | Collision-free path | Timing | Verification | Total | Peak memory |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Triangular prism | 29 | 40.8 s | 14.0 s | 25.4 s | 88.3 s | 3.8 GB |
-| Bottle | 55 | 51.3 s | 13.4 s | 37.8 s | 121.8 s | 5.6 GB |
-| Torus | 27 | 71.0 s | 15.4 s | 36.0 s | 137.2 s | 4.1 GB |
-| Cube | 39 | 50.0 s | 26.3 s | 50.5 s | 133.9 s | 5.1 GB |
-| Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
-| Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1 mm strand (24 workers) | 151 | 5.7 s | 3.0 s | 7.3 s | 19.1 s | 6.5 GB |
-| Palace, 8 mm feature (24 workers) | 271 | 15.2 s | 5.8 s | 14.0 s | 43.0 s | 8.2 GB |
+| Triangular prism | 21 | 3.6 s | 1.0 s | 2.8 s | 8.1 s | 3.3 GB |
+| Bottle | 31 | 3.2 s | 1.4 s | 4.8 s | 10.5 s | 4.4 GB |
+| Cube | 21 | 4.4 s | 1.4 s | 3.5 s | 10.2 s | 3.6 GB |
+| Narrowed cube | 21 | 2.5 s | 1.2 s | 3.6 s | 8.1 s | 3.4 GB |
+| Vase, outer shell only | 33 | 2.9 s | 2.6 s | 7.6 s | 14.5 s | 4.2 GB |
+| Branching shape, 8 mm feature, 1 mm strand | 151 | 5.8 s | 3.1 s | 9.0 s | 20.9 s | 6.5 GB |
+| Palace, 8 mm feature | 271 | 14.6 s | 5.9 s | 14.1 s | 42.6 s | 7.9 GB |
+| Torus | 15 | not planned | | | | |
 
-The cube, branching shape and Palace were measured on 2026-10-13 with the
-current code. The other five date from 2026-10-12, before the material
-stiffness change, the wireframe generator fixes and the three speed-ups of
-2026-10-13 (progress-report throttle, build-order screens on the workers,
-lighter library lookup); their wireframes are unchanged by those fixes. Totals
-include setup (11 s for the Palace). The Palace and branching rows use 24
-workers and the code of late 2026-10-13, with member-length path pieces; the
-other rows predate that and used a piece per path sample. What the pipeline does to be fast, where the time goes and what
+The torus does not plan with member-length pieces: it rests on a tangent
+circle, so its inner and outer zigzags stand on two rings a fraction of a
+millimetre apart, and the pen's nose comes 0.979 mm from a neighbouring
+diagonal against the 1 mm margin on every candidate. It plans and verifies in
+18.5 s with `--build-option=--path-pieces=samples`. Runs:
+`runs/geomfirst_gf43_*_w24`. A violation reported by the pen's spheres is
+confirmed against the exact pen shape at the same pose before an action is
+rejected.
+
+What the pipeline does to be fast, where the time goes and what
 limits it:
 [fast planning and verification](docs/2026_1013_fast_planning_and_verification.md). Details and history:
 [geometry-first planning plan](docs/2026_1012_geometry_first_planning_plan.md).

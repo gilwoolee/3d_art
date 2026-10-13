@@ -105,7 +105,12 @@ class PenSpheres:
         return self.centres @ flange[:3, :3].T + flange[:3, 3]
 
     def violation(self, flange, wires, margin):
-        """The closest wire nearer than ``margin`` to the pen at this pose, or None."""
+        """The closest wire nearer than ``margin`` to the spheres at this pose, or None.
+
+        ``wires`` in the result lists every wire some sphere is too near to. The
+        spheres stand slightly proud of the tool, so the caller confirms those
+        few wires against the exact tool shape.
+        """
         starts, ends, wire_radii = wires
         if not len(wire_radii):
             return None
@@ -113,7 +118,7 @@ class PenSpheres:
         middles, spans = (starts + ends) / 2, ends - starts
         halves = np.linalg.norm(spans, axis=1) / 2
         squared = np.maximum(np.einsum("ij,ij->i", spans, spans), 1e-300)
-        worst = None
+        worst, close = None, set()
         for first, last in self.groups:
             # Wires whose middle is far from this body's axis cannot reach it.
             reach = self.radii[first:last].max() + halves + wire_radii + margin + ROUNDING_M
@@ -129,6 +134,7 @@ class PenSpheres:
                 - self.radii[first:last, None]
                 - wire_radii[None, near]
             )
+            close.update(near[np.flatnonzero((gap < margin + ROUNDING_M).any(axis=0))].tolist())
             sphere, wire = np.unravel_index(np.argmin(gap), gap.shape)
             if gap[sphere, wire] < margin + ROUNDING_M and (
                 worst is None or gap[sphere, wire] < worst["distance_m"]
@@ -140,6 +146,8 @@ class PenSpheres:
                     "distance_m": float(gap[sphere, wire]),
                     "margin_m": margin,
                 }
+        if worst is not None:
+            worst["wires"] = sorted(close)
         return worst
 
 

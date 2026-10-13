@@ -39,7 +39,7 @@ from .axis_repair import (
 )
 from .cell_motion import drawing_alternatives, radial_pen_rotations
 from .clock_path import timed_path
-from .collision import QUERY_STATS, Body, RobotCollisionModel
+from .collision import QUERY_STATS, Body, RobotCollisionModel, placed
 from .coordinated_motion import check_pair_linear, check_pair_paths
 from .dual_arm import (
     MotionProposal,
@@ -757,14 +757,36 @@ class CellPlanner:
         spheres, wires = self._pen_spheres[identity], wire_arrays(scene)
         self.verification_stats["pen_sphere_poses"] += len(fractions)
         for u, count in zip(fractions, marks, strict=True):
+            flange = arm.robot.forward(position(u), np.eye(4))
             failure = spheres.violation(
-                arm.robot.forward(position(u), np.eye(4)),
-                tuple(values[:count] for values in wires),
-                self.margin,
+                flange, tuple(values[:count] for values in wires), self.margin
             )
-            if failure is not None:
-                failure["wire"] = scene.segments[failure["wire"]]["name"]
-                return {**failure, "fraction": float(u)}
+            if failure is None:
+                continue
+            # The spheres are slightly larger than the tool. Measure the wires
+            # they flag against the exact tool shape at this same pose.
+            bodies = [placed(body.geometry, flange @ body.origin) for body in arm.tool.bodies]
+            exact = min(
+                (
+                    fcl.distance(
+                        body, scene.objects[wire], fcl.DistanceRequest(), fcl.DistanceResult()
+                    ),
+                    wire,
+                    tool.name,
+                )
+                for wire in failure.pop("wires")
+                for body, tool in zip(bodies, arm.tool.bodies, strict=True)
+            )
+            if exact[0] >= self.margin:
+                self.verification_stats["pen_sphere_cleared_by_exact_shape"] += 1
+                continue
+            return {
+                **failure,
+                "distance_m": float(exact[0]),
+                "wire": scene.segments[exact[1]]["name"],
+                "body": exact[2],
+                "fraction": float(u),
+            }
         return None
 
     def add_draw(self, scene, identity, q0, q1, radius, name):
