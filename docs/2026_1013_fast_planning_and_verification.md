@@ -13,8 +13,8 @@ library, no adaptation failure and no timing rejection.
 
 | Object | Actions | Start of 2026-10-13 (16 workers) | Now (24 workers) |
 | --- | ---: | ---: | ---: |
-| Palace, 8 mm feature | 366 | 937.0 s | 203.8 s |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 67.5 s |
+| Palace, 8 mm feature | 366 | 937.0 s | 185.4 s |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 62.7 s |
 
 The Palace by stage, as each change landed:
 
@@ -32,6 +32,7 @@ The Palace by stage, as each change landed:
 | No-posture-change rule (a new check, no rejections) | 24 | 27 s | 77 s | 43 s | 84 s | 235.4 s |
 | Verification report keeps only the final deformed shape (1.2 GB to 8 MB) | 24 | 27 s | 77 s | 43 s | 66 s | 217.1 s |
 | Verification accepts the pen proof; arm links checked against one envelope | 24 | 27 s | 76 s | 45 s | 51 s | 203.8 s |
+| Verification accepts planning's structural screens; faster clock parsing | 24 | 27 s | 77 s | 45 s | 32 s | 185.4 s |
 
 Thirty-two workers were tried and do not help: Palace 301 s against 281 s with
 24 at the same code state, because the machine has 24 cores. Memory is not the
@@ -41,7 +42,7 @@ stages of that run are a clean comparison (162 s against 161 s).
 
 Twenty-four workers is the setting to use on this machine.
 
-Runs: `runs/geomfirst_gf29_{palace,branching}_w24` (current),
+Runs: `runs/geomfirst_gf30_{palace,branching}_w24` (current),
 `runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf26` (steps).
 The stage breakdown further down was taken at the 242.2 s step.
 
@@ -178,9 +179,10 @@ and path checks 13 s, deposit journals 6 s, collision replay 23 s. About 25 s
 falls outside those phases (process start, structural screens, writing the
 final report) and has not been separated.
 
-### 7. What verification still checks for collision (`--accept-pen-proofs`)
+### 7. What verification still checks for collision
 
-Decided 2026-10-13. Planning stays pen-only. Verification no longer repeats
+Decided 2026-10-13, and the default; `--full-replay` restores the complete
+independent replay. Planning stays pen-only. Verification no longer repeats
 planning's pen checks when it can show they apply:
 
 - **The pen and tool against the cell and the wire.** Planning's check and
@@ -194,16 +196,29 @@ planning's pen checks when it can show they apply:
 - **The arm.** Every edge is still checked continuously with the full robot:
   against itself (tool against arm included), and each arm link against the
   table, riser and turntable and against one upright cylinder that encloses
-  every wire of the finished object. If an arm link cannot be certified clear
-  of that cylinder, the interval falls back to the exact check against wire.
+  every wire of the finished object. An arm that cannot be certified clear of
+  itself, the cell or that cylinder is a rejection (`ARM_NOT_CLEAR`): the arm
+  has no business inside the volume the object occupies.
+- **How the arm check is answered.** Clearances measured at one configuration
+  certify every later one whose bounded motion stays inside them. On the Palace
+  61,247 of 62,193 edges (98.5%) were certified from that lookup with no new
+  measurement, 1.006 evaluations per edge, 34 s of worker time in all.
 - **Not re-derived for accepted actions:** deposit enclosures, pen contact
   geometry and fixed orientation of the timed clock.
 
-On both shapes every action was accepted and no interval fell back: the arm
-never comes near the printed volume. The collision stage went from 19.0 s to
+On both shapes every action was accepted and none was rejected: the arm never
+comes near the printed volume. The collision stage went from 19.0 s to
 2.5 s on the Palace and from 7.4 s to 1.4 s on the branching shape. Without the
-flag verification runs the full independent replay as before. The deposit
-journals are still rebuilt (6 s on the Palace) for the final material record.
+`--full-replay` verification runs the complete independent replay as before.
+The deposit journals are still rebuilt (5 s on the Palace) for the final
+material record.
+
+Verification also accepts the structural screens planning ran to choose the
+build order (`structural_screens.json`), when a saved verdict names the same
+graph, material, screening code and exactly the members built so far; the
+finished object is always solved again. 365 of 366 Palace screens were accepted.
+Clock parsing no longer builds numpy polynomials to compare joint velocities at
+edge joins. Together these took loading and source audits from 23.6 s to 7.4 s.
 
 ### 8. No posture change while the pen works
 
@@ -215,7 +230,7 @@ Planning rejects a candidate that breaks it and tries another; verification
 rejects the plan. Travel between actions is exempt. Verified builds stay below
 0.25 degrees per millimetre, and neither shape lost a candidate to the rule.
 
-## The Palace at 217 s (now 204 s), and what under 60 s would take
+## The Palace at 217 s (now 185 s), and what under 60 s would take
 
 | Stage | Wall | What it is |
 | --- | ---: | --- |
@@ -223,7 +238,7 @@ rejects the plan. Travel between actions is exempt. Verified builds stay below
 | Collision-free path | 77.1 s | 1,699 s of worker time: propose 765 (library lookup 364, adaptation 233, drawing proof 105, deposit prediction 53), check 591 (material validation 436, approach and withdraw 123), connect 343 (transit validation 175, source coverage 143) |
 | Timing | 43.2 s | 1,003 s of worker time: retiming 494, audit 366 |
 | Assembly and export | 4.0 s | |
-| Verification | 66.1 s (now 51.2 s) | load and source audits 23.5, path checks 8.3, deposit journals 6.0, collision replay 19.0 (now 2.5), other 9.3 |
+| Verification | 66.1 s (now 32.2 s) | load and source audits 23.5 (now 7.4), path checks 8.3 (now 9.3), deposit journals 6.0 (now 5.1), collision replay 19.0 (now 2.9), other 9.3 (now 7.5) |
 
 Worker-time figures are from the 234.0 s run; the later changes did not touch
 those stages. About 3,300 s of worker time and 40 s of single-core time make up
@@ -236,7 +251,7 @@ the total. On 24 cores, 60 s leaves room for roughly 1,000 s of worker time and
 | Vectorized or compiled retiming constraints | -10 to -15 s | -4 to -6 s |
 | Compiled and batched kernels for tracking, speed, clearance and kinematics | -40 to -60 s | -12 to -18 s |
 | Carry deposit enclosures and orientation over by the same-sweep certificate | done: -13 s | done: -4 s |
-| Binary plan exchange; reuse setup's structural screens in verification | -15 to -20 s | -4 to -5 s |
+| Reuse setup's structural screens in verification; faster clock parsing | done: -19 s | done: -4 s |
 | Incremental structural screens and a deferred coverage report in setup | -12 to -18 s | -3 to -4 s |
 
 The branching shape (71.8 s) should pass under 60 s with any two or three of

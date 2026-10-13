@@ -315,17 +315,18 @@ triggers re-planning. The flag implies merged wire capsules
 .venv/bin/python scripts/benchmark_parallel_build.py \
   --source-run runs/the_source --profile path/to/profile.yaml \
   --output runs/new_build --workers 24 --build-option=--geometry-first \
-  --verification-option=--accept-geometry-proofs \
-  --verification-option=--accept-pen-proofs
+  --verification-option=--accept-geometry-proofs
 ```
 
 Use 24 workers on Blondie (24 cores; 32 gave nothing). With
 `--accept-geometry-proofs`, verification accepts planning's proofs of speed
 limits and source coverage for the exact saved clocks and still checks
-the rest in full. With `--accept-pen-proofs` it also accepts planning's proof
-that the pen clears the cell and the preceding wire, and checks the arm on every
-edge against itself, the cell and one volume enclosing all wire. Leave both out
-for a fully independent verification.
+the rest in full. By default verification also accepts planning's proof that the
+pen clears the cell and the preceding wire, and planning's structural screens,
+and checks the arm on every edge against itself, the cell and one volume
+enclosing all wire; an arm not clear of those is a rejection. Pass
+`--verification-option=--full-replay` and leave the first option out for a fully
+independent verification.
 
 Long runs on Blondie go in tmux. Wireframe settings live in the source run's
 `fabrication_config.json` (defaults in `configs/fabrication.yaml`):
@@ -351,8 +352,8 @@ verification; wireframe generation (under a minute) is not included.
 | Cube | 39 | 50.0 s | 26.3 s | 50.5 s | 133.9 s | 5.1 GB |
 | Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
 | Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 24.7 s | 16.9 s | 17.5 s | 67.5 s | 9.5 GB |
-| Palace, 8 mm feature (24 workers) | 366 | 76.4 s | 45.2 s | 51.2 s | 203.8 s | 12.7 GB |
+| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 24.2 s | 16.4 s | 13.8 s | 62.7 s | 9.6 GB |
+| Palace, 8 mm feature (24 workers) | 366 | 77.0 s | 45.3 s | 32.2 s | 185.4 s | 13.0 GB |
 
 The cube, branching shape and Palace were measured on 2026-10-13 with the
 current code. The other five date from 2026-10-12, before the material
