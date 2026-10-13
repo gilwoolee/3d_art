@@ -13,8 +13,8 @@ library, no adaptation failure and no timing rejection.
 
 | Object | Actions | Start of 2026-10-13 (16 workers) | Now (24 workers) |
 | --- | ---: | ---: | ---: |
-| Palace, 8 mm feature | 366 | 937.0 s | 169.8 s |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 58.8 s |
+| Palace, 8 mm feature | 366 | 937.0 s | 156.8 s |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 51.9 s |
 
 The Palace by stage, as each change landed:
 
@@ -34,6 +34,7 @@ The Palace by stage, as each change landed:
 | Verification accepts the pen proof; arm links checked against one envelope | 24 | 27 s | 76 s | 45 s | 51 s | 203.8 s |
 | Verification accepts planning's structural screens; faster clock parsing | 24 | 27 s | 77 s | 45 s | 32 s | 185.4 s |
 | Library coverage survey moved to a worker (it only informs the report) | 24 | 11 s | 77 s | 46 s | 32 s | 169.8 s |
+| Closed-form path clock; no second tip-speed audit of drawing | 24 | 11 s | 77 s | 31 s | 33 s | 156.8 s |
 
 Thirty-two workers were tried and do not help: Palace 301 s against 281 s with
 24 at the same code state, because the machine has 24 cores. Memory is not the
@@ -43,7 +44,7 @@ stages of that run are a clean comparison (162 s against 161 s).
 
 Twenty-four workers is the setting to use on this machine.
 
-Runs: `runs/geomfirst_gf32_{palace,branching}_w24` (current),
+Runs: `runs/geomfirst_gf33_{palace,branching}_w24` (current),
 `runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf26` (steps).
 The stage breakdown further down was taken at the 242.2 s step.
 
@@ -105,6 +106,19 @@ the Palace went from an unbuildable 1,412 actions to 366.
 - After the whole chain is collision-free, each action is timed independently on
   the workers: time-optimal retiming on the path's own knots, with stalled parts
   retimed on a finer grid and a finer grid on numerical failure.
+- Since 2026-10-13 the clock itself comes from a closed-form forward and
+  backward pass (`timing.scan_clock`, `--retiming-solver scan`, the default with
+  `--geometry-first`) instead of the TOPP-RA solver: each knot gets the largest
+  path speed its joint-velocity, tip-speed and curvature limits allow, and the
+  two passes limit how fast that speed may rise and fall under the exact
+  joint-acceleration limits at both ends of each piece. As before, the result
+  is then bounded over every whole interval (Bernstein coefficients of eight
+  subintervals, within 1% of the true maximum) and slowed uniformly by whatever
+  the bounds require, so the limits are guaranteed, not assumed. The modelled
+  print is 0.6% longer on the branching shape and 0.9% on the Palace.
+- The audit no longer bounds drawing tip speed a second time: the clock is
+  already rescaled against a tip-tangent bound over every interval. Joint
+  velocity and acceleration are still audited on the saved clock.
 - A same-sweep check certifies that the timed clock visits exactly the untimed
   configurations, so the geometric proof carries over.
 - A timing failure is reported (`PARALLEL_FORWARD_TIMING_REJECTED`) and never
