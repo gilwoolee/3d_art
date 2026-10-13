@@ -5,9 +5,12 @@ https://interactivetextbooks.citg.tudelft.nl/mechanics/slender_structures/EB_K_F
 Rigid welds and small deflections are explicit modeling assumptions, not calibration.
 """
 
+import hashlib
+import json
 import warnings
 from copy import deepcopy
 from functools import lru_cache
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
@@ -20,6 +23,9 @@ from .curves import flatten_curve
 from .graph import straight_edge, topology
 from .io import artifact
 from .strokes import orient_stroke
+
+# A change to this file changes what a saved screen means.
+SCREEN_IMPLEMENTATION = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
 def analyze_member_prefixes(
@@ -352,6 +358,15 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
             for edge in edges
         ],
     }
+
+
+def screen_key(graph_sha256, material, edge_ids):
+    """Identity of one structural screen: the frame, the material and the members built."""
+    return hashlib.sha256(
+        json.dumps(
+            [SCREEN_IMPLEMENTATION, graph_sha256, material, sorted(edge_ids)], sort_keys=True
+        ).encode()
+    ).hexdigest()
 
 
 def repair_structure(graph, settings, material):

@@ -1220,6 +1220,22 @@ def prepare_context(build, action_budget=240.0, workers=1):
             "candidates within it, but do not search alternate construction orders.",
         },
     )
+    # The order search screened the structure after every action. Save those
+    # verdicts so verification need not solve the same frames again.
+    from ..io import sha256 as file_sha256
+    from ..structure import screen_key
+
+    graph_sha256, members, screens = file_sha256(build.run / "stroke_graph.json"), set(), {}
+    built = set()
+    for row in order:
+        built.add(row["id"])
+        members.update(row["members"])
+        screen = build.structure.get(frozenset(built))
+        if screen is not None and screen["modeled_pass"]:
+            screens[screen_key(graph_sha256, build.material, members)] = {
+                name: value for name, value in screen.items() if name not in {"nodes", "edges"}
+            }
+    write_json(build.run / "structural_screens.json", {"screens": screens})
     model = IndexedMotions(build)
     model.round = max(model.round, 3)
     root = build.run / "parallel"

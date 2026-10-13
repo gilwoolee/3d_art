@@ -156,6 +156,9 @@ def _parallel_arm_check(index):
     state, _ = _PARALLEL["states"][index]
     obstacles = {**planner.obstacles, "printed_volume": _PARALLEL["envelope"]}
     depth, edges = planner.settings["maximum_subdivision_depth"], 0
+    from .collision import QUERY_STATS
+
+    before, started = Counter(QUERY_STATS), perf_counter()
     for motion in state.active + new:
         arm = planner.arms[motion.proposal.arm]
         models = _LOCAL.setdefault("arm_links", {})
@@ -185,7 +188,12 @@ def _parallel_arm_check(index):
             if check["status"] != "CERTIFIED_MODELED_EDGE":
                 return {"certified": False, "detail": check}
             edges += 1
-    return {"certified": True, "edges": edges}
+    return {
+        "certified": True,
+        "edges": edges,
+        "counts": Counter(QUERY_STATS) - before,
+        "seconds": perf_counter() - started,
+    }
 
 
 def _printed_volume(planner):
@@ -233,7 +241,7 @@ def _replay_cell_body(
     workers=1,
     optimize_contact_geometry=True,
     geometry_proofs=False,
-    pen_proofs=False,
+    pen_proofs=True,
     pools,
 ):
     validation_name = plan_name.removesuffix("_plan") + "_validation.json"
@@ -329,12 +337,12 @@ def _replay_cell_body(
         proofs = result["proofs"] = []
         # Looked up here, on the workers: binding a proof digests the whole clock.
         result["pen_proof"] = (
-            store.get(
+            planner.path_certificates.get(
                 planner.path_certificate_context(row["arm"], pen=True),
                 row["trajectory"],
                 "pen_material_path",
             )
-            if pen_proofs and store is not None and not row.get("auxiliary", False)
+            if pen_proofs and not row.get("auxiliary", False)
             else None
         )
         if planner.turntable is not None:
@@ -593,17 +601,38 @@ def _replay_cell_body(
                 screen = {k: v for k, v in screen.items() if k not in {"nodes", "edges"}}
             return prefixes, screen
 
+        # Planning screened the same frames to choose the build order. Accept a
+        # saved verdict when it names this graph, this material and exactly the
+        # members built so far; the finished object is always solved here.
+        saved_screens, accepted_screens = {}, {}
+        if pen_proofs and not member_screens and (run / "structural_screens.json").exists():
+            from ..structure import screen_key
+
+            saved_screens = read_json(run / "structural_screens.json")["screens"]
+            graph_sha256 = sha256(run / "stroke_graph.json")
+            for index, row in enumerate(sections[:-1]):
+                key = screen_key(graph_sha256, material, deposited[index] | set(row["members"]))
+                if key in saved_screens:
+                    accepted_screens[index] = (
+                        {"modeled_pass": True, "status": "MEMBER_PREFIXES_NOT_SCREENED"},
+                        {**saved_screens[key], "accepted_from_planning": True},
+                    )
+        section_audits["structural_screens_accepted"] = len(accepted_screens)
         pool = audit_pool()
-        screens = (
-            (structural(index) for index in range(len(sections)))
-            if pool is None
-            else [
-                future.result()
-                for future in [
-                    pool.submit(_parallel_structural, index) for index in range(len(sections))
-                ]
-            ]
+        pending = [index for index in range(len(sections)) if index not in accepted_screens]
+        solved = dict(
+            zip(
+                pending,
+                (structural(index) for index in pending)
+                if pool is None
+                else [
+                    future.result()
+                    for future in [pool.submit(_parallel_structural, index) for index in pending]
+                ],
+                strict=True,
+            )
         )
+        screens = [accepted_screens.get(index) or solved[index] for index in range(len(sections))]
         releases = []
         for row, (prefixes, screen) in zip(sections, screens, strict=True):
             if not prefixes["modeled_pass"]:
@@ -649,7 +678,6 @@ def _replay_cell_body(
         geometry_proofs_accepted=geometry_proofs,
         pen_proofs_accepted=pen_proofs,
         pen_proof_intervals=0,
-        pen_proof_fallbacks=0,
         geometry_proof_hits={},
         verification_raw=verification_raw,
         optimize_contact_geometry=optimize_contact_geometry,
@@ -990,6 +1018,9 @@ def _replay_cell_body(
                     # this interval adds is the journal later checks receive.
                     planner.checked_intervals += result["edges"]
                     output["pen_proof_intervals"] += 1
+                    planner.verification_seconds["arm_check"] += result["seconds"]
+                    for name in ("path_calls", "path_evaluations", "reference_certified"):
+                        planner.verification_stats[f"arm_{name}"] += result["counts"][name]
                     scene = MaterialScene()
                     scene.table_index = expected[1]
                     state = advance(state, new, b, scene)
@@ -1000,9 +1031,17 @@ def _replay_cell_body(
                     save()
                     continue
                 if accepted[k]:
-                    # An arm link came near the printed volume: check it exactly.
-                    output["pen_proof_fallbacks"] += 1
-                    result = full_check(k).result()
+                    # The arm must stay out of the volume the object occupies and
+                    # clear of itself and the cell. Failing that is a rejection.
+                    output.update(
+                        status="REPLAY_REJECTED",
+                        failures=[
+                            locate({"status": "ARM_NOT_CLEAR", **result["detail"]}, owners[k])
+                        ],
+                        checked_intervals=planner.checked_intervals,
+                    )
+                    failed = True
+                    break
                 # Merged journals replace a check's fine wire for its successors,
                 # so compare what the check deposited with the journal they use.
                 if (
@@ -1123,7 +1162,7 @@ def replay_cell(
     workers=1,
     optimize_contact_geometry=True,
     geometry_proofs=False,
-    pen_proofs=False,
+    pen_proofs=True,
 ):
     """Replay a saved plan with the complete robot model.
 
@@ -1230,11 +1269,12 @@ def main():
         "collision, orientation, deposits and structure are still checked in full",
     )
     parser.add_argument(
-        "--accept-pen-proofs",
+        "--full-replay",
         action="store_true",
-        help="Accept planning's proof that the pen clears the cell and the preceding wire, for "
-        "actions whose exact clock and preceding chain match; the arm is still checked on "
-        "every edge, against itself, the cell and a volume enclosing all wire",
+        help="Re-check the pen against the cell and rebuilt wire for every action. By default "
+        "planning's proof of that is accepted for actions whose exact clock and preceding "
+        "chain match, and the arm is checked on every edge against itself, the cell and a "
+        "volume enclosing all wire; an arm that is not clear of those is a rejection",
     )
     args = parser.parse_args()
     result = replay_cell(
@@ -1244,7 +1284,7 @@ def main():
         args.plan_name,
         workers=args.workers,
         geometry_proofs=args.accept_geometry_proofs,
-        pen_proofs=args.accept_pen_proofs,
+        pen_proofs=not args.full_replay,
     )
     print(result["status"], result["completed_strokes"], result["checked_intervals"])
     return 0 if result["status"] == "CERTIFIED_GEOMETRIC_REPLAY" else 1

@@ -324,20 +324,15 @@ class ClockPath:
                 raise ValueError("Discontinuous saved clock path")
             if edges and (edge.coefficients is not None or edges[-1].coefficients is not None):
                 prior = edges[-1]
-                before = np.array([p.deriv()(1) for p in prior.piece().polynomials]) / (
-                    prior.end_s - prior.start_s
-                )
-                after = np.array([p.deriv()(0) for p in edge.piece().polynomials]) / (
-                    edge.end_s - edge.start_s
-                )
+                before = prior.piece().velocity(1) / (prior.end_s - prior.start_s)
+                after = edge.piece().velocity(0) / (edge.end_s - edge.start_s)
                 if not np.allclose(before, after, atol=1e-6, rtol=1e-6):
                     raise ValueError("Discontinuous saved joint velocity")
             edges.append(edge)
         path = cls(edges)
         for edge, value in ((edges[0], 0), (edges[-1], 1)):
-            if edge.coefficients is not None and any(
-                abs(p.deriv()(value) / (edge.end_s - edge.start_s)) > 1e-6
-                for p in edge.piece().polynomials
+            if edge.coefficients is not None and np.any(
+                abs(edge.piece().velocity(value) / (edge.end_s - edge.start_s)) > 1e-6
             ):
                 raise ValueError("Saved path must start and finish at rest")
         if edges[0].start_s != 0 or abs(path.duration_s - data["duration_s"]) > 1e-9:
