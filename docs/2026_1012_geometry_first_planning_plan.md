@@ -78,7 +78,7 @@ that keep their contact point. Metadata marks it `parameterization: geometric`.
 
 ## Implementation checklist
 
-- [ ] **G0 — Baseline and a new-object reference.**
+- [ ] **G0 (counters done; reference builds running) — Baseline and a new-object reference.**
   Owners: `scripts/benchmark_parallel_build.py`, `planning/parallel_build.py`,
   `planning/motion_runtime.py`, `planning/cell_planner.py`.
   Commit the current working tree first (user approval needed).
@@ -86,12 +86,13 @@ that keep their contact point. Metadata marks it `parameterization: geometric`.
   checked; continuous-checker evaluations. Record per action: retrieval
   candidates tried, adaptation outcome, and on failure the point index and
   reason (IK, tracking, collision, deadline). Aggregate across workers.
-  Plan one shape the library has not seen, starting from
-  `runs/cube_continuous_variation_v1_input`, with the unchanged code. This is
-  the reference for every later claim. Run in tmux, 16 workers, fresh run
-  directory.
+  Plan three references with the unchanged planning code, sequentially, in
+  tmux, 16 workers, fresh run directories: the cube (warm), the cube narrowed
+  to 98% in x (`runs/geomfirst_cube_narrow_v1_source`, seeds for every zigzag)
+  and the triangular prism (`runs/geomfirst_prism_v1_source`, no zigzag seeds).
+  These are the reference for every later claim.
 
-- [ ] **G1 — Geometric path and same-sweep guard.**
+- [x] **G1 — Geometric path and same-sweep guard.**
   Owners: `planning/clock_path.py`, `timing.py`, new test in
   `tests/test_timing.py`.
   Add `geometric_path(operations, arm)` producing the geometric `ClockPath`
@@ -99,10 +100,13 @@ that keep their contact point. Metadata marks it `parameterization: geometric`.
   Add `same_sweep(geometric, timed)`: every timed DRAW edge must equal one
   geometric cubic piece composed with a nondecreasing clock, consecutive timed
   edges must tile each piece without gap or overlap, and every other edge must
-  have identical endpoints and kind in the same order. Compare coefficients at
-  1e-12; a failed guard is a rejection, never a warning.
-  Acceptance: the guard passes for every action of the saved cube plan and
-  fails on a perturbed coefficient, a dropped edge and a reversed clock.
+  have identical endpoints and kind in the same order. Compare within
+  1e-9 rad summed over a joint's coefficients, about a nanometre at the tool;
+  a failed guard is a rejection, never a warning.
+  Acceptance: the guard passes on a path with travel, holds, a corner stop and
+  a reversing joint, and fails on a perturbed coefficient, a dropped edge, a
+  reversed clock and a moved travel point. Saved plans hold no spline, so real
+  cube actions are checked when G3 produces both forms.
 
 - [ ] **G2 — Check geometry on geometric pieces.**
   Owners: `planning/cell_planner.py`, `planning/parallel_build.py`.
@@ -167,10 +171,17 @@ that keep their contact point. Metadata marks it `parameterization: geometric`.
   on geometry and cell context, not on timing settings. Existing records stay
   usable as adaptation seeds through `_compact_timed_seed` and are not
   rewritten. Publish a new library directory; never mutate the frozen one.
-  Extend coverage by precomputing zigzag families at other heights, radii and
-  leg counts, and report coverage per shape with
-  `check_motion_cache_coverage.py --require-zigzags`.
-  **Open question:** which shapes or families to add first.
+  Cover the union of all test-object wireframes: cube, narrowed cube, bottle,
+  triangular prism and torus, 191 actions in 26 shape families, of which only
+  two are shared between objects. Today the library seeds every cube and bottle
+  zigzag and none of the prism's 14 or the torus's 12. Report coverage per
+  object with `check_motion_cache_coverage.py --require-zigzags`.
+  The reuse key currently hashes the whole cell profile, including the riser
+  sized to one object's footprint, so cube records cannot seed the bottle or
+  torus. Key retrieval on robot, tool and policy only; keep static geometry,
+  riser included, as a fresh check on every reuse.
+  Palace is excluded for now: WirePrint slicing fails on its mesh with
+  "Open contour at layer 1; repair the input mesh".
 
 - [ ] **G8 — Cheaper timing pass.**
   Owners: `timing.py`.
