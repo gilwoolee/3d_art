@@ -19,8 +19,10 @@ import numpy as np
 import yaml
 
 from ..cell import load_cell
+from ..curves import transform_points
 from ..io import artifact, read_json, sha256, stage_update, write_json
 from ..kinematics import inverse_candidates
+from ..strokes import orient_stroke
 from ..timing import (
     TimingParameterizationError,
     make_path,
@@ -47,6 +49,7 @@ from .dual_arm import (
     tasks_from_construction,
 )
 from .geometric_path import geometric_path
+from .pen_spheres import PenSpheres, wire_arrays
 from .process_clock import PROCESS_CLOCK_POLICY, derive_deposition_events, source_vertex_schedule
 from .rrt import connect
 from .scene import MaterialScene
@@ -132,6 +135,98 @@ def tracked_drawing_path(arm, drawing, continuous, deadline, *, require_fixed_or
                 ),
             }
     return {**failed, "status": "BOUND_EXCEEDS_TOLERANCE"}
+
+
+def member_drawing_path(arm, drawing, members, schedule, deadline):
+    """One path piece per straight source member, split only where tracking fails.
+
+    ``drawing`` holds a dense joint path. Its knots at member ends and at any
+    other change of direction are kept; the rest are dropped, and one is put
+    back at the middle of a piece whose tool path leaves its tolerance.
+    ``schedule(reached)`` returns the kept knots at which the pen stops.
+    Returns None when the drawing does not fit this construction.
+    """
+    q, targets = np.asarray(drawing["positions"], float), np.asarray(drawing["tcp_targets_m"])
+    if drawing.get("free_tool_orientation", False) or len(q) != len(targets):
+        return None
+    moving = np.r_[True, np.linalg.norm(np.diff(q, axis=0), axis=1) > 1e-10]
+    q, targets = q[moving], targets[moving]
+    if len(q) < 2:
+        return None
+    keep, previous = {0, len(q) - 1}, 0
+    for point in members:
+        index = previous + int(np.argmin(np.linalg.norm(targets[previous:] - point, axis=1)))
+        if np.linalg.norm(targets[index] - point) > 1e-6:
+            return None
+        keep.add(index)
+        previous = index
+    steps = np.diff(targets, axis=0)
+    lengths = np.linalg.norm(steps, axis=1)
+    if np.any(lengths < 1e-9):
+        return None
+    directions = steps / lengths[:, None]
+    keep.update((np.flatnonzero(np.linalg.norm(np.diff(directions, axis=0), axis=1) > 1e-7) + 1)
+                .tolist())
+    arc = np.r_[0.0, np.cumsum(lengths)]
+    rotation = np.asarray(drawing["tcp_rotation"])
+    reached = {}
+    checked = {}
+    while True:
+        if monotonic() >= deadline:
+            return {"status": "TIME_BUDGET"}
+        kept = sorted(keep)
+        for index in kept:
+            if index not in reached:
+                reached[index] = arm.robot.forward(q[index], arm.flange_to_tcp)[:3, 3]
+        points = np.array([reached[index] for index in kept])
+        spline = make_path(q[kept], points, interpolation="pchip", breaks=schedule(points))
+        worst, worst_angle, failed, added = 0.0, 0.0, None, False
+        pieces = []
+        for i, width in enumerate(np.diff(spline.cspl.x)):
+            piece = CubicPiece(spline.cspl.c[:, i, :], width)
+            pieces.append(piece)
+            key = (kept[i], kept[i + 1], spline.cspl.c[:, i, :].tobytes())
+            if key not in checked:
+                checked[key] = check_tracking(
+                    piece, arm.robot, arm.flange_to_tcp, targets[kept[i]], targets[kept[i + 1]],
+                    rotation, 0.0003, 0.003,
+                )
+            check = checked[key]
+            if (
+                check["position_error_bound_m"] <= 0.0003
+                and check["orientation_error_bound_rad"] <= 0.003
+            ):
+                worst = max(worst, check["position_error_bound_m"])
+                worst_angle = max(worst_angle, check["orientation_error_bound_rad"])
+                continue
+            inside = np.arange(kept[i] + 1, kept[i + 1])
+            if not len(inside):
+                failed = check
+                break
+            middle = (arc[kept[i]] + arc[kept[i + 1]]) / 2
+            keep.add(int(inside[np.argmin(abs(arc[inside] - middle))]))
+            added = True
+        if failed is not None:
+            return {**failed, "status": "BOUND_EXCEEDS_TOLERANCE"}
+        if added:
+            continue
+        positions = q[kept]
+        rows = np.repeat(np.eye(4)[None], len(kept), axis=0)
+        rows[:, :3, :3] = rotation
+        rows[:, :3, 3] = targets[kept]
+        return {
+            "status": "BOUNDED",
+            "positions": positions,
+            "targets": rows,
+            "spline": spline,
+            "pieces": pieces,
+            "subdivisions": 1,
+            "position_error_bound_m": worst,
+            "orientation_error_bound_rad": worst_angle,
+            "orientation_constraint": "fixed",
+            "fixed_tcp_rotation": rotation.tolist(),
+            "member_pieces": {"source_knots": len(q), "members": len(members) - 1},
+        }
 
 
 def add_piece_material(scene, arm, piece, radius, name):
@@ -297,6 +392,7 @@ class CellPlanner:
         self.margin = self.profile["environment"]["clearance_m"]
         self.tip_models = {}
         self.pen_models, self.pen_tip_models = {}, {}
+        self._pen_spheres = {}
         self.drawings = {}
         self.cache = {}
         self.attempts = []
@@ -610,6 +706,43 @@ class CellPlanner:
             ),
             deadline=self.deadline,
         )
+
+    def pen_sample_fractions(self, identity, position):
+        """Fractions of an interval whose tool positions lie within the sampling distance."""
+        arm = self.arms[identity]
+        spacing = float(self.settings.get("pen_sample_m", 0.010))
+        count = 1
+        while True:
+            fractions = np.linspace(0, 1, count + 1)
+            tips = np.array(
+                [arm.robot.forward(position(u), arm.flange_to_tcp)[:3, 3] for u in fractions]
+            )
+            gap = float(np.max(np.linalg.norm(np.diff(tips, axis=0), axis=1)))
+            if gap <= spacing or count >= 4096:
+                return fractions.tolist()
+            count = max(count + 1, int(np.ceil(count * gap / spacing)))
+
+    def pen_wire_failure(self, identity, scene, position, fractions, marks):
+        """Check the pen's spheres at each fraction against the wire laid up to it.
+
+        ``marks[k]`` is the number of wire capsules present when the pen is at
+        ``fractions[k]``: a member's own wire is only what it has drawn so far.
+        """
+        arm = self.arms[identity]
+        if identity not in self._pen_spheres:
+            self._pen_spheres[identity] = PenSpheres(arm.tool.metadata)
+        spheres, wires = self._pen_spheres[identity], wire_arrays(scene)
+        self.verification_stats["pen_sphere_poses"] += len(fractions)
+        for u, count in zip(fractions, marks, strict=True):
+            failure = spheres.violation(
+                arm.robot.forward(position(u), np.eye(4)),
+                tuple(values[:count] for values in wires),
+                self.margin,
+            )
+            if failure is not None:
+                failure["wire"] = scene.segments[failure["wire"]]["name"]
+                return {**failure, "fraction": float(u)}
+        return None
 
     def add_draw(self, scene, identity, q0, q1, radius, name):
         arm = self.arms[identity]
@@ -961,9 +1094,37 @@ class CellPlanner:
         task = drawing["stroke_id"]
         continuous = self.timing.get("drawing_clock") == "cubic_toppra"
         fixed_required = self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}
-        tracked = tracked_drawing_path(
-            arm, drawing, continuous, self.deadline, require_fixed_orientation=fixed_required
+        transform = (
+            self.turntable.build_transform(drawing.get("table_index", 0))
+            if self.turntable is not None
+            else np.asarray(self.profile["world_from_build"])
         )
+        vertex_cooling = float(self.process.get("vertex_cooling_s", 1.0))
+        if not np.isfinite(vertex_cooling) or vertex_cooling < 0:
+            raise ValueError("Vertex cooling must be finite and nonnegative")
+        tracked = None
+        if continuous and fixed_required and self.settings.get("path_pieces") == "members":
+            oriented = orient_stroke(
+                self.actions[task],
+                reverse=drawing.get("reverse", False),
+                start_visit=drawing.get("start_visit", 0),
+            )
+            ends = transform_points(
+                np.asarray(oriented["segments"])[:, [0, -1]].reshape(-1, 3), transform
+            ).reshape(-1, 2, 3)
+            tracked = member_drawing_path(
+                arm,
+                drawing,
+                np.r_[ends[:1, 0], ends[:, 1]],
+                lambda reached: source_vertex_schedule(
+                    self.actions[task], drawing, reached, transform, vertex_cooling
+                )[0],
+                self.deadline,
+            )
+        if tracked is None:
+            tracked = tracked_drawing_path(
+                arm, drawing, continuous, self.deadline, require_fixed_orientation=fixed_required
+            )
         if tracked["status"] != "BOUNDED":
             self.failure(
                 task,
@@ -982,14 +1143,6 @@ class CellPlanner:
         # Numerical samples are not physical stop locations. Only actual source
         # direction changes split the clock, preserving a single action.
         targets = tracked["targets"][:, :3, 3]
-        transform = (
-            self.turntable.build_transform(drawing.get("table_index", 0))
-            if self.turntable is not None
-            else np.asarray(self.profile["world_from_build"])
-        )
-        vertex_cooling = float(self.process.get("vertex_cooling_s", 1.0))
-        if not np.isfinite(vertex_cooling) or vertex_cooling < 0:
-            raise ValueError("Vertex cooling must be finite and nonnegative")
         # Stop where the process audit will look for each corner: at the knot
         # whose actual tool position is nearest the source vertex. Ideal targets
         # can name a neighbouring knot when two lie within tracking error.
@@ -1304,6 +1457,7 @@ class CellPlanner:
             grid_samples=self.timing.get("retiming_grid_samples", 101),
             grid_midpoints=self.timing.get("retiming_grid_midpoints", True),
             solver=self.timing.get("retiming_solver", "toppra"),
+            grid_ramps=self.timing.get("retiming_grid_ramps", False),
             **reuse,
         )
 
@@ -1442,6 +1596,9 @@ class CellPlanner:
                     self.arms[motion.proposal.arm].initial_positions,
                     self.settings["assumed_cooling_s"],
                 )
+        spheres = str(self.settings.get("pen_check", "")).startswith("spheres")
+        if spheres and len(self.arms) != 1:
+            raise ValueError("The sphere pen check supports one arm")
         boundaries = {state.time_s, end}
         for motion in motions.values():
             boundaries.update(
@@ -1525,6 +1682,7 @@ class CellPlanner:
                         continue
             # Deposit conservative enclosures of BOTH growing strokes before
             # checking the interval. Future intervals are never installed early.
+            pen_steps = {}
             for identity, (edge, _position, _) in paths.items():
                 if edge is not None and edge.kind == "DRAW":
                     motion = motions[identity]
@@ -1541,6 +1699,13 @@ class CellPlanner:
                     )
                     started = perf_counter()
                     before = len(scene.segments)
+                    # The sphere check looks at the pen at these fractions of
+                    # the interval, each against the wire laid up to there, so
+                    # the wire is deposited in the same steps.
+                    steps = (
+                        self.pen_sample_fractions(identity, _position) if spheres else [0.0, 1.0]
+                    )
+                    marks = [before]
                     if cached_capsules is not None:
                         for capsule in cached_capsules:
                             scene.add(
@@ -1549,20 +1714,33 @@ class CellPlanner:
                                 capsule["radius_m"],
                                 name + capsule["suffix"],
                             )
+                        laid = [
+                            int(c["suffix"][1:].split("/")[0]) if c["suffix"].startswith("@") else 0
+                            for c in cached_capsules
+                        ]
+                        marks.extend(
+                            before + sum(step <= j for step in laid)
+                            for j in range(len(steps) - 1)
+                        )
                         self.verification_stats["deposition_intervals_reused"] += 1
                         self.verification_stats["deposition_capsules_reused"] += len(
                             cached_capsules
                         )
                         deposition_enclosures[identity][interval_key] = cached_capsules
                     else:
-                        self.add_clock_edge(
-                            scene,
-                            identity,
-                            edge,
-                            name,
-                            a - motion.start_s,
-                            b - motion.start_s,
-                        )
+                        low, high = a - motion.start_s, b - motion.start_s
+                        for j, (first, second) in enumerate(
+                            zip(steps[:-1], steps[1:], strict=True)
+                        ):
+                            self.add_clock_edge(
+                                scene,
+                                identity,
+                                edge,
+                                name if j == 0 else f"{name}@{j}",
+                                low if j == 0 else low + (high - low) * first,
+                                high if j == len(steps) - 2 else low + (high - low) * second,
+                            )
+                            marks.append(len(scene.segments))
                         deposition_enclosures[identity][interval_key] = [
                             {
                                 "start": row["start"],
@@ -1572,6 +1750,7 @@ class CellPlanner:
                             }
                             for row in scene.segments[before:]
                         ]
+                    pen_steps[identity] = (steps, marks)
                     if journal is not None:
                         journal.append(("add", [dict(row) for row in scene.segments[before:]]))
                     if hasattr(self, "verification_seconds"):
@@ -1664,6 +1843,30 @@ class CellPlanner:
                             "time_s": a,
                             "evidence": valid.failures[:2],
                         }
+                elif edge is not None and edge.kind == "DRAW" and spheres:
+                    # The pen as a row of spheres against the wire, at both ends
+                    # of the interval and at poses no further apart than the
+                    # sampling distance. The cell's fixed obstacles keep the
+                    # continuous check.
+                    started = perf_counter()
+                    if identity not in invariant_hits:
+                        check = arm.collision.check_bounded_path(
+                            position,
+                            deviation,
+                            self.obstacles,
+                            self.margin,
+                            self.settings["maximum_subdivision_depth"],
+                            None,
+                            self.deadline,
+                        )
+                        if check["status"] != "CERTIFIED_MODELED_EDGE":
+                            return None, {"arm": identity, "time_s": a, **check}
+                    self.verification_seconds["pen_fixed_obstacles"] += perf_counter() - started
+                    started = perf_counter()
+                    failure = self.pen_wire_failure(identity, scene, position, *pen_steps[identity])
+                    self.verification_seconds["pen_spheres"] += perf_counter() - started
+                    if failure is not None:
+                        return None, {"arm": identity, "time_s": a, **failure}
                 else:
                     model = (
                         arm.collision

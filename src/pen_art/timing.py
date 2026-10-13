@@ -14,7 +14,7 @@ import numpy as np
 import toppra as ta
 import yaml
 from numpy.polynomial import Polynomial
-from scipy.interpolate import PchipInterpolator
+from scipy.interpolate import PchipInterpolator, PPoly
 
 from .io import artifact, read_json, sha256, stage_update, write_json
 from .kinematics import geometric_jacobian, rigid_transform
@@ -77,7 +77,13 @@ def refine_samples(values, subdivisions=2):
     return np.concatenate([interior.reshape(-1, *values.shape[1:]), values[-1:]])
 
 
-def make_path(positions, tcp_points, *, interpolation="natural", subdivisions=1):
+def make_path(positions, tcp_points, *, interpolation="natural", subdivisions=1, breaks=None):
+    """Joint spline through ``positions``, parameterized by tool travel.
+
+    ``breaks`` names knots where the pen stops. The pchip interpolant is then
+    fitted to each run between stops on its own, so a run between two knots is
+    exactly the straight joint segment and no corner bends its neighbours.
+    """
     q, p = np.asarray(positions, float), np.asarray(tcp_points, float)
     if q.ndim != 2 or p.shape != (len(q), 3) or not np.isfinite(q).all():
         raise ValueError("Expected finite joint positions and corresponding TCP points")
@@ -96,8 +102,23 @@ def make_path(positions, tcp_points, *, interpolation="natural", subdivisions=1)
     knots = np.r_[0.0, np.cumsum(steps)]
     knots /= knots[-1]
     result = ta.SplineInterpolator(knots, q, bc_type="natural")
+    if breaks and (interpolation != "pchip" or subdivisions != 1 or not keep.all()):
+        raise ValueError("Stops need an unrefined pchip path without repeated points")
     if interpolation == "pchip":
-        result.cspl = PchipInterpolator(knots, q, axis=0)
+        cuts = sorted({0, len(knots) - 1, *(breaks or ())})
+        if len(cuts) == 2:
+            result.cspl = PchipInterpolator(knots, q, axis=0)
+        else:
+            result.cspl = PPoly(
+                np.concatenate(
+                    [
+                        PchipInterpolator(knots[a : b + 1], q[a : b + 1], axis=0).c
+                        for a, b in zip(cuts[:-1], cuts[1:], strict=True)
+                    ],
+                    axis=1,
+                ),
+                knots,
+            )
         result.cspld, result.cspldd = result.cspl.derivative(), result.cspl.derivative(2)
     elif interpolation != "natural":
         raise ValueError(f"Unsupported interpolation: {interpolation}")
@@ -415,6 +436,33 @@ def scan_clock(path, grid, robot, offset, velocity_limits, acceleration_limits, 
     return velocities, tangent, vmax, amax
 
 
+# Clock knots at these tool distances from each stop, doubling until half way,
+# let a run ramp to its drawing speed without a knot every fraction of a
+# millimetre. Added knots keep at least the gap below from every other knot.
+RAMP_KNOT_START_M = 0.001
+RAMP_KNOT_GAP_M = 0.00025
+
+
+def ramp_knots(path, robot, offset):
+    """Path parameters for clock knots that resolve the ramps of one run."""
+    knots = path.cspl.x
+    tips = np.array([robot.forward(q, offset)[:3, 3] for q in path.cspl(knots)])
+    arc = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(tips, axis=0), axis=1))]
+    wanted, distance = [arc[-1] / 2], RAMP_KNOT_START_M
+    while distance < arc[-1] / 2:
+        wanted.extend([distance, arc[-1] - distance])
+        distance *= 2
+    present, added = list(arc), []
+    for value in wanted:
+        # A run of one piece always gets its middle: a clock needs three knots.
+        if min(abs(value - other) for other in present) >= RAMP_KNOT_GAP_M or (
+            len(knots) == 2 and not added and arc[-1] > 0
+        ):
+            present.append(value)
+            added.append(value)
+    return np.interp(added, arc, knots)
+
+
 # An interior clock knot slower than this share of the fastest marks a stall.
 STALLED_CLOCK_FRACTION = 0.02
 
@@ -434,6 +482,7 @@ def retime_operation(
     grid_samples=101,
     grid_midpoints=True,
     solver="toppra",
+    grid_ramps=False,
 ):
     """Time one path, refining the clock grid only where a coarse one stalls.
 
@@ -462,6 +511,7 @@ def retime_operation(
                 grid_samples=samples,
                 grid_midpoints=midpoints,
                 solver=solver,
+                grid_ramps=grid_ramps,
             )
         except TimingParameterizationError as error:
             # A checked path can always be traversed slowly enough; a numerical
@@ -493,10 +543,12 @@ def _retime_operation(
     grid_samples=101,
     grid_midpoints=True,
     solver="toppra",
+    grid_ramps=False,
 ):
-    """Time one path. Every spline knot is a clock knot; ``grid_midpoints`` and
-    ``grid_samples`` uniformly spaced values add resolution between them. A
-    coarser grid can only lengthen the clock: the exact bounds below rescale it.
+    """Time one path. Every spline knot is a clock knot; ``grid_midpoints``,
+    ``grid_samples`` uniformly spaced values and ``grid_ramps`` add resolution
+    between them. A coarser grid can only lengthen the clock: the exact bounds
+    below rescale it.
     """
     if path is None:
         path = make_path(operation["positions"], operation["tcp_path_m"])
@@ -509,6 +561,7 @@ def _retime_operation(
     extra = np.r_[
         (knots[:-1] + knots[1:]) / 2 if grid_midpoints else [],
         np.linspace(0, 1, grid_samples) if grid_samples else [],
+        ramp_knots(path, robot, offset) if grid_ramps else [],
     ]
     for value in extra:
         if min(abs(value - present) for present in grid) > 1e-10:

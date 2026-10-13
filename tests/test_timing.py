@@ -265,3 +265,38 @@ def test_timing_must_sweep_exactly_the_checked_geometric_path(tmp_path):
     creep = [still(here + 0.001 * k, here + 0.001 * (k + 1)) for k in range(30)]
     assert posture_change(ClockPath(creep), arm)["scope"] == "run"
 
+
+    # A path whose pen stops at a knot is fitted run by run: a run of one piece
+    # is the straight joint segment, and its clock gets knots for the ramps.
+    from pen_art.timing import make_path, ramp_knots
+
+    knots = np.array([[0.1, 0.4], [0.2, 0.6], [0.5, 0.5], [0.9, 0.2]])
+    tips = [arm.robot.forward(q, offset)[:3, 3] for q in knots]
+    joined = make_path(knots, tips, interpolation="pchip")
+    stopped = make_path(knots, tips, interpolation="pchip", breaks=[1])
+    assert np.allclose(stopped.cspl(stopped.cspl.x), knots, atol=1e-12)
+    assert np.allclose(stopped.cspl.c[:2, 0], 0, atol=1e-9)
+    assert not np.allclose(joined.cspl.c[:2, 0], 0, atol=1e-6)
+    extra = ramp_knots(stopped, arm.robot, offset)
+    arc = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(tips, axis=0), axis=1))]
+    travelled = np.sort(np.interp(extra, stopped.cspl.x, arc))
+    assert len(extra) > 4 and abs(travelled[0] - 0.001) < 1e-9
+    assert np.min(np.diff(np.sort(np.r_[arc, travelled]))) >= 0.00025 - 1e-12
+    member = deepcopy(operations)
+    member[3] = {**member[3], "positions": drawing[[0, 4, 8]], "break_indices": [1]}
+    member[3]["path"] = make_path(
+        drawing[[0, 4, 8]],
+        [arm.robot.forward(q, offset)[:3, 3] for q in drawing[[0, 4, 8]]],
+        interpolation="pchip",
+        breaks=[1],
+    )
+    member[4]["positions"] = [drawing[8]]
+    pieces = geometric_path(member, arm, drawing_clock="cubic_toppra")
+    ramped = timed_path(
+        member, arm, np.ones(2), np.full(2, 0.5), 0.03, 0.1, drawing_clock="cubic_toppra",
+        acceleration_constraint="cubic_bernstein", grid_samples=0, grid_midpoints=False,
+        solver="scan", grid_ramps=True,
+    )
+    assert sum(edge.kind == "DRAW" for edge in pieces.edges) == 2
+    assert sum(edge.kind == "DRAW" for edge in ramped.edges) > 6
+    assert same_sweep(pieces, ramped)["status"] == "SAME_SWEEP"

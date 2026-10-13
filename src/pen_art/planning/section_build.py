@@ -284,6 +284,7 @@ class SectionBuild:
         retiming_grid="full",
         structural_check="action",
         retiming_solver="toppra",
+        path_pieces="samples",
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -301,8 +302,18 @@ class SectionBuild:
         if merge_deposits_m:
             # Saved with the plan, so its verification models the wire identically.
             settings["merge_deposits_m"] = merge_deposits_m
+        if path_pieces == "members":
+            # One path piece per straight member, with the pen checked against
+            # wire as a row of spheres at spaced poses. Saved with the plan.
+            from .pen_spheres import PEN_SPHERES_REVISION
+
+            settings.update(
+                path_pieces="members", pen_check=PEN_SPHERES_REVISION, pen_sample_m=0.010
+            )
         timing = yaml.safe_load(Path("configs/timing_continuous_bounded.yaml").read_text())
         timing.pop("target_seconds", None)
+        if path_pieces == "members":
+            timing["retiming_grid_ramps"] = True
         if retiming_grid != "full":
             # Clock knots between spline knots: none, or one midpoint each.
             timing.update(
@@ -1241,6 +1252,15 @@ def main():
         "and audit faster and draw slower. Default: knots with --geometry-first, else full",
     )
     parser.add_argument(
+        "--path-pieces",
+        choices=("members", "samples"),
+        help="members: one path piece per straight member, the pen checked against wire as "
+        "a row of spheres at each piece end and every 10 mm (a sampled check, not a "
+        "continuous proof), and clock knots placed for the ramps. samples: a piece per "
+        "retained path sample, checked continuously. Default: members with "
+        "--geometry-first, else samples",
+    )
+    parser.add_argument(
         "--merge-deposits-um",
         type=float,
         help="Describe earlier actions' wire by merged capsules whose radius grows by at "
@@ -1264,6 +1284,8 @@ def main():
     args = parser.parse_args()
     if args.retiming_solver is None:
         args.retiming_solver = "scan" if args.geometry_first else "toppra"
+    if args.path_pieces is None:
+        args.path_pieces = "members" if args.geometry_first else "samples"
     if args.retiming_grid is None:
         args.retiming_grid = "knots" if args.geometry_first else "full"
     if args.merge_deposits_um is None:
@@ -1299,6 +1321,7 @@ def main():
         retiming_grid=args.retiming_grid,
         structural_check=args.structural_check,
         retiming_solver=args.retiming_solver,
+        path_pieces=args.path_pieces,
     )
     try:
         build.run_build(

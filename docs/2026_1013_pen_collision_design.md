@@ -1,10 +1,18 @@
 # Pen-against-wire collision check: design
 
 **Date:** 2026-10-13
-**Status:** Simplified on 2026-10-13 at the user's direction: the pen is a row
-of spheres checked at the ends of each short piece, not a swept volume with a
-derived remainder bound. Nothing here is implemented or measured. Numbers
-marked *estimate* are reasoning, not results.
+**Status:** Partly implemented on 2026-10-13, in a simpler form decided that
+day: one path piece per straight member, the pen as a row of spheres checked
+at both ends of each piece and every 10 mm, each pose against the wire laid so
+far. That is a sampled check, not the proof described under "Goal" and in
+section 1 below (which assumed half-millimetre pieces and a 1 mm spacing rule).
+Implemented: the sphere model (section 2), batched distances (section 3) with
+a distance cull in place of the grid of section 4, and validation item 3 in
+part. Not implemented: the grid, shadow mode, and the change to deposited wire.
+Measured results are in
+[fast planning and verification](2026_1013_fast_planning_and_verification.md).
+The rest of this page is the original design; numbers marked *estimate* are
+reasoning, not results.
 
 ## Goal
 

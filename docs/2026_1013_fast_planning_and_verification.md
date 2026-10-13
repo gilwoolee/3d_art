@@ -13,8 +13,8 @@ library, no adaptation failure and no timing rejection.
 
 | Object | Actions | Start of 2026-10-13 (16 workers) | Now (24 workers) |
 | --- | ---: | ---: | ---: |
-| Palace, 8 mm feature | 366 | 937.0 s | 156.8 s |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 51.9 s |
+| Palace, 8 mm feature | 366 | 937.0 s | 117.4 s |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 34.6 s |
 
 The Palace by stage, as each change landed:
 
@@ -35,6 +35,7 @@ The Palace by stage, as each change landed:
 | Verification accepts planning's structural screens; faster clock parsing | 24 | 27 s | 77 s | 45 s | 32 s | 185.4 s |
 | Library coverage survey moved to a worker (it only informs the report) | 24 | 11 s | 77 s | 46 s | 32 s | 169.8 s |
 | Closed-form path clock; no second tip-speed audit of drawing | 24 | 11 s | 77 s | 31 s | 33 s | 156.8 s |
+| One path piece per straight member; pen checked as spheres at spaced poses | 24 | 11 s | 58 s | 21 s | 26 s | 117.4 s |
 
 Thirty-two workers were tried and do not help: Palace 301 s against 281 s with
 24 at the same code state, because the machine has 24 cores. Memory is not the
@@ -44,7 +45,43 @@ stages of that run are a clean comparison (162 s against 161 s).
 
 Twenty-four workers is the setting to use on this machine.
 
-Runs: `runs/geomfirst_gf33_{palace,branching}_w24` (current),
+### Member-length path pieces (2026-10-13)
+
+A drawing used to be cut wherever the adapted library path had a sample, about
+every 0.45 mm. It is now one piece per straight member of the wireframe
+(`member_drawing_path`), and a member is split only where its tool path would
+leave the 0.3 mm tracking tolerance. The joint path is fitted separately
+between the corners where the pen stops, so a member between two corners is
+exactly a straight joint segment. The Palace went from about 170 to 52 path
+edges per action; verification checks 36,808 edges instead of 59,857.
+
+Three things had to change with it:
+
+- **The clock.** With no knots inside a member the clock could not ramp, so
+  clock knots are placed at 1, 2, 4, 8 mm of tool travel from each stop and at
+  the middle of each run (`ramp_knots`). Print time fell, 8,822 s to 8,275 s on
+  the Palace and 3,547 s to 3,361 s on the branching shape, because the clock is
+  no longer held to a knot every half millimetre.
+- **The pen check.** The pen is a row of 65 spheres generated from the tool
+  geometry (`pen_spheres.py`), checked against wire at both ends of each piece
+  and at poses no more than 10 mm apart. On 3,597 random wire placements the
+  spheres never reported more clearance than the exact shapes; the median
+  over-estimate is 0.17 mm. **This is a sampled check, not a continuous proof**,
+  by decision of 2026-10-13. The pen against fixed obstacles and all contact
+  moves keep their continuous checks.
+- **Wire laid so far.** Each checked pose sees only the wire deposited up to
+  that pose. Adding a member's whole wire before checking was tried first and
+  blocked the Palace: at the start of a rising member the nose is 0.72 mm from
+  that member's own not-yet-drawn wire, inside the 1 mm margin.
+
+No action was rejected on either shape. The new pen check costs 14.6 s of
+worker time on the Palace (14,320 poses) plus 4.0 s for the fixed obstacles.
+The check stage is still 247 s of worker time; what remains is the contact
+checks at corners, approach and withdrawal, and bookkeeping around them.
+Full replay (`--full-replay`) also verifies the branching shape (39.3 s).
+
+Runs: `runs/geomfirst_gf37_{palace,branching}_w24` (current),
+`runs/geomfirst_gf33_*_w24` (a piece per path sample),
 `runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf26` (steps).
 The stage breakdown further down was taken at the 242.2 s step.
 

@@ -308,8 +308,18 @@ Generated datasets, libraries, checkpoints, and reports remain under ignored
 `--geometry-first` finds a collision-free path through the whole object without
 a clock, then times it once at the end. A timing failure is reported; it never
 triggers re-planning. The flag implies merged wire capsules
-(`--merge-deposits-um 20`) and one timed segment per path piece
-(`--retiming-grid knots`). The separate full-robot verification is unchanged.
+(`--merge-deposits-um 20`), one path piece per straight member
+(`--path-pieces members`) and clock knots only at piece ends and along the
+ramps (`--retiming-grid knots`). The separate full-robot verification is
+unchanged.
+
+With member-length pieces the pen is checked against printed wire as a row of
+65 spheres, at both ends of every piece and at poses no more than 10 mm apart
+along it, each against the wire laid up to that pose. This is a sampled check,
+not a continuous proof (decided 2026-10-13); the pen against the cell's fixed
+obstacles and the contact moves keep their continuous checks.
+`--build-option=--path-pieces=samples` restores a piece per path sample with
+the continuous pen check.
 
 ```bash
 .venv/bin/python scripts/benchmark_parallel_build.py \
@@ -352,8 +362,8 @@ verification; wireframe generation (under a minute) is not included.
 | Cube | 39 | 50.0 s | 26.3 s | 50.5 s | 133.9 s | 5.1 GB |
 | Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
 | Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 24.8 s | 9.6 s | 13.5 s | 51.9 s | 9.2 GB |
-| Palace, 8 mm feature (24 workers) | 366 | 77.1 s | 31.1 s | 33.2 s | 156.8 s | 11.8 GB |
+| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 17.0 s | 5.2 s | 9.2 s | 34.6 s | 9.1 GB |
+| Palace, 8 mm feature (24 workers) | 366 | 58.0 s | 20.5 s | 25.6 s | 117.4 s | 11.5 GB |
 
 The cube, branching shape and Palace were measured on 2026-10-13 with the
 current code. The other five date from 2026-10-12, before the material
@@ -361,8 +371,8 @@ stiffness change, the wireframe generator fixes and the three speed-ups of
 2026-10-13 (progress-report throttle, build-order screens on the workers,
 lighter library lookup); their wireframes are unchanged by those fixes. Totals
 include setup (11 s for the Palace). The Palace and branching rows use 24
-workers and the code of late 2026-10-13; the cube row predates that day's later
-speed-ups. What the pipeline does to be fast, where the time goes and what
+workers and the code of late 2026-10-13, with member-length path pieces; the
+other rows predate that and used a piece per path sample. What the pipeline does to be fast, where the time goes and what
 limits it:
 [fast planning and verification](docs/2026_1013_fast_planning_and_verification.md). Details and history:
 [geometry-first planning plan](docs/2026_1012_geometry_first_planning_plan.md).
