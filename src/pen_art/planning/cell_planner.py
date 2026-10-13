@@ -46,6 +46,7 @@ from .dual_arm import (
     search_schedule,
     tasks_from_construction,
 )
+from .geometric_path import geometric_path
 from .process_clock import PROCESS_CLOCK_POLICY, derive_deposition_events, source_vertex_schedule
 from .rrt import connect
 from .scene import MaterialScene
@@ -334,6 +335,9 @@ class CellPlanner:
         )
         self.verification_stats, self.verification_seconds = Counter(), Counter()
         self._path_model_contexts, self._obstacle_context_refs = {}, {}
+        # Check continuous drawings as untimed paths; ``time_local_drawing``
+        # times them once the whole object has a collision-free chain.
+        self.geometry_first = False
 
     @property
     def collision_scope(self):
@@ -973,17 +977,13 @@ class CellPlanner:
             draw_operation["path"] = spline
         timed = []
         try:
-            draw_clock = timed_path(
-                [draw_operation],
-                arm,
-                arm.robot.velocity * self.timing["velocity_fraction"],
-                np.array(self.timing["joint_acceleration_rad_s2"]),
-                self.process["nominal_speed_m_s"],
-                self.timing["travel_speed_m_s"],
-                drawing_clock=self.timing.get("drawing_clock", "quintic_stop_at_geometric_knots"),
-                acceleration_constraint=self.timing.get("acceleration_constraint", "interpolated"),
-                drawing_capture=timed,
-            )
+            if continuous and self.geometry_first:
+                timed = None
+                draw_clock = geometric_path(
+                    [draw_operation], arm, drawing_clock=self.timing["drawing_clock"]
+                )
+            else:
+                draw_clock = self._timed([draw_operation], arm, drawing_capture=timed)
         except TimingParameterizationError as error:
             self.failure(
                 task,
@@ -1161,18 +1161,15 @@ class CellPlanner:
             )
         for operation in operations:
             operation["stroke_id"] = task
+        geometric = local["timed"] is None
         try:
-            path = timed_path(
-                operations,
-                arm,
-                arm.robot.velocity * self.timing["velocity_fraction"],
-                np.array(self.timing["joint_acceleration_rad_s2"]),
-                self.process["nominal_speed_m_s"],
-                self.timing["travel_speed_m_s"],
-                drawing_clock=self.timing.get("drawing_clock", "quintic_stop_at_geometric_knots"),
-                acceleration_constraint=self.timing.get("acceleration_constraint", "interpolated"),
-                drawing_reuse=local["timed"],
-            )
+            if geometric:
+                path = geometric_path(
+                    operations, arm, drawing_clock=self.timing["drawing_clock"]
+                )
+                path.timing_operations = operations
+            else:
+                path = self._timed(operations, arm, drawing_reuse=local["timed"])
         except TimingParameterizationError as error:
             self.failure(
                 task,
@@ -1229,17 +1226,8 @@ class CellPlanner:
                 "DEFERRED_TO_FULL_CLOCK" if defer_drawing_check else "CHECKED_GEOMETRIC_PREFIX"
             ),
         )
-        transform = (
-            self.turntable.build_transform(drawing.get("table_index", 0))
-            if self.turntable is not None
-            else np.asarray(self.profile["world_from_build"])
-        )
-        path.metadata["deposition_events"] = derive_deposition_events(
-            path, self.actions[task], self.settings["assumed_cooling_s"], transform
-        )
-        path.metadata["release_ready_s"] = max(
-            event["ready_at_s"] for event in path.metadata["deposition_events"]
-        )
+        if not geometric:
+            self._process_events(path, task, drawing.get("table_index", 0))
         path.metadata["tracking_position_bound_m"] = tracked["position_error_bound_m"]
         path.metadata["tracking_orientation_constraint"] = tracked["orientation_constraint"]
         if tracked["orientation_constraint"] == "fixed":
@@ -1258,9 +1246,56 @@ class CellPlanner:
             path,
         )
         print(
-            f"Prepared {identity}/{task}/{drawing['variant']}: {path.duration_s:.1f}s", flush=True
+            f"Prepared {identity}/{task}/{drawing['variant']}: "
+            + (f"{len(path.edges)} untimed edges" if geometric else f"{path.duration_s:.1f}s"),
+            flush=True,
         )
         return proposal
+
+    def _timed(self, operations, arm, **reuse):
+        return timed_path(
+            operations,
+            arm,
+            arm.robot.velocity * self.timing["velocity_fraction"],
+            np.array(self.timing["joint_acceleration_rad_s2"]),
+            self.process["nominal_speed_m_s"],
+            self.timing["travel_speed_m_s"],
+            drawing_clock=self.timing.get("drawing_clock", "quintic_stop_at_geometric_knots"),
+            acceleration_constraint=self.timing.get("acceleration_constraint", "interpolated"),
+            **reuse,
+        )
+
+    def _process_events(self, path, task, table_index):
+        transform = (
+            self.turntable.build_transform(table_index)
+            if self.turntable is not None
+            else np.asarray(self.profile["world_from_build"])
+        )
+        path.metadata["deposition_events"] = derive_deposition_events(
+            path, self.actions[task], self.settings["assumed_cooling_s"], transform
+        )
+        path.metadata["release_ready_s"] = max(
+            event["ready_at_s"] for event in path.metadata["deposition_events"]
+        )
+
+    def time_local_drawing(self, identity, geometric, task, table_index):
+        """Time an accepted geometric action and prove its sweep is unchanged.
+
+        Raises ``TimingParameterizationError`` when no clock exists, and
+        ``ValueError`` when the timed clock would leave the checked geometry.
+        """
+        from .geometric_path import same_sweep
+
+        path = self._timed(geometric.timing_operations, self.collision_arm(identity))
+        guard = same_sweep(geometric, path)
+        if guard["status"] != "SAME_SWEEP":
+            raise ValueError(f"Timed clock leaves its checked geometry: {guard}")
+        path.metadata.update(
+            {key: value for key, value in geometric.metadata.items() if key != "parameterization"}
+        )
+        path.metadata["same_sweep"] = guard
+        self._process_events(path, task, table_index)
+        return path
 
     def validate_interval(self, state, new, end, *, deposit_only=False, journal=None):
         started, queries = perf_counter(), Counter(QUERY_STATS)
@@ -1290,6 +1325,15 @@ class CellPlanner:
         rebuild the same scene before this interval's verdict exists.
         """
         motions = {m.proposal.arm: m for m in state.active + new}
+        # An untimed path has no seconds: cooling and indexed-clock audits wait
+        # for its timing pass. Every geometric check below is unchanged.
+        untimed = {
+            m.proposal.payload.metadata.get("parameterization") == "geometric"
+            for m in motions.values()
+        }
+        if True in untimed and (len(untimed) > 1 or len(self.arms) != 1):
+            raise ValueError("Untimed validation needs one arm and only untimed paths")
+        untimed = True in untimed
         # Reuse only the clipped contact geometry within this call. Tool,
         # static obstacles, radii and deadline are fixed here; every joint
         # edge still receives fresh arm and tip checks. Deposition or an
@@ -1346,7 +1390,7 @@ class CellPlanner:
                         )
         scene = state.payload.copy()
         scene.clearance_query_enabled = not getattr(self, "verification_raw", False)
-        if self.turntable is not None and not deposit_only:
+        if self.turntable is not None and not deposit_only and not untimed:
             from .turntable import audit_indexed_clock
 
             for motion in motions.values():
@@ -1399,7 +1443,9 @@ class CellPlanner:
                     if edge.table_index != scene.table_index:
                         return None, {"status": "TABLE_INDEX_MISMATCH", "time_s": a}
                     if edge.kind == "INDEX_TURN":
-                        if any(ready > a + 1e-9 for _, ready in state.support_ready):
+                        if not untimed and any(
+                            ready > a + 1e-9 for _, ready in state.support_ready
+                        ):
                             return None, {"status": "TABLE_TURN_BEFORE_COOLING", "time_s": a}
                         motion = motions[identity]
                         if (

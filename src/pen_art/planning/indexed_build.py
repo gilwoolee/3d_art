@@ -35,6 +35,8 @@ def at_index(path, index):
         return path
     result = ClockPath([replace(edge, table_index=index) for edge in path.edges])
     result.metadata.update(path.metadata)
+    if hasattr(path, "timing_operations"):
+        result.timing_operations = path.timing_operations
     return result
 
 

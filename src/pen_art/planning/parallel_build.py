@@ -614,14 +614,12 @@ def _check(context, spec, seconds):
             "status": "UNRESOLVED" if failure.get("status") == "TIME_BUDGET" else "REJECTED",
             "failure": failure,
         }
-    started = perf_counter()
-    try:
-        build.check_forward_timing(row, local)
-    except TimeoutError as error:
-        return {"status": "UNRESOLVED", "failure": {"status": "TIME_BUDGET", "detail": str(error)}}
-    except ValueError as error:
-        return {"status": "REJECTED", "failure": {"status": "TIMING", "detail": str(error)}}
-    seconds["timing_audit"] += perf_counter() - started
+    if not _untimed(local):
+        started = perf_counter()
+        failure = _timing_failure(build, row, local)
+        seconds["timing_audit"] += perf_counter() - started
+        if failure:
+            return failure
     difference = deposit_difference(operations, _deposits(context["root"], spec["deposit_key"]))
     if difference is None or difference > 1e-9:
         return {
@@ -641,6 +639,20 @@ def _check(context, spec, seconds):
         "preceding_capsules": len(scene.objects),
         "predicted_deposit_difference_m": difference,
     }
+
+
+def _untimed(path):
+    return path.metadata.get("parameterization") == "geometric"
+
+
+def _timing_failure(build, row, clock):
+    try:
+        build.check_forward_timing(row, clock)
+    except TimeoutError as error:
+        return {"status": "UNRESOLVED", "failure": {"status": "TIME_BUDGET", "detail": str(error)}}
+    except ValueError as error:
+        return {"status": "REJECTED", "failure": {"status": "TIMING", "detail": str(error)}}
+    return None
 
 
 def _connect(context, spec, seconds):
@@ -696,10 +708,15 @@ def _connect(context, spec, seconds):
     seconds["serialization"] += perf_counter() - started
     path = combine_clocks(incoming, checked["clock"])
     path.metadata["drawing_table_index"] = end_index
-    try:
-        audit_indexed_clock(model.table, path, build.initial, build.cooling)
-    except ValueError as error:
-        return {"status": "REJECTED", "failure": {"status": "INDEXED_CLOCK", "detail": str(error)}}
+    untimed = _untimed(checked["clock"])
+    if not untimed:
+        try:
+            audit_indexed_clock(model.table, path, build.initial, build.cooling)
+        except ValueError as error:
+            return {
+                "status": "REJECTED",
+                "failure": {"status": "INDEXED_CLOCK", "detail": str(error)},
+            }
     started = perf_counter()
     store = (None if planner.verification_raw else
              getattr(planner, "path_certificates", None))
@@ -716,9 +733,69 @@ def _connect(context, spec, seconds):
     seconds["serialization"] += _store(
         context["root"],
         spec["key"],
-        {"clock": path, "drawing": checked["drawing"], "source_audit": audit},
+        {
+            "clock": path,
+            "drawing": checked["drawing"],
+            "source_audit": audit,
+            # The final timing pass rebuilds this action around its own clock.
+            **({"incoming": incoming, "local": checked["clock"]} if untimed else {}),
+        },
     )
-    return {"status": "OK", "duration_s": path.duration_s, "edges": len(path.edges)}
+    return {
+        "status": "OK",
+        "duration_s": path.duration_s,
+        "edges": len(path.edges),
+        "untimed": untimed,
+    }
+
+
+def _time(context, spec, seconds):
+    """Time one accepted untimed action; its checked sweep must be unchanged."""
+    from ..timing import TimingParameterizationError
+    from .geometric_path import same_sweep
+    from .indexed_build import at_index
+    from .section_build import combine_clocks
+    from .turntable import audit_indexed_clock
+
+    build, model, planner = context["build"], context["model"], context["build"].planner
+    row = context["order"][spec["index"]]
+    started = perf_counter()
+    payload = _load(context["root"], spec["connected"])
+    seconds["serialization"] += perf_counter() - started
+    local, table_index = payload["local"], payload["clock"].metadata["drawing_table_index"]
+    started = perf_counter()
+    try:
+        timed = planner.time_local_drawing(build.arm.identity, local, row["id"], table_index)
+    except TimingParameterizationError as error:
+        return {"status": "REJECTED", "failure": {"status": "TIMING", "detail": str(error)}}
+    except ValueError as error:
+        return {"status": "REJECTED", "failure": {"status": "SWEEP", "detail": str(error)}}
+    timed = at_index(timed, table_index)
+    timed.metadata["drawing_table_index"] = table_index
+    seconds["retiming"] += perf_counter() - started
+    started = perf_counter()
+    failure = _timing_failure(build, row, timed)
+    seconds["timing_audit"] += perf_counter() - started
+    if failure:
+        return failure
+    path = combine_clocks(payload["incoming"], timed)
+    path.metadata["drawing_table_index"] = table_index
+    guard = same_sweep(payload["clock"], path)
+    if guard["status"] != "SAME_SWEEP":
+        return {"status": "REJECTED", "failure": {"status": "SWEEP", "detail": guard}}
+    try:
+        audit_indexed_clock(model.table, path, build.initial, build.cooling)
+    except ValueError as error:
+        return {"status": "REJECTED", "failure": {"status": "INDEXED_CLOCK", "detail": str(error)}}
+    seconds["serialization"] += _store(
+        context["root"], spec["key"], {"clock": path, "drawing": payload["drawing"]}
+    )
+    return {
+        "status": "OK",
+        "duration_s": path.duration_s,
+        "edges": len(path.edges),
+        "untimed_edges": guard["geometric_edges"],
+    }
 
 
 def run_job(spec):
@@ -743,9 +820,9 @@ def run_job(spec):
     before = {name: Counter(values) for name, values in sources.items()}
     planner.deadline = min(context["deadline"], monotonic() + context["budget"])
     try:
-        summary = {"propose": _propose, "check": _check, "connect": _connect}[spec["kind"]](
-            context, spec, seconds
-        )
+        summary = {"propose": _propose, "check": _check, "connect": _connect, "time": _time}[
+            spec["kind"]
+        ](context, spec, seconds)
     except TimeoutError as error:
         summary = {
             "status": "UNRESOLVED",
@@ -930,6 +1007,7 @@ def build_binding(build, order, budget):
             if library is None
             else sorted(library.record_key(record) for record in library.records),
             "action_budget_s": budget,
+            **({"geometry_first": True} if build.planner.geometry_first else {}),
         }
     )
 
@@ -1130,11 +1208,50 @@ def run_parallel_forward(
         started = perf_counter()
         status = coordinator.run()
         phases["planning_0"] = perf_counter() - started
+        timed_keys = {}
+        if status == "COMPLETE":
+            # The whole object now has a checked chain. Time its untimed
+            # actions; each is independent of the others.
+            started = perf_counter()
+            futures = {}
+            for index in range(len(order)):
+                connected = schedule._connected(index)
+                if not connected.get("untimed"):
+                    continue
+                spec = {
+                    "kind": "time",
+                    "index": index,
+                    "connected": connected["key"],
+                    "key": digest({"time": connected["key"], "binding": context["binding"]}),
+                }
+                futures[submit(spec)] = spec
+            for future, spec in futures.items():
+                summary = future.result()
+                coordinator.jobs.append(
+                    {
+                        "kind": "time",
+                        "index": spec["index"],
+                        "status": summary["status"],
+                        "current": True,
+                        "failure": summary.get("failure"),
+                        "seconds": summary.get("seconds", {}),
+                        "counters": summary.get("counters", {}),
+                        "worker": summary.get("worker"),
+                        "memory": summary.get("memory", {}),
+                    }
+                )
+                if summary["status"] == "OK":
+                    timed_keys[spec["index"]] = spec["key"]
+                else:
+                    status = "TIMING_REJECTED"
+            phases["timing_0"] = perf_counter() - started
         if status == "COMPLETE":
             started = perf_counter()
             witnesses = []
             for index, row in enumerate(order):
-                payload = _load(root, schedule._connected(index)["key"])
+                payload = _load(
+                    root, timed_keys.get(index, schedule._connected(index)["key"])
+                )
                 clock, drawing = payload["clock"], payload["drawing"]
                 witnesses.append(
                     (
@@ -1195,6 +1312,7 @@ def run_parallel_forward(
         build.report(
             {
                 "TIME_BUDGET": "SEARCH_TIME_BUDGET",
+                "TIMING_REJECTED": "PARALLEL_FORWARD_TIMING_REJECTED",
                 "BLOCKED": "PARALLEL_FORWARD_INCOMPLETE",
                 "WORKERS_LOST": "PARALLEL_FORWARD_WORKERS_LOST",
             }[status],

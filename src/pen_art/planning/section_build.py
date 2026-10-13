@@ -249,6 +249,7 @@ class SectionBuild:
         motion_library=None,
         diffusion_checkpoint=None,
         learning_device="cpu",
+        geometry_first=False,
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -266,6 +267,7 @@ class SectionBuild:
         self.planner = CellPlanner(
             run, profile, settings, monotonic() + maximum_seconds, timing_override=timing
         )
+        self.planner.geometry_first = geometry_first
         if self.motion_library_path is None and self.planner.turntable is not None:
             self.motion_library_path = Path("runs/motion_library_phase1_upright27_v1")
         if self.motion_library_path is not None and self.planner.turntable is None:
@@ -1155,6 +1157,11 @@ def main():
         "--action-budget", type=float, default=240.0, help="Seconds per parallel planning job"
     )
     parser.add_argument(
+        "--geometry-first",
+        action="store_true",
+        help="Check new drawings as untimed paths and time them after the whole chain passes",
+    )
+    parser.add_argument(
         "--inject-rejection",
         type=int,
         action="append",
@@ -1188,6 +1195,7 @@ def main():
         motion_library=args.motion_library,
         diffusion_checkpoint=args.diffusion_checkpoint,
         learning_device=args.learning_device,
+        geometry_first=args.geometry_first,
     )
     try:
         build.run_build(
