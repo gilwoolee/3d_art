@@ -366,8 +366,24 @@ class CellPlanner:
     def collision_obstacles(self):
         return self.obstacles
 
-    def path_certificate_context(self, identity):
-        """Bind invariant checks without including the changing material scene."""
+    def path_certificate_context(self, identity, *, kinematic=False):
+        """Bind invariant checks without including the changing material scene.
+
+        ``kinematic`` binds what the speed and source-coverage audits read: the
+        arm's kinematics and limits, the tool point, the source and the process
+        settings. Those audits never consult a collision model, so their proofs
+        hold whichever collision scope the path was planned under.
+        """
+        if kinematic:
+            context = {
+                name: value
+                for name, value in self.path_certificate_context(identity).items()
+                if name not in {"collision_scope", "models", "body_origins", "obstacles"}
+            }
+            context["settings"] = {
+                name: value for name, value in self.settings.items() if name != "collision_scope"
+            }
+            return context
         from .motion_library import collision_context_hash, digest, obstacle_context
         from .motion_runtime import static_shapes
 

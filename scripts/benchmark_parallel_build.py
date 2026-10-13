@@ -72,6 +72,7 @@ def launch(args, workers):
         "--run", str(run), "--config", str(args.profile),
         "--plan-name", "offline_dual_arm_plan",
         "--workers", str(workers), "--maximum-seconds", str(args.maximum_seconds),
+        *args.verification_option,
     ]
     # Time the complete workflow while keeping verification a separate command.
     commands = [command, verification_command]
@@ -180,6 +181,12 @@ def main():
         action="append",
         default=[],
         help="Extra planning flag passed through, e.g. --build-option=--geometry-first",
+    )
+    parser.add_argument(
+        "--verification-option",
+        action="append",
+        default=[],
+        help="Extra verification flag, e.g. --verification-option=--accept-geometry-proofs",
     )
     parser.add_argument("--action-budget", type=float, default=240.0)
     parser.add_argument(

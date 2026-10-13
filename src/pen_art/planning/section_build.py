@@ -451,7 +451,9 @@ class SectionBuild:
             audit = None
             if store is not None and not getattr(self.planner, "verification_raw", False):
                 coverage_context = {
-                    "invariants": self.planner.path_certificate_context(self.arm.identity),
+                    "invariants": self.planner.path_certificate_context(
+                        self.arm.identity, kinematic=True
+                    ),
                     "source_points_m": source_points,
                 }
                 audit = store.get(coverage_context, clock.record(), "source_coverage")
@@ -626,7 +628,7 @@ class SectionBuild:
             clock, row, self.planner.process, self.cooling, transform, require_release=True
         )
         store = self.planner.path_certificates
-        context = self.planner.path_certificate_context(self.arm.identity)
+        context = self.planner.path_certificate_context(self.arm.identity, kinematic=True)
         if store.get(context, clock.record(), "joint_speed") is not None:
             return
         drawing_proof = store.get(context, clock.record(), "drawing_speed")

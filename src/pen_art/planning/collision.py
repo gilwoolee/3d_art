@@ -92,6 +92,8 @@ class RobotCollisionModel:
         # A fixed world-to-base joint is part of the mounting assembly. Exclude
         # only those links from the table check, never a moving link.
         self.mount_links = {robot.root}
+        # Fixed obstacles, configuration, motion radii and clearances last measured.
+        self._reference = None
         for joint in robot.joint_data:
             if joint["index"] is not None:
                 break
@@ -185,8 +187,10 @@ class RobotCollisionModel:
                     continue
                 yield body.name, name, obj, obstacle
 
-    def distances(self, positions, obstacles=None, *, deadline=float("inf")):
+    def distances(self, positions, obstacles=None, *, deadline=float("inf"), only=None):
         """Yield names, signed clearance and overlap; cache only self pairs.
+
+        ``only`` restricts the query to the named pairs.
 
         Keys retain exact relative joint values, without angle quantization.
         The bounded, in-memory cache belongs to this fixed robot/tool model.
@@ -224,6 +228,8 @@ class RobotCollisionModel:
 
         for index, body in enumerate(self.bodies):
             for other_index, relative in self._self_pairs[index]:
+                if only is not None and (body.name, self.bodies[other_index].name) not in only:
+                    continue
                 if monotonic() >= deadline:
                     raise TimeoutError("Self-collision check exceeded its budget")
                 key = (index, other_index, q[relative].tobytes())
@@ -241,18 +247,23 @@ class RobotCollisionModel:
             for name, obstacle in (obstacles or {}).items():
                 if name == "table" and body.link in self.mount_links:
                     continue
+                if only is not None and (body.name, name) not in only:
+                    continue
                 if monotonic() >= deadline:
                     raise TimeoutError("Obstacle collision check exceeded its budget")
                 yield body.name, name, *measure(object_at(index), obstacle)
 
     def material_distances(
-        self, positions, material, clearance_bounds=None, *, deadline=float("inf")
+        self, positions, material, clearance_bounds=None, *, deadline=float("inf"), only=None
     ):
+        """Yield each body's nearest material within its bound; ``only`` names bodies."""
         enabled = material.clearance_query_enabled
         prefix_cache = enabled and getattr(material, "supports_prefix_cache", True)
         pose = self._material_pose(positions, enabled=enabled)
         suffixes = {}
         for index, body in enumerate(self.bodies):
+            if only is not None and body.name not in only:
+                continue
             if monotonic() >= deadline:
                 raise TimeoutError("Material-distance query exceeded its budget")
             transform = pose["transforms"][index]
@@ -305,8 +316,23 @@ class RobotCollisionModel:
                 # The previous proof covers the entire prefix and this query
                 # covers every appended capsule, with the current swept bound.
                 pose["proofs"][index] = (
-                    len(material.objects), material.geometry_prefix(), threshold
+                    len(material.objects),
+                    material.geometry_prefix(),
+                    threshold,
                 )
+
+    @staticmethod
+    def _obstacle_key(obstacles):
+        """Identity and pose of the fixed obstacles a clearance was measured against."""
+        return tuple(
+            (
+                name,
+                id(obstacle),
+                obstacle.getTranslation().tobytes(),
+                obstacle.getRotation().tobytes(),
+            )
+            for name, obstacle in sorted((obstacles or {}).items())
+        )
 
     def check(
         self, positions, obstacles=None, margin_m=0.0, material=None, *, deadline=float("inf")
@@ -398,15 +424,20 @@ class RobotCollisionModel:
         self.robot.frames(position(0))
         self.robot.frames(position(1))
         evaluations, greatest_depth = 0, 0
+        fixed = self._obstacle_key(obstacles)
 
-        def visit(start, end, depth):
+        def visit(start, end, depth, pairs=None, bodies=None):
+            """Certify [start, end]. ``pairs`` and ``bodies`` name what the parent
+            interval left unresolved; everything else it already certified for
+            the whole of its span, which contains this one.
+            """
             nonlocal evaluations, greatest_depth
             if monotonic() >= deadline:
                 return {"status": "TIME_BUDGET"}
             evaluations += 1
             greatest_depth = max(greatest_depth, depth)
             alpha = (start + end) / 2
-            q = position(alpha)
+            q = np.asarray(position(alpha), float)
             half_delta = np.asarray(deviation(start, end), float)
             if (
                 half_delta.shape != (len(self.robot.names),)
@@ -417,9 +448,27 @@ class RobotCollisionModel:
             uncertain = []
             QUERY_STATS["path_evaluations"] += 1
             started = perf_counter()
+            # The arm moves a fraction of a degree per edge. Clearances measured
+            # at one configuration certify every configuration whose bounded
+            # motion from it stays inside them, so most edges need no new
+            # self or fixed-obstacle query at all.
+            reference = self._reference if pairs is None else None
+            certified = (
+                reference is not None
+                and reference[0] == fixed
+                and bool(
+                    np.all(
+                        reference[2] @ (np.abs(q - reference[1]) + half_delta) + margin_m + 1e-6
+                        < reference[3]
+                    )
+                )
+            )
+            measured = []
             try:
-                for name1, name2, distance, contact in self.distances(
-                    q, obstacles, deadline=deadline
+                if certified:
+                    QUERY_STATS["reference_certified"] += 1
+                for name1, name2, distance, contact in (
+                    () if certified else self.distances(q, obstacles, deadline=deadline, only=pairs)
                 ):
                     if contact:
                         return {
@@ -433,6 +482,7 @@ class RobotCollisionModel:
                         if name2 not in (obstacles or {}) and (name1, name2) in self._pair_radii
                         else self.motion_radii[name1]
                     )
+                    measured.append((radius, distance))
                     bound = float(radius @ half_delta)
                     if distance <= bound + margin_m + 1e-6:
                         uncertain.append(
@@ -445,7 +495,15 @@ class RobotCollisionModel:
                         )
             finally:
                 QUERY_STATS["self_static_seconds"] += perf_counter() - started
-            if material is not None:
+            if pairs is None and not certified and measured:
+                self._reference = (
+                    fixed,
+                    q.copy(),
+                    np.array([radius for radius, _ in measured]),
+                    np.array([distance for _, distance in measured]),
+                )
+            unresolved_pairs = {(row["first"], row["second"]) for row in uncertain}
+            if material is not None and bodies != set():
                 bounds = {
                     body.name: float(self.motion_radii[body.name] @ half_delta) + margin_m + 1e-6
                     for body in self.bodies
@@ -453,7 +511,7 @@ class RobotCollisionModel:
                 started = perf_counter()
                 try:
                     for name1, name2, distance in self.material_distances(
-                        q, material, bounds, deadline=deadline
+                        q, material, bounds, deadline=deadline, only=bodies
                     ):
                         if distance <= 0:
                             return {
@@ -483,9 +541,14 @@ class RobotCollisionModel:
                     "positions": q.tolist(),
                     "pairs": uncertain,
                 }
-            first = visit(start, alpha, depth + 1)
+            unresolved_bodies = {
+                row["first"]
+                for row in uncertain
+                if (row["first"], row["second"]) not in unresolved_pairs
+            }
+            first = visit(start, alpha, depth + 1, unresolved_pairs, unresolved_bodies)
             return (
-                visit(alpha, end, depth + 1)
+                visit(alpha, end, depth + 1, unresolved_pairs, unresolved_bodies)
                 if first["status"] == "CERTIFIED_MODELED_EDGE"
                 else first
             )

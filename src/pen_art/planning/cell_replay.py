@@ -154,6 +154,7 @@ def _replay_cell_body(
     reuse_material_checkpoint=True,
     workers=1,
     optimize_contact_geometry=True,
+    geometry_proofs=False,
     pools,
 ):
     validation_name = plan_name.removesuffix("_plan") + "_validation.json"
@@ -224,13 +225,29 @@ def _replay_cell_body(
     tasks = {task.identity: task for task in planner.tasks}
     section_audits = {}
     partial_sections = saved.get("partial_section_schedule", False)
-    store = None if verification_raw else getattr(planner, "path_certificates", None)
+    if geometry_proofs:
+        # Speed and source-coverage proofs planning wrote for these exact clocks.
+        # They bind the path, kinematics, source and process settings. Collision,
+        # orientation, deposits and structure are still checked here in full.
+        from .path_certificates import PathCertificateStore
+
+        planner.path_certificates = PathCertificateStore(
+            run / "path_certificates", fallback=run / "parallel" / "path_certificates"
+        )
+    store = (
+        getattr(planner, "path_certificates", None)
+        if geometry_proofs or not verification_raw
+        else None
+    )
     mark("context_setup")
 
     def audit_action(row, path, tick=None):
         """Every saved-clock audit that needs no other action. Raises on violation."""
         result = {"turns": 0, "initial_index": None, "final_index": None, "checked_edges": 0}
-        invariant_context = None if store is None else planner.path_certificate_context(row["arm"])
+        invariant_context = (
+            None if store is None else planner.path_certificate_context(row["arm"], kinematic=True)
+        )
+        proofs = result["proofs"] = []
         if planner.turntable is not None:
             from ..curves import flatten_curve, transform_points
             from .source_coverage import audit_source_curve
@@ -259,6 +276,8 @@ def _replay_cell_body(
                     if store is None
                     else store.get(coverage_context, row["trajectory"], "source_coverage")
                 )
+                if coverage is not None:
+                    proofs.append("source_coverage")
                 if coverage is None:
                     coverage = audit_source_curve(planner.arms[row["arm"]], [path], source_points)
                     if coverage["status"] == "BOUNDED" and store is not None:
@@ -309,6 +328,11 @@ def _replay_cell_body(
         reuse = reuse or speed_proof is not None
         drawing_proof = (None if store is None else
                          store.get(invariant_context, row["trajectory"], "drawing_speed"))
+        proofs.extend(
+            name
+            for name, proof in (("joint_speed", speed_proof), ("drawing_speed", drawing_proof))
+            if proof is not None
+        )
         result.update(reuse=reuse, key=key)
         for edge_index, edge in () if reuse else enumerate(path.edges):
             if drawing_proof is not None and edge.kind == "DRAW":
@@ -520,6 +544,8 @@ def _replay_cell_body(
         checked_intervals=0,
         checked_actions=0,
         reused_path_checks=0,
+        geometry_proofs_accepted=geometry_proofs,
+        geometry_proof_hits={},
         verification_raw=verification_raw,
         optimize_contact_geometry=optimize_contact_geometry,
         reuse_material_checkpoint=not verification_raw and reuse_material_checkpoint,
@@ -634,6 +660,8 @@ def _replay_cell_body(
             previous_q, path.edges[0].q0, atol=1e-8, rtol=0
         ):
             raise ValueError("Overlapping or discontinuous arm channel")
+        for name in audit["proofs"]:
+            output["geometry_proof_hits"][name] = output["geometry_proof_hits"].get(name, 0) + 1
         if audit["reuse"]:
             output["reused_path_checks"] += 1
             output["checked_edges"] += len(path.edges)
@@ -945,6 +973,7 @@ def replay_cell(
     reuse_material_checkpoint=True,
     workers=1,
     optimize_contact_geometry=True,
+    geometry_proofs=False,
 ):
     """Replay a saved plan with the complete robot model.
 
@@ -972,6 +1001,7 @@ def replay_cell(
             reuse_material_checkpoint=reuse_material_checkpoint,
             workers=workers,
             optimize_contact_geometry=optimize_contact_geometry,
+            geometry_proofs=geometry_proofs,
         )
         stage_update(
             Path(run),
@@ -1035,9 +1065,20 @@ def main():
     parser.add_argument("--maximum-seconds", type=float, default=300)
     parser.add_argument("--plan-name", default="dual_arm_plan")
     parser.add_argument("--workers", type=int, default=1, help="Parallel interval checks")
+    parser.add_argument(
+        "--accept-geometry-proofs",
+        action="store_true",
+        help="Accept planning's speed and source-coverage proofs for the exact saved clocks; "
+        "collision, orientation, deposits and structure are still checked in full",
+    )
     args = parser.parse_args()
     result = replay_cell(
-        args.run, args.config, args.maximum_seconds, args.plan_name, workers=args.workers
+        args.run,
+        args.config,
+        args.maximum_seconds,
+        args.plan_name,
+        workers=args.workers,
+        geometry_proofs=args.accept_geometry_proofs,
     )
     print(result["status"], result["completed_strokes"], result["checked_intervals"])
     return 0 if result["status"] == "CERTIFIED_GEOMETRIC_REPLAY" else 1

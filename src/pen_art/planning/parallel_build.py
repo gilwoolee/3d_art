@@ -775,8 +775,10 @@ def _connect(context, spec, seconds):
     started = perf_counter()
     store = (None if planner.verification_raw else
              getattr(planner, "path_certificates", None))
-    coverage_context = {"invariants": planner.path_certificate_context(build.arm.identity),
-                        "source_points_m": _points(context, row, end_index)}
+    coverage_context = {
+        "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
+        "source_points_m": _points(context, row, end_index),
+    }
     audit = None if store is None else store.get(coverage_context, path.record(), "source_coverage")
     if audit is None:
         audit = audit_source_curve(build.arm, [path], coverage_context["source_points_m"])
@@ -828,16 +830,34 @@ def _time(context, spec, seconds):
     timed = at_index(timed, table_index)
     timed.metadata["drawing_table_index"] = table_index
     seconds["retiming"] += perf_counter() - started
+    path = combine_clocks(payload["incoming"], timed)
+    path.metadata["drawing_table_index"] = table_index
+    # Audit the clock exactly as it is saved, transit included: a speed proof
+    # binds each floating-point duration, and joining the transit shifts them.
     started = perf_counter()
-    failure = _timing_failure(build, row, timed)
+    failure = _timing_failure(build, row, path)
     seconds["timing_audit"] += perf_counter() - started
     if failure:
         return failure
-    path = combine_clocks(payload["incoming"], timed)
-    path.metadata["drawing_table_index"] = table_index
     guard = same_sweep(payload["clock"], path)
     if guard["status"] != "SAME_SWEEP":
         return {"status": "REJECTED", "failure": {"status": "SWEEP", "detail": guard}}
+    # The timed clock visits exactly the configurations of the untimed path, so
+    # that path's proof of covering the source curve holds for it too.
+    store = None if planner.verification_raw else getattr(planner, "path_certificates", None)
+    if store is not None:
+        coverage_context = {
+            "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
+            "source_points_m": _points(context, row, table_index),
+        }
+        covered = store.get(coverage_context, payload["clock"].record(), "source_coverage")
+        if covered is not None:
+            store.admit(
+                coverage_context,
+                path.record(),
+                "source_coverage",
+                {**covered, "derived_from": "same_sweep_of_untimed_path"},
+            )
     try:
         audit_indexed_clock(model.table, path, build.initial, build.cooling)
     except ValueError as error:
