@@ -65,6 +65,7 @@ def launch(args, workers):
         str(args.action_budget),
         "--workers",
         str(workers),
+        *args.build_option,
     ]
     verification_command = [
         sys.executable, "-m", "pen_art.planning.cell_replay",
@@ -174,6 +175,12 @@ def main():
     )
     parser.add_argument("--workers", type=int, nargs="+", default=[1, 2, 4])
     parser.add_argument("--maximum-seconds", type=float, default=14400)
+    parser.add_argument(
+        "--build-option",
+        action="append",
+        default=[],
+        help="Extra planning flag passed through, e.g. --build-option=--geometry-first",
+    )
     parser.add_argument("--action-budget", type=float, default=240.0)
     parser.add_argument(
         "--concurrent",

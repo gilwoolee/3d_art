@@ -479,7 +479,9 @@ class DrawingExperience:
                 proposal = self.retained_seed_proposal(record, request)
                 if proposal is not None:
                     self.stats["retained_seed_proposals"] += 1
-                else:
+                elif not getattr(planner, "geometry_first", False):
+                    # A stored clock carries its timing segments. Geometry-first
+                    # planning adapts the record so it is checked as a path.
                     proposal = self.retained_clock_proposal(record, request)
                     if proposal is not None:
                         self.stats["retained_interpolant_proposals"] += 1
