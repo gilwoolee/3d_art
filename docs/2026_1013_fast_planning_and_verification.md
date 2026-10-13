@@ -138,7 +138,32 @@ stroke was drawn upward in both plans. The Palace had two rejected candidates
 (action 257, source coverage) that planning recovered from; the branching
 shape had none.
 
-Runs: `runs/geomfirst_gf40_{palace,branching}_w24` (current, sources
+### Print time (2026-10-13)
+
+Print time is separate from planning time. On the branching shape only 18% of
+55.9 minutes was drawing; the rest was the pen lifting, moving and waiting
+between 151 separate strokes. Three settings changed:
+
+| Setting | Before | Now | Basis |
+| --- | ---: | ---: | --- |
+| Joint acceleration limit | 0.5 rad/s² | 1.8 rad/s² | Chosen so the measured tip acceleration stays under 1.5 m/s², Flexiv's default for straight moves (allowed range 0.1-3.0). No joint acceleration figure was found for this arm. |
+| Speed of moves in free air | 30 mm/s | 250 mm/s | Half of Flexiv's default 0.5 m/s for straight moves |
+| Lift-off path pieces | every 3 mm | every 10 mm | The arm rests at the end of each piece |
+
+| | Before | Now |
+| --- | ---: | ---: |
+| Branching shape | 55.9 min | 34.3 min |
+| Palace | 101.9 min | 64.2 min |
+| Largest sampled tip acceleration | 0.43 m/s² | 1.41 m/s² (branching), 1.26 m/s² (Palace) |
+
+Joint limits govern the clock; tip acceleration is measured afterwards at five
+points per edge, not enforced. These are settings, not measurements of the
+real arm. What remains on the branching shape is mostly placeholder waits: pen
+start and stop 537 s, cooling 419 s, joining 151 s, against 453 s of drawing.
+Strokes are still drawn one at a time with a lift between them.
+Runs: `runs/geomfirst_gf47_{palace,branching}_w24`.
+
+Runs: `runs/geomfirst_gf40_{palace,branching}_w24` (sources
 `runs/geomfirst_{palacevr,branchingvr}_f8_l3_source`),
 `runs/geomfirst_gf39_*_w24` (slanted zigzags),
 `runs/geomfirst_gf37_*_w24` (member pieces, before the bookkeeping changes),
