@@ -17,45 +17,152 @@ from numpy.polynomial import Polynomial
 from ..io import artifact, read_json, sha256, stage_update, write_json
 from ..kinematics import pose_error, rigid_transform
 from ..robot import SerialArm
-from ..timing import make_path, maximum_absolute, polynomial_range, tcp_acceleration_bound
+from ..timing import (
+    _stationary_roots,
+    make_path,
+    maximum_absolute,
+    polynomial_range,
+    tcp_acceleration_bound,
+)
 from .collision import RobotCollisionModel, work_surfaces
 from .scene import MaterialScene
 from .tool import load_tool, require_matching_tool
 
 
+def _horner(coefficients, x):
+    # The recurrence numpy's polyval uses, on plain floats.
+    value = coefficients[-1] + x * 0
+    for coefficient in coefficients[-2::-1]:
+        value = coefficient + value * x
+    return value
+
+
+def _extent(coefficients, stationary, a, b):
+    values = [_horner(coefficients, a), _horner(coefficients, b)]
+    values.extend(_horner(coefficients, x) for x in stationary if a < x < b)
+    return min(values), max(values)
+
+
 class PolynomialPiece:
-    """Joint polynomials on [0,1], with exact extrema for continuous checking."""
+    """Joint polynomials on [0,1], with exact extrema for continuous checking.
+
+    Checking subdivides a piece thousands of times. The piece therefore keeps,
+    for the joint polynomials and their first two derivatives, plain
+    coefficient rows and stationary points, and evaluates them directly; the
+    numpy polynomial objects are built only when a caller asks for them.
+    """
 
     def __init__(self, polynomials):
-        self.polynomials = list(polynomials)
-        if not self.polynomials or any(not np.isfinite(p.coef).all() for p in self.polynomials):
+        self._polynomials = list(polynomials)
+        self._rows = None
+        if not self._polynomials or any(not np.isfinite(p.coef).all() for p in self._polynomials):
             raise ValueError("Expected finite joint polynomials")
 
+    @property
+    def polynomials(self):
+        if self._polynomials is None:
+            self._polynomials = [Polynomial(row) for row in self._rows[0]]
+        return self._polynomials
+
+    def _tables(self):
+        """Coefficient rows of every joint, per derivative order; False if unsupported."""
+        if self._rows is None:
+            if any(not np.array_equal(p.domain, p.window) for p in self._polynomials):
+                self._rows = False  # Mapped domains keep the general numpy path.
+                return False
+            rows = [[[float(c) for c in p.coef] for p in self._polynomials]]
+            for _ in range(2):
+                rows.append([[k * c for k, c in enumerate(row)][1:] or [0.0] for row in rows[-1]])
+            self._rows = rows
+            self._stationary = [None, None, None]
+        return self._rows
+
+    def _extents(self, order, a, b):
+        """Lowest and highest value of each joint's ``order``-th derivative on ``[a, b]``."""
+        stationary = self._stationary[order]
+        if stationary is None:
+            # Found on first use: many pieces are only evaluated or subdivided.
+            stationary = self._stationary[order] = [
+                tuple(
+                    float(root.real)
+                    for root in _stationary_roots(Polynomial, tuple(row), (-1.0, 1.0), (-1.0, 1.0))
+                    if abs(root.imag) < 1e-8
+                )
+                for row in self._rows[order]
+            ]
+        rows = zip(self._rows[order], stationary, strict=True)
+        return [_extent(row, points, a, b) for row, points in rows]
+
     def position(self, t):
-        return np.array([p(t) for p in self.polynomials])
+        rows = self._tables()
+        if rows is False or not isinstance(t, (int, float)):
+            return np.array([p(t) for p in self.polynomials])
+        return np.array([_horner(row, t) for row in rows[0]])
+
+    def velocity(self, t):
+        """Derivative with respect to the piece parameter."""
+        rows = self._tables()
+        if rows is False:
+            return np.array([p.deriv()(t) for p in self.polynomials])
+        return np.array([_horner(row, t) for row in rows[1]])
+
+    def ranges(self, a, b):
+        """Lowest and highest value of every joint on ``[a, b]``."""
+        rows = self._tables()
+        if rows is False:
+            return np.array([polynomial_range(p, a, b) for p in self.polynomials])
+        return np.array(self._extents(0, a, b))
 
     def deviation(self, a, b):
         q = self.position((a + b) / 2)
-        ranges = [polynomial_range(p, a, b) for p in self.polynomials]
+        ranges = self.ranges(a, b)
         return np.array(
             [max(abs(lo - m), abs(hi - m)) for (lo, hi), m in zip(ranges, q, strict=True)]
         )
 
     def derivatives(self, a, b):
-        # Subdivision asks for the same derivatives on many subintervals.
-        derived = getattr(self, "_derived", None)
-        if derived is None:
-            derived = self._derived = tuple(
-                [p.deriv(order) for p in self.polynomials] for order in (1, 2)
+        rows = self._tables()
+        if rows is False:
+            return tuple(
+                np.array([maximum_absolute(p.deriv(order), a, b) for p in self.polynomials])
+                for order in (1, 2)
             )
         return tuple(
-            np.array([maximum_absolute(p, a, b) for p in order]) for order in derived
+            np.array([max(abs(low), abs(high)) for low, high in self._extents(order, a, b)])
+            for order in (1, 2)
         )
 
     def subpiece(self, a, b):
         # Composition preserves all extrema, including nonmonotonic excursions.
-        clock = Polynomial([a, b - a])
-        return PolynomialPiece(p(clock) for p in self.polynomials)
+        rows = self._tables()
+        if rows is False:
+            clock = Polynomial([a, b - a])
+            return PolynomialPiece(p(clock) for p in self.polynomials)
+        width = b - a
+        composed = []
+        for row in rows[0]:
+            # Horner's rule in polynomial arithmetic: row(a + width * u).
+            result = [row[-1]]
+            for coefficient in row[-2::-1]:
+                shifted = [0.0, *(c * width for c in result)]
+                result = [c * a + s for c, s in zip([*result, 0.0], shifted, strict=True)]
+                result[0] = coefficient + result[0]
+            composed.append(result)
+        piece = object.__new__(PolynomialPiece)
+        piece._polynomials = None
+        piece._rows = [composed]
+        for _ in range(2):
+            piece._rows.append(
+                [[k * c for k, c in enumerate(row)][1:] or [0.0] for row in piece._rows[-1]]
+            )
+        # Stationary points already found carry over; the rest wait for first use.
+        piece._stationary = [
+            None
+            if found is None or not width
+            else [tuple((x - a) / width for x in points) for points in found]
+            for found in self._stationary
+        ]
+        return piece
 
 
 class CubicPiece(PolynomialPiece):

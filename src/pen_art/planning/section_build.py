@@ -614,7 +614,6 @@ class SectionBuild:
 
     def check_forward_timing(self, row, clock):
         """Qualify timing independently before persisting a complete state."""
-        from ..timing import polynomial_range
         from .clock_path import polynomial_tcp_speed_bound, tcp_tangent_bound
         from .process_clock import audit_process_clock
 
@@ -644,7 +643,7 @@ class SectionBuild:
             )
             if edge.coefficients is not None:
                 piece = edge.piece()
-                ranges = np.array([polynomial_range(p, 0, 1) for p in piece.polynomials])
+                ranges = piece.ranges(0, 1)
                 if np.any(ranges[:, 0] < self.arm.robot.lower - 1e-9) or np.any(
                     ranges[:, 1] > self.arm.robot.upper + 1e-9
                 ):

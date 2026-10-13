@@ -16,7 +16,6 @@ import numpy as np
 
 from ..io import artifact, read_json, sha256, stage_update, write_json
 from ..provenance import audit_source_provenance
-from ..timing import polynomial_range
 from .cell_planner import CellPlanner
 from .clock_path import ClockPath, polynomial_tcp_speed_bound, tcp_tangent_bound
 from .dual_arm import MotionProposal, ScheduledMotion, ScheduleState
@@ -328,7 +327,7 @@ def _replay_cell_body(
             )
             if edge.coefficients is not None:
                 piece = edge.piece()
-                ranges = np.array([polynomial_range(p, 0, 1) for p in piece.polynomials])
+                ranges = piece.ranges(0, 1)
                 if np.any(ranges[:, 0] < arm.robot.lower - 1e-9) or np.any(
                     ranges[:, 1] > arm.robot.upper + 1e-9
                 ):
@@ -547,10 +546,16 @@ def _replay_cell_body(
             ),
         ],
     )
+    published = [-np.inf]
+
     def save(final=False):
         """Publish progress cheaply; the structural release states can be tens of
-        megabytes and belong only in the finished report.
+        megabytes and belong only in the finished report. Progress is written
+        at most every five seconds: the report grows with the build.
         """
+        if not final and monotonic() - published[0] < 5:
+            return
+        published[0] = monotonic()
         write_json(
             run / validation_name,
             output if final else {k: v for k, v in output.items() if k != "release_states"},

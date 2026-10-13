@@ -66,7 +66,7 @@ def polynomial_tcp_speed_bound(edge, arm, limit, *, deadline=None):
             raise TimeoutError("Tip-speed verification exceeded its planning budget")
         first, second = piece.derivatives(a, b)
         middle = (a + b) / 2
-        tangent = np.array([p.deriv()(middle) for p in piece.polynomials])
+        tangent = piece.velocity(middle)
         observed = np.linalg.norm(
             geometric_jacobian(arm.robot, piece.position(middle), arm.flange_to_tcp)[:3] @ tangent
         )
@@ -101,15 +101,21 @@ class ClockEdge:
     table_index: int | None = None
     table_to_index: int | None = None
 
+    def __getstate__(self):
+        return {name: value for name, value in self.__dict__.items() if name != "_piece"}
+
     def piece(self, a=None, b=None):
-        if self.coefficients is None:
-            polynomials = [
-                Polynomial([first, 0, 0, 10 * d, -15 * d, 6 * d])
-                for first, d in zip(self.q0, self.q1 - self.q0, strict=True)
-            ]
-        else:
-            polynomials = [Polynomial(c) for c in self.coefficients]
-        piece = PolynomialPiece(polynomials)
+        # An edge is not edited after construction; checks ask for its piece often.
+        piece = self.__dict__.get("_piece")
+        if piece is None:
+            if self.coefficients is None:
+                polynomials = [
+                    Polynomial([first, 0, 0, 10 * d, -15 * d, 6 * d])
+                    for first, d in zip(self.q0, self.q1 - self.q0, strict=True)
+                ]
+            else:
+                polynomials = [Polynomial(c) for c in self.coefficients]
+            piece = self.__dict__["_piece"] = PolynomialPiece(polynomials)
         if (a is None and b is None) or (a == self.start_s and b == self.end_s):
             return piece
         width = self.end_s - self.start_s
