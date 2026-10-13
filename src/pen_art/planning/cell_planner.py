@@ -180,7 +180,7 @@ def member_drawing_path(arm, drawing, members, schedule, deadline):
                 reached[index] = arm.robot.forward(q[index], arm.flange_to_tcp)[:3, 3]
         points = np.array([reached[index] for index in kept])
         spline = make_path(q[kept], points, interpolation="pchip", breaks=schedule(points))
-        worst, worst_angle, failed, added = 0.0, 0.0, None, False
+        worst, worst_angle, added = 0.0, 0.0, False
         pieces = []
         for i, width in enumerate(np.diff(spline.cspl.x)):
             piece = CubicPiece(spline.cspl.c[:, i, :], width)
@@ -201,13 +201,11 @@ def member_drawing_path(arm, drawing, members, schedule, deadline):
                 continue
             inside = np.arange(kept[i] + 1, kept[i + 1])
             if not len(inside):
-                failed = check
-                break
+                # Nothing left to split with; the caller refines every sample.
+                return None
             middle = (arc[kept[i]] + arc[kept[i + 1]]) / 2
             keep.add(int(inside[np.argmin(abs(arc[inside] - middle))]))
             added = True
-        if failed is not None:
-            return {**failed, "status": "BOUND_EXCEEDS_TOLERANCE"}
         if added:
             continue
         positions = q[kept]
@@ -469,15 +467,40 @@ class CellPlanner:
         arm's kinematics and limits, the tool point, the source and the process
         settings. Those audits never consult a collision model, so their proofs
         hold whichever collision scope the path was planned under.
+
+        The context is rebuilt on every call and compared with the last one by
+        what can differ between calls; an unchanged one is returned as the same
+        frozen object, whose hash the proof store then forms only once.
         """
+        from .path_certificates import FrozenContext
+
+        context = self._path_certificate_context(identity, kinematic=kinematic, pen=pen)
+        arm = self.arms[identity]
+        signature = (
+            self.collision_scope,
+            json.dumps([self.settings, self.timing, self.process, self.transit],
+                       sort_keys=True, default=str),
+            self.margin,
+            *(id(part) for part in (self.profile, self.actions, self.obstacles, arm.collision,
+                                    arm.tool.metadata, self.turntable)),
+            tuple(sorted(self.obstacles)),
+        )
+        frozen = self.__dict__.setdefault("_frozen_contexts", {})
+        cached = frozen.get((identity, kinematic, pen))
+        if cached is None or cached[0] != signature:
+            cached = (signature, FrozenContext(context))
+            frozen[(identity, kinematic, pen)] = cached
+        return cached[1]
+
+    def _path_certificate_context(self, identity, *, kinematic=False, pen=False):
         if pen:
             # What a pen-only collision proof read, whichever scope asks for it:
             # the kinematic context, the fixed obstacles and the pen's geometry.
             from .motion_library import collision_context_hash
 
-            arm, full = self.arms[identity], self.path_certificate_context(identity)
+            arm, full = self.arms[identity], self._path_certificate_context(identity)
             return {
-                **self.path_certificate_context(identity, kinematic=True),
+                **self._path_certificate_context(identity, kinematic=True),
                 "obstacles": full["obstacles"],
                 "pen_models": {
                     "pen": collision_context_hash(self.pen_models[identity], arm.tool.metadata),
@@ -489,7 +512,7 @@ class CellPlanner:
         if kinematic:
             context = {
                 name: value
-                for name, value in self.path_certificate_context(identity).items()
+                for name, value in self._path_certificate_context(identity).items()
                 if name not in {"collision_scope", "models", "body_origins", "obstacles"}
             }
             context["settings"] = {
@@ -1254,7 +1277,16 @@ class CellPlanner:
                 task, identity, "APPROACH", "NO_CONNECTED_APPROACH", attempts=approach_attempts
             )
             return None
-        if defer_drawing_check:
+        if defer_drawing_check and local.get("deposits") is not None:
+            # The wire this drawing lays was already enclosed when its deposit
+            # was predicted from the same path; withdrawal planning reuses it.
+            after, failure = scene.copy(), None
+            for number, row in enumerate(local["deposits"]):
+                after.add(
+                    row["start"], row["end"], row["radius_m"],
+                    f"prospective/{identity}/{task}/{number}",
+                )
+        elif defer_drawing_check:
             after, failure = enclose_drawing_prefix(
                 arm,
                 tracked,
@@ -1584,8 +1616,19 @@ class CellPlanner:
                                 edge.q0, self.arms[identity].flange_to_tcp
                             )[:3, :3]
                         )
-        scene = state.payload.copy()
-        scene.clearance_query_enabled = not getattr(self, "verification_raw", False)
+        # A motion that lays no wire and turns no table leaves the scene as it is.
+        changes = any(
+            edge.kind in {"DRAW", "INDEX_TURN"}
+            for motion in motions.values()
+            for edge in motion.proposal.payload.edges
+        )
+        enabled = not getattr(self, "verification_raw", False)
+        scene = (
+            state.payload
+            if not changes and state.payload.clearance_query_enabled == enabled
+            else state.payload.copy()
+        )
+        scene.clearance_query_enabled = enabled
         if self.turntable is not None and not deposit_only and not untimed:
             from .turntable import audit_indexed_clock
 

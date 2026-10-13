@@ -362,8 +362,8 @@ verification; wireframe generation (under a minute) is not included.
 | Cube | 39 | 50.0 s | 26.3 s | 50.5 s | 133.9 s | 5.1 GB |
 | Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
 | Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 17.0 s | 5.2 s | 9.2 s | 34.6 s | 9.1 GB |
-| Palace, 8 mm feature (24 workers) | 366 | 58.0 s | 20.5 s | 25.6 s | 117.4 s | 11.5 GB |
+| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 6.1 s | 3.2 s | 8.8 s | 21.3 s | 6.6 GB |
+| Palace, 8 mm feature (24 workers) | 366 | 18.6 s | 8.3 s | 18.6 s | 59.1 s | 9.2 GB |
 
 The cube, branching shape and Palace were measured on 2026-10-13 with the
 current code. The other five date from 2026-10-12, before the material

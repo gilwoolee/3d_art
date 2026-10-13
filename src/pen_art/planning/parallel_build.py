@@ -524,7 +524,7 @@ def _journal(context, index, clock, table_index):
     )
     if failure:
         raise ValueError(f"Deposition could not be derived: {failure}")
-    return _merged(build.planner, operations)
+    return operations
 
 
 def _propose(context, spec, seconds):
@@ -583,6 +583,9 @@ def _propose(context, spec, seconds):
             clock = move.payload
         started = perf_counter()
         operations = _journal(context, index, clock, table_index)
+        if local is not None:
+            local["deposits"] = [row for op in operations if op[0] == "add" for row in op[1]]
+        operations = _merged(planner, operations)
         seconds["predicted_deposit"] += perf_counter() - started
         key = deposit_key(operations)
         from .material_journal import write_journal

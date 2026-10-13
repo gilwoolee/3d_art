@@ -13,8 +13,8 @@ library, no adaptation failure and no timing rejection.
 
 | Object | Actions | Start of 2026-10-13 (16 workers) | Now (24 workers) |
 | --- | ---: | ---: | ---: |
-| Palace, 8 mm feature | 366 | 937.0 s | 117.4 s |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 34.6 s |
+| Palace, 8 mm feature | 366 | 937.0 s | 59.1 s |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 21.3 s |
 
 The Palace by stage, as each change landed:
 
@@ -36,6 +36,7 @@ The Palace by stage, as each change landed:
 | Library coverage survey moved to a worker (it only informs the report) | 24 | 11 s | 77 s | 46 s | 32 s | 169.8 s |
 | Closed-form path clock; no second tip-speed audit of drawing | 24 | 11 s | 77 s | 31 s | 33 s | 156.8 s |
 | One path piece per straight member; pen checked as spheres at spaced poses | 24 | 11 s | 58 s | 21 s | 26 s | 117.4 s |
+| Proof context hashed once; pre-validated library records; joint positions solved only at member ends; predicted wire reused | 24 | 11 s | 19 s | 8 s | 19 s | 59.1 s |
 
 Thirty-two workers were tried and do not help: Palace 301 s against 281 s with
 24 at the same code state, because the machine has 24 cores. Memory is not the
@@ -80,7 +81,40 @@ The check stage is still 247 s of worker time; what remains is the contact
 checks at corners, approach and withdrawal, and bookkeeping around them.
 Full replay (`--full-replay`) also verifies the branching shape (39.3 s).
 
-Runs: `runs/geomfirst_gf37_{palace,branching}_w24` (current),
+### Bookkeeping removed (2026-10-13, later)
+
+A profile of every worker job showed that about a third of planning's worker
+time was not planning. Four changes, the first two of which change no result:
+
+- **Proof context hashed once.** Every proof lookup or save re-serialised and
+  hashed the whole planning context (cell profile, all source actions, tool,
+  settings): 5,859 calls at 0.11 s. The planner now returns the same frozen
+  context object while nothing it depends on has changed, and the store keeps
+  its text (`FrozenContext`). Proof keys are byte-identical. This had been
+  counted as "source coverage", "timing audit" and "material validation".
+- **Pre-validated library records.** A lookup parsed 3-55 MB JSON files and
+  re-validated them, about two per action. The part planning reads is now kept
+  validated beside the index (`index/*.selected.pkl`, bound to the original
+  file's hash and this module's source) and loads in 7-25 ms.
+- **Joint positions solved only at member ends.** Adaptation solved 66 points
+  per action and the planner then discarded most of them. It now solves member
+  ends and corners, and a member's middle only where its tool path would leave
+  tolerance. This changes the joint paths slightly.
+- **Predicted wire reused.** Withdrawal planning reuses the wire enclosures
+  computed when the deposit was predicted, and a transit that lays no wire no
+  longer copies the scene.
+
+Palace worker time by job, before and after: propose 646 s to 173 s (lookup
+370 s to 48 s, adaptation 232 s to 53 s), check 340 s to 171 s, connect 267 s
+to 51 s, timing 471 s to 185 s. Print time is unchanged (8,277 s). The first
+run after an edit to `motion_library.py` rebuilds the index and the record
+cache once (about 40 s).
+
+What is left of the Palace's 59 s: setup 11 s, path 19 s, timing 8 s,
+export 2 s, verification 19 s.
+
+Runs: `runs/geomfirst_gf39_{palace,branching}_w24` (current),
+`runs/geomfirst_gf37_*_w24` (member pieces, before the bookkeeping changes),
 `runs/geomfirst_gf33_*_w24` (a piece per path sample),
 `runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf26` (steps).
 The stage breakdown further down was taken at the 242.2 s step.

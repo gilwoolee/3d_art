@@ -31,3 +31,15 @@ def test_local_drawing_proofs_survive_travel_but_keep_scopes_and_changes(tmp_pat
     store.admit(context, local, 'invariant_path', {'status': 'CERTIFIED_MODELED_PATH'})
     assert store.get(context, full, 'invariant_path') is None
     assert store.get(context, full, 'pen_invariant_path') is None
+
+    # A context its owner froze is hashed once and yields the identical key,
+    # also when it is one part of a larger context.
+    from pen_art.planning.path_certificates import FrozenContext
+
+    keys = PathCertificateStore(tmp_path / "keys")
+    inner = {"limits": np.array([1.5, 2.0]), "nested": {"b": 1, "a": (2, 3)}, "z": None}
+    row = {"edges": [], "metadata": {}}
+    for build in (lambda c: c, lambda c: {"invariants": c, "source_points_m": np.eye(3)}):
+        plain, frozen = build(dict(inner)), build(FrozenContext(inner))
+        assert keys.key(plain, row, "joint_speed") == keys.key(frozen, row, "joint_speed")
+        assert keys.key(frozen, row, "joint_speed") == keys.key(frozen, row, "joint_speed")

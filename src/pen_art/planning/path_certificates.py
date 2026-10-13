@@ -1,5 +1,6 @@
 """Exact checked-path proofs; growing-material validation is never implied."""
 
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -36,6 +37,29 @@ def _canonical(value):
         raise TypeError(f"Unsupported certificate value: {type(item).__name__}")
 
     return json.loads(json.dumps(value, default=convert, allow_nan=False, sort_keys=True))
+
+
+class FrozenContext(dict):
+    """A proof context its owner will not change, so its text is formed once."""
+
+    text = None
+
+
+def _context_text(context):
+    """Exactly ``json.dumps(_canonical(context), sort_keys=True)``, reusing frozen parts."""
+    if isinstance(context, FrozenContext):
+        if context.text is None:
+            context.text = json.dumps(_canonical(context), sort_keys=True, allow_nan=False)
+        return context.text
+    if (
+        isinstance(context, dict)
+        and all(isinstance(key, str) for key in context)
+        and any(isinstance(value, FrozenContext) for value in context.values())
+    ):
+        return "{" + ", ".join(
+            f"{json.dumps(key)}: {_context_text(context[key])}" for key in sorted(context)
+        ) + "}"
+    return json.dumps(_canonical(context), sort_keys=True, allow_nan=False)
 
 
 def drawing_binding(path_record, *, durations=True):
@@ -86,7 +110,7 @@ class PathCertificateStore:
             "policy": POLICY,
             "implementation": IMPLEMENTATION,
             "scope": scope,
-            "context_sha256": digest(_canonical(context)),
+            "context_sha256": hashlib.sha256(_context_text(context).encode()).hexdigest(),
             "path_sha256": digest(_canonical(
                 drawing_binding(path_record, durations=False)
                 if scope in {"source_coverage", "drawing_orientation"} and "edges" in path_record

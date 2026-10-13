@@ -446,8 +446,13 @@ class DrawingExperience:
                 return
             # Bound proposal effort independently of the teacher's search budget.
             # A populated library must leave time for ordinary planning fallback.
-            points, _ = flatten_curve(oriented, 0.00005, 0.003)
+            points, parameters = flatten_curve(oriented, 0.00005, 0.003)
             points = transform_points(points, self.table.build_transform(index))
+            members = (
+                points[np.isclose(parameters, np.round(parameters), atol=1e-12, rtol=0)]
+                if planner.settings.get("path_pieces") == "members"
+                else None
+            )
             # The retained seed can be much denser than the new source. Share
             # the explicit action allowance with realization instead of
             # clipping adaptation by the source's sample count.
@@ -489,6 +494,7 @@ class DrawingExperience:
                         planner.obstacles,
                         deadline=min(planner.deadline, monotonic() + share),
                         clearance_m=planner.margin,
+                        members=members,
                     )
                     if proposal is not None:
                         self.stats["cache_adaptation_backtracks"] += proposal[

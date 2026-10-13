@@ -9,6 +9,7 @@ continuous swept-motion checker, not a sampled collision acceptance test.
 import hashlib
 import json
 import os
+import pickle
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from dataclasses import asdict, dataclass, field, replace
@@ -682,7 +683,7 @@ def certify_fixed_orientation(arm, drawing, *, clock=None, deadline=float("inf")
 
 class PublishedRecord(dict):
     """Selected runtime payload retaining its original immutable evidence identity."""
-    __slots__ = ("published_digest",)
+    __slots__ = ("published_digest", "payload_digest")
 
 
 class MotionLibrary:
@@ -691,6 +692,7 @@ class MotionLibrary:
         self.historical = historical
         self.lazy = lazy and not historical
         self._selected_records = OrderedDict()
+        self._file_hashes = {}
         (self.directory / "motions").mkdir(parents=True, exist_ok=True)
         (self.directory / "attempts").mkdir(parents=True, exist_ok=True)
         self.records = []
@@ -796,27 +798,55 @@ class MotionLibrary:
         from ..io import sha256
 
         path = self.directory / "motions" / lazy["file"]
-        # Check the original bytes even when a selected object is already cached.
-        if sha256(path) != lazy["file_sha256"]:
+        # Check the original bytes even when a selected object is already
+        # cached; an unchanged file (same size and modification time) is hashed
+        # once per process.
+        stat = path.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
+        if self._file_hashes.get(path, (None,))[0] != signature:
+            self._file_hashes[path] = (signature, sha256(path))
+        if self._file_hashes[path][1] != lazy["file_sha256"]:
             raise ValueError("Stale selected motion record")
         key = lazy["record_digest"]
         if key in self._selected_records:
             self._selected_records.move_to_end(key)
             return self._selected_records[key]
-        envelope = json.loads(path.read_text())
-        full = envelope["record"]
-        # The file's bytes were just checked against the index, which also
-        # names this digest; re-serializing megabytes to recompute it per
-        # lookup cost more than the lookup.
-        if envelope["digest"] != key:
-            raise ValueError("Corrupt selected motion record")
-        self._validate_record(full)
-        # Historical scenes and duplicate validation clocks remain in the
-        # original evidence file, rather than every planning worker.
-        full = PublishedRecord({name: value for name, value in full.items() if name != "scene"})
+        # The part of a record that planning reads, validated once and kept
+        # beside the index. It is bound to the original file's bytes, checked
+        # above, and to this module's source; anything else is rebuilt.
+        selected_path = self.directory / "index" / f"{path.name}.selected.pkl"
+        binding = ("selected-motion-v1", lazy["file_sha256"], key, ADMISSION_IMPLEMENTATION)
+        full = None
+        try:
+            stored = pickle.loads(selected_path.read_bytes())
+            if stored[0] == binding:
+                full = PublishedRecord(stored[1])
+                full.payload_digest = stored[2]
+        except (OSError, ValueError, TypeError, IndexError, EOFError, pickle.UnpicklingError):
+            pass
+        if full is None:
+            envelope = json.loads(path.read_text())
+            full = envelope["record"]
+            # The file's bytes were just checked against the index, which also
+            # names this digest; re-serializing megabytes to recompute it per
+            # lookup cost more than the lookup.
+            if envelope["digest"] != key:
+                raise ValueError("Corrupt selected motion record")
+            self._validate_record(full)
+            # Historical scenes and duplicate validation clocks remain in the
+            # original evidence file, rather than every planning worker.
+            full = PublishedRecord(
+                {name: value for name, value in full.items() if name != "scene"}
+            )
+            full["validation"] = {name: value for name, value in full["validation"].items()
+                                  if name != "clock_record"}
+            full.payload_digest = digest(full)
+            temporary = selected_path.with_name(
+                f".{selected_path.name}.{os.getpid()}.{time_ns()}.tmp"
+            )
+            temporary.write_bytes(pickle.dumps((binding, dict(full), full.payload_digest), 5))
+            temporary.replace(selected_path)
         full.published_digest = key
-        full["validation"] = {name: value for name, value in full["validation"].items()
-                              if name != "clock_record"}
         self._selected_records[key] = full
         while len(self._selected_records) > SELECTED_RECORDS:
             self._selected_records.popitem(last=False)
@@ -1226,12 +1256,21 @@ class MotionLibrary:
             record, request, arm, obstacles, deadline=deadline, clearance_m=clearance_m
         )
 
-    def adapt(self, record, request, arm, obstacles, *, deadline, clearance_m=0.001):
+    def adapt(
+        self, record, request, arm, obstacles, *, deadline, clearance_m=0.001, members=None
+    ):
+        """Adapt a record to ``request``. ``members`` lists the ends of the
+        source's straight members; given them, joint positions are solved only
+        there and where a member's tool path would otherwise leave tolerance.
+        """
         if self.historical:
             raise ValueError("Historical libraries cannot adapt motion proposals")
-        self._validate_record(record)
+        if getattr(record, "payload_digest", None) is None:
+            # A selected record was validated when its payload was prepared.
+            self._validate_record(record)
         proposal = self._adapt(
-            record, request, arm, obstacles, deadline=deadline, clearance_m=clearance_m
+            record, request, arm, obstacles, deadline=deadline, clearance_m=clearance_m,
+            members=members,
         )
         if (
             proposal is None
@@ -1241,12 +1280,13 @@ class MotionLibrary:
         ):
             proposal = self._adapt(
                 record, request, arm, obstacles, deadline=deadline,
-                clearance_m=clearance_m, compact_seed=False,
+                clearance_m=clearance_m, compact_seed=False, members=members,
             )
         return proposal
 
     def _adapt(
-        self, record, request, arm, obstacles, *, deadline, clearance_m=0.001, compact_seed=True
+        self, record, request, arm, obstacles, *, deadline, clearance_m=0.001, compact_seed=True,
+        members=None,
     ):
         """Trim or extend in physical stroke distance, then locally project IK.
 
@@ -1327,6 +1367,26 @@ class MotionLibrary:
             else original_rotation
         )
         edge_checks = getattr(self, "adaptation_edge_checks", True)
+        # ``points`` and ``seeds`` are the points being solved; ``spare`` holds
+        # the dense samples left out, to be put back where a member must split.
+        dense_points, dense_seeds = points, seeds
+        if members is not None:
+            members = np.asarray(members, float).reshape(-1, 3)
+            steps = np.diff(dense_points, axis=0)
+            lengths = np.linalg.norm(steps, axis=1)
+            directions = steps / np.maximum(lengths, 1e-300)[:, None]
+            turning = np.linalg.norm(np.diff(directions, axis=0), axis=1) > 1e-7
+            keep = np.r_[True, turning, True] | (
+                np.min(
+                    np.linalg.norm(dense_points[:, None, :] - members[None, :, :], axis=2), axis=1
+                )
+                < 1e-7
+            )
+            solved = np.flatnonzero(keep).tolist()
+        else:
+            solved = list(range(len(dense_points)))
+        points = [dense_points[index] for index in solved]
+        seeds = [dense_seeds[index] for index in solved]
 
         def candidates(i, previous, wide):
             """Joint candidates for point ``i``; ``wide`` searches harder for alternatives."""
@@ -1414,6 +1474,16 @@ class MotionLibrary:
             if selected is not None:
                 path.append(selected)
                 continue
+            if stage == "tracking" and i > 0 and solved[i] - solved[i - 1] > 1:
+                # A member too long to track as one piece: solve its middle too.
+                middle = (solved[i - 1] + solved[i]) // 2
+                solved.insert(i, middle)
+                points.insert(i, dense_points[middle])
+                seeds.insert(i, dense_seeds[middle])
+                banned.pop(i, None)
+                if furthest["point"] >= i:
+                    furthest["point"] += 1
+                continue
             if i >= furthest["point"]:
                 furthest = {"point": i, "stage": stage, "candidates": tried}
             if (
@@ -1445,7 +1515,7 @@ class MotionLibrary:
             "status": "SAMPLED_DRAWING_PATH",
             "arm": arm.identity,
             "positions": np.asarray(path).tolist(),
-            "tcp_targets_m": points.tolist(),
+            "tcp_targets_m": np.asarray(points).tolist(),
             "tcp_rotation": (
                 rotation
                 if rotation is not None
@@ -1458,7 +1528,7 @@ class MotionLibrary:
             "tracking_status": "BOUNDED",
             "adaptation_backtracks": backtracks,
             "table_index": request.table_index,
-            "motion_library_parent": digest(record),
+            "motion_library_parent": getattr(record, "payload_digest", None) or digest(record),
             "variant": "cache-adapted",
             "drawing_policy": DRAWING_POLICY_VERSION,
             "adaptation_seed_points": len(old_q),
