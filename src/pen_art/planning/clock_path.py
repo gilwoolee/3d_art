@@ -350,6 +350,8 @@ def timed_path(
     acceleration_constraint="interpolated",
     drawing_capture=None,
     drawing_reuse=None,
+    grid_samples=101,
+    grid_midpoints=True,
 ):
     """Analytically time checked edges without changing their geometric sweep.
 
@@ -395,6 +397,8 @@ def timed_path(
                     sample_output=False,
                     path=path,
                     continuous_acceleration=acceleration_constraint == "cubic_bernstein",
+                    grid_samples=grid_samples,
+                    grid_midpoints=grid_midpoints,
                 )
                 timed = {
                     "positions": q,

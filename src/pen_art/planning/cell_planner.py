@@ -1269,6 +1269,8 @@ class CellPlanner:
             self.timing["travel_speed_m_s"],
             drawing_clock=self.timing.get("drawing_clock", "quintic_stop_at_geometric_knots"),
             acceleration_constraint=self.timing.get("acceleration_constraint", "interpolated"),
+            grid_samples=self.timing.get("retiming_grid_samples", 101),
+            grid_midpoints=self.timing.get("retiming_grid_midpoints", True),
             **reuse,
         )
 

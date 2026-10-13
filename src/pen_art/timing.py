@@ -245,7 +245,13 @@ def retime_operation(
     sample_output=True,
     path=None,
     continuous_acceleration=False,
+    grid_samples=101,
+    grid_midpoints=True,
 ):
+    """Time one path. Every spline knot is a clock knot; ``grid_midpoints`` and
+    ``grid_samples`` uniformly spaced values add resolution between them. A
+    coarser grid can only lengthen the clock: the exact bounds below rescale it.
+    """
     if path is None:
         path = make_path(operation["positions"], operation["tcp_path_m"])
     deviation = check_position_limits(path, robot.lower, robot.upper)
@@ -254,7 +260,11 @@ def retime_operation(
     # tiny differences can amplify solver roundoff into enormous accelerations.
     # Keep every original knot, adding extra samples only when well separated.
     grid = list(knots)
-    for value in np.r_[(knots[:-1] + knots[1:]) / 2, np.linspace(0, 1, 101)]:
+    extra = np.r_[
+        (knots[:-1] + knots[1:]) / 2 if grid_midpoints else [],
+        np.linspace(0, 1, grid_samples) if grid_samples else [],
+    ]
+    for value in extra:
         if min(abs(value - present) for present in grid) > 1e-10:
             grid.append(float(value))
     grid = np.sort(grid)

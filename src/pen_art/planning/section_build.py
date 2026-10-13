@@ -252,6 +252,7 @@ class SectionBuild:
         geometry_first=False,
         adaptation_waypoint_checks=False,
         merge_deposits_m=0.0,
+        retiming_grid="full",
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -269,6 +270,11 @@ class SectionBuild:
             settings["merge_deposits_m"] = merge_deposits_m
         timing = yaml.safe_load(Path("configs/timing_continuous_bounded.yaml").read_text())
         timing.pop("target_seconds", None)
+        if retiming_grid != "full":
+            # Clock knots between spline knots: none, or one midpoint each.
+            timing.update(
+                retiming_grid_samples=0, retiming_grid_midpoints=retiming_grid == "midpoints"
+            )
         self.planner = CellPlanner(
             run, profile, settings, monotonic() + maximum_seconds, timing_override=timing
         )
@@ -1168,6 +1174,14 @@ def main():
         help="Check new drawings as untimed paths and time them after the whole chain passes",
     )
     parser.add_argument(
+        "--retiming-grid",
+        choices=("full", "midpoints", "knots"),
+        default="full",
+        help="Clock resolution for new drawings: every spline knot plus midpoints and 101 "
+        "samples per part (full), knots and midpoints, or knots only. Coarser grids time "
+        "and audit faster and draw slightly slower",
+    )
+    parser.add_argument(
         "--merge-deposits-um",
         type=float,
         default=0.0,
@@ -1217,6 +1231,7 @@ def main():
         geometry_first=args.geometry_first,
         adaptation_waypoint_checks=args.adaptation_waypoint_checks,
         merge_deposits_m=args.merge_deposits_um * 1e-6,
+        retiming_grid=args.retiming_grid,
     )
     try:
         build.run_build(
