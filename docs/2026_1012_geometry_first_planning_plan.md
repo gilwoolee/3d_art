@@ -91,13 +91,15 @@ Three things made them buildable:
 
 Limits of these two results:
 
-- The branching shape sags 2.9 mm in the linear frame model, over the 1 mm
-  limit, so the planner rejects it (`GOAL_STRUCTURE_REJECTED`) with the default
-  settings. The verified build above uses a source whose limit was raised to
-  3 mm for the experiment (`runs/geomfirst_branching_f8_l3_sag3_source`). The
-  material constants are uncalibrated placeholders; whether to brace the shape,
-  thicken the strand or change the limit is undecided. The Palace passes at the
-  default limit (0.33 mm).
+- The branching shape failed the structural screen with a 1 mm strand (2.9 mm
+  sag with the old 1 GPa placeholder; 1.2 mm as 3D pen PLA at 2.5 GPa, typical
+  and not measured). Denser zigzags, bed props and a thicker trunk did not fix
+  it; a heavier strand everywhere does. `prepare_framework` now regenerates a
+  failing frame with each strand in `wireprint.heavier_strands_m` (default
+  1.5 mm, a tip not yet on hand) and records `strand_escalation`. With defaults
+  the branching shape becomes a 1.5 mm frame sagging 0.54 mm and builds
+  `FULL_BUILD_VERIFIED` in 237.2 s (`runs/geomfirst_gf15_branching_w16`). The
+  tool nose geometry is still the 1 mm estimate. The Palace passes with 1 mm.
 - Both need a requested layer height of 3 mm. From the default 10 mm request the
   refinement overshoots (Palace 0.9 mm layers, 852 actions).
 - The Palace build ran on the wireframe from one commit earlier, which differs

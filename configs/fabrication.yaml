@@ -6,6 +6,9 @@ wireprint:
   maximum_descent_angle_deg: 27.0
   layer_height: 0.01
   zigzag_spacing: 0.025
+  # Tried in order when the frame fails the structural screen. Assumes a
+  # 1.5 mm tip for the pen, which is not yet on hand.
+  heavier_strands_m: [0.0015]
 graph:
   strand_diameter_m: 0.001
   junction_tolerance_m: 0.00075

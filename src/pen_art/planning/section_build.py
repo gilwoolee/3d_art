@@ -145,6 +145,13 @@ def prepare_candidates(run):
     )
 
 
+def _sag(screen):
+    return {
+        "modeled_pass": screen["modeled_pass"],
+        "maximum_displacement_m": screen.get("maximum_displacement_m"),
+    }
+
+
 def prepare_framework(source, run, profile, wir3d_budget=None):
     from ..abstraction.hybrid import attach_style, select_printable_style
     from ..abstraction.wir3d_adapter import import_curves
@@ -157,17 +164,39 @@ def prepare_framework(source, run, profile, wir3d_budget=None):
             source / "fabrication_config.json",
             yaml.safe_load(Path("configs/fabrication.yaml").read_text()),
         )
-    graph = connect_framework_islands(generate(source))
-    material = read_json(source / "fabrication_config.json")["structure"]
-    initial_screen = analyze_structure(graph, material)
-    if not initial_screen["modeled_pass"] and "maximum_displacement_m" in initial_screen:
-        graph = reinforce_base(
-            graph,
-            {
-                "initial_maximum_displacement_m": initial_screen["maximum_displacement_m"],
-                "initial_maximum_stress_pa": initial_screen["maximum_stress_pa"],
-            },
-        )
+    fabrication = read_json(source / "fabrication_config.json")
+    material = fabrication["structure"]
+
+    def framework(**settings):
+        graph = connect_framework_islands(generate(source, **settings))
+        screen = analyze_structure(graph, material)
+        if not screen["modeled_pass"] and "maximum_displacement_m" in screen:
+            graph = reinforce_base(
+                graph,
+                {
+                    "initial_maximum_displacement_m": screen["maximum_displacement_m"],
+                    "initial_maximum_stress_pa": screen["maximum_stress_pa"],
+                },
+            )
+            screen = analyze_structure(graph, material)
+        return graph, screen
+
+    graph, screen = framework()
+    # A frame that still fails is regenerated with each heavier strand the pen
+    # can lay, lightest first. The strand diameter is also the wire's collision
+    # size. Nothing passing leaves the original for the planner to reject.
+    tried = [{"strand_diameter_m": graph["generation"]["strand_diameter_m"], **_sag(screen)}]
+    for diameter in fabrication.get("wireprint", {}).get("heavier_strands_m", []):
+        if screen["modeled_pass"]:
+            break
+        heavier, screen = framework(diameter=diameter)
+        tried.append({"strand_diameter_m": diameter, **_sag(screen)})
+        if screen["modeled_pass"]:
+            graph = heavier
+    if len(tried) > 1:
+        if not screen["modeled_pass"]:
+            graph, _ = framework()
+        graph["strand_escalation"] = tried
     write_json(source / "framework_graph.json", graph)
     if wir3d_budget is not None:
         curves = import_curves(
