@@ -314,7 +314,7 @@ triggers re-planning. The flag implies merged wire capsules
 ```bash
 .venv/bin/python scripts/benchmark_parallel_build.py \
   --source-run runs/the_source --profile path/to/profile.yaml \
-  --output runs/new_build --workers 24 --build-option=--geometry-first \\
+  --output runs/new_build --workers 24 --build-option=--geometry-first \
   --verification-option=--accept-geometry-proofs
 ```
 
