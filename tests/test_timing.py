@@ -164,3 +164,79 @@ def test_whole_action_vertex_hold_preserves_spline_and_counts_feed_lags(tmp_path
     after = restored.edges[restored.edges.index(holds[-1]) + 1]
     assert abs(before.piece().polynomials[0].deriv()(1)) < 1e-8
     assert abs(after.piece().polynomials[0].deriv()(0)) < 1e-8
+
+
+def test_timing_must_sweep_exactly_the_checked_geometric_path(tmp_path):
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    from pen_art.planning.clock_path import ClockPath, timed_path
+    from pen_art.planning.geometric_path import geometric_path, same_sweep
+
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text("""<robot name="two">
+      <link name="base"/><link name="upper"/><link name="flange"/>
+      <joint name="a" type="revolute"><parent link="base"/><child link="upper"/>
+      <axis xyz="0 0 1"/><limit lower="-2" upper="2" velocity="1" effort="1"/></joint>
+      <joint name="b" type="revolute"><parent link="upper"/><child link="flange"/>
+      <origin xyz="0.2 0 0"/><axis xyz="0 0 1"/>
+      <limit lower="-2" upper="2" velocity="1" effort="1"/></joint>
+    </robot>""")
+    offset = np.eye(4)
+    offset[0, 3] = 0.2
+    arm = SimpleNamespace(robot=SerialArm(urdf), flange_to_tcp=offset)
+    # The second joint reverses inside the drawing, so the sweep is not monotone.
+    drawing = np.column_stack([np.linspace(0.1, 0.9, 9), 0.4 + 0.3 * np.sin(np.linspace(0, 3, 9))])
+    corner = arm.robot.forward(drawing[4], offset)[:3, 3]
+    operations = [
+        {"kind": "TRAVEL", "positions": [[0.0, 0.2], [0.05, 0.3], drawing[0]]},
+        {"kind": "PEN_START_WAIT", "positions": [drawing[0]], "hold_s": 0.2, "contact_m": corner},
+        {"kind": "JOIN", "positions": [drawing[0]], "hold_s": 0.0, "contact_m": corner},
+        {
+            "kind": "DRAW",
+            "positions": drawing,
+            "stroke_id": "stroke",
+            "material_radius_m": 0.0005,
+            "break_indices": [4],
+            "vertex_holds": {4: {"contact_m": corner, "duration_s": 1.0}},
+            "start_lag_s": 0.2,
+            "stop_lag_s": 0.2,
+        },
+        {"kind": "WITHDRAW", "positions": [drawing[-1], [1.0, 0.3]], "contact_m": corner},
+    ]
+    timed = timed_path(
+        deepcopy(operations), arm, np.array([0.4, 0.4]), np.array([0.5, 0.5]), 0.02, 0.05,
+        drawing_clock="cubic_toppra",
+    )
+    geometric = geometric_path(deepcopy(operations), arm, drawing_clock="cubic_toppra")
+    verdict = same_sweep(geometric, timed)
+    assert verdict["status"] == "SAME_SWEEP", verdict
+    drawn = [edge for edge in geometric.edges if edge.coefficients is not None]
+    # Sixteen cubic pieces replace several hundred retiming intervals.
+    assert len(drawn) == 16 and verdict["timed_edges"] > 10 * verdict["geometric_edges"]
+    assert verdict["maximum_difference_rad"] < 1e-9
+    # Both describe the same configurations at every piece boundary.
+    np.testing.assert_allclose(drawn[0].q0, drawing[0], atol=1e-12)
+    np.testing.assert_allclose(drawn[-1].q1, drawing[-1], atol=1e-12)
+
+    def altered(change):
+        edges = [deepcopy(edge) for edge in timed.edges]
+        edges = change(edges) or edges
+        return same_sweep(geometric, ClockPath(edges))["status"]
+
+    index = next(i for i, edge in enumerate(timed.edges) if edge.coefficients is not None)
+
+    def bend(edges):
+        edges[index + 3].coefficients[1][2] += 1e-6
+
+    def reverse(edges):
+        edges[index + 3].coefficients = [row[:1] + [-c for c in row[1:]] for row in
+                                         edges[index + 3].coefficients]
+
+    def move_travel(edges):
+        edges[0].q1 = edges[0].q1 + 1e-9
+
+    for change in (bend, reverse, move_travel, lambda edges: edges[:index + 5] + edges[index + 6:],
+                   lambda edges: edges[:-1]):
+        assert altered(change) == "SWEEP_MISMATCH"
+    assert same_sweep(timed, timed)["reason"] == "not_a_geometric_path"
