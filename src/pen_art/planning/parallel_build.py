@@ -891,6 +891,12 @@ def _time(context, spec, seconds):
     }
 
 
+def _survey_coverage():
+    experience = _CONTEXT["model"].experience
+    experience.cache_coverage()
+    return experience._coverage_snapshot
+
+
 def run_job(spec):
     """Execute one job in a worker; a failure is a result, never an exception."""
     from collections import Counter
@@ -1307,6 +1313,20 @@ def run_parallel_forward(
         pool = ProcessPoolExecutor(max_workers=workers, mp_context=get_context("fork"))
         pools.append(pool)
         return lambda spec: pool.submit(run_job, spec)
+
+    # How well the library covers this object only informs the report. Survey it
+    # on a worker so neither start-up nor the coordinator waits for it.
+    experience = context["model"].experience
+    if experience is not None and getattr(experience, "_coverage_snapshot", None) is None:
+        experience._coverage_pending = {"status": "SURVEY_RUNNING"}
+        start_pool()
+
+        def surveyed(future):
+            if future.exception() is None:
+                experience._coverage_snapshot = future.result()
+                experience._coverage_pending = None
+
+        pools[-1].submit(_survey_coverage).add_done_callback(surveyed)
 
     def submit(spec):
         # Forked on first use, and again after the replay released the workers.

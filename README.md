@@ -352,15 +352,15 @@ verification; wireframe generation (under a minute) is not included.
 | Cube | 39 | 50.0 s | 26.3 s | 50.5 s | 133.9 s | 5.1 GB |
 | Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
 | Vase, outer shell only | 57 | 89.6 s | 30.2 s | 67.6 s | 216.3 s | 5.3 GB |
-| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 24.2 s | 16.4 s | 13.8 s | 62.7 s | 9.6 GB |
-| Palace, 8 mm feature (24 workers) | 366 | 77.0 s | 45.3 s | 32.2 s | 185.4 s | 13.0 GB |
+| Branching shape, 8 mm feature, 1.5 mm strand (24 workers) | 151 | 25.4 s | 16.5 s | 12.9 s | 58.8 s | 9.2 GB |
+| Palace, 8 mm feature (24 workers) | 366 | 76.6 s | 45.5 s | 32.3 s | 169.8 s | 11.8 GB |
 
 The cube, branching shape and Palace were measured on 2026-10-13 with the
 current code. The other five date from 2026-10-12, before the material
 stiffness change, the wireframe generator fixes and the three speed-ups of
 2026-10-13 (progress-report throttle, build-order screens on the workers,
 lighter library lookup); their wireframes are unchanged by those fixes. Totals
-include setup (27 s for the Palace). The Palace and branching rows use 24
+include setup (11 s for the Palace). The Palace and branching rows use 24
 workers and the code of late 2026-10-13; the cube row predates that day's later
 speed-ups. What the pipeline does to be fast, where the time goes and what
 limits it:

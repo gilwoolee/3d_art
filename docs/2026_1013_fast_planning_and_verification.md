@@ -13,8 +13,8 @@ library, no adaptation failure and no timing rejection.
 
 | Object | Actions | Start of 2026-10-13 (16 workers) | Now (24 workers) |
 | --- | ---: | ---: | ---: |
-| Palace, 8 mm feature | 366 | 937.0 s | 185.4 s |
-| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 62.7 s |
+| Palace, 8 mm feature | 366 | 937.0 s | 169.8 s |
+| Branching shape, 8 mm feature, 1.5 mm strand | 151 | 237.2 s | 58.8 s |
 
 The Palace by stage, as each change landed:
 
@@ -33,6 +33,7 @@ The Palace by stage, as each change landed:
 | Verification report keeps only the final deformed shape (1.2 GB to 8 MB) | 24 | 27 s | 77 s | 43 s | 66 s | 217.1 s |
 | Verification accepts the pen proof; arm links checked against one envelope | 24 | 27 s | 76 s | 45 s | 51 s | 203.8 s |
 | Verification accepts planning's structural screens; faster clock parsing | 24 | 27 s | 77 s | 45 s | 32 s | 185.4 s |
+| Library coverage survey moved to a worker (it only informs the report) | 24 | 11 s | 77 s | 46 s | 32 s | 169.8 s |
 
 Thirty-two workers were tried and do not help: Palace 301 s against 281 s with
 24 at the same code state, because the machine has 24 cores. Memory is not the
@@ -42,7 +43,7 @@ stages of that run are a clean comparison (162 s against 161 s).
 
 Twenty-four workers is the setting to use on this machine.
 
-Runs: `runs/geomfirst_gf30_{palace,branching}_w24` (current),
+Runs: `runs/geomfirst_gf32_{palace,branching}_w24` (current),
 `runs/geomfirst_gf21_*_w32` (32 workers), `runs/geomfirst_gf14`-`gf26` (steps).
 The stage breakdown further down was taken at the 242.2 s step.
 
@@ -259,6 +260,9 @@ these. The Palace needs nearly all of them to land at the upper end of their
 ranges, which would put it around 60-90 s; a firm 60 s also needs either more
 cores or fewer actions. Time is close to linear in the action count (0.59 s per
 action now), and the Palace has 366 because its layers are 2.1 mm.
+
+Research on making collision checking and timing near-instant, with sources:
+[collision and timing research](2026_1013_collision_and_timing_research.md).
 
 ## Bottlenecks and what could remove them
 

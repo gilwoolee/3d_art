@@ -221,14 +221,10 @@ class DrawingExperience:
         self.checkpoint_hash = (
             None if build.diffusion_checkpoint is None else sha256(build.diffusion_checkpoint)
         )
-        coverage = self.cache_coverage()
-        missing = coverage["zigzags_without_usable_seeds"]
-        print(
-            f"Motion cache: {len(self.library.records)} records; "
-            f"{len(missing)} whole zigzag actions without matching-context seeds"
-            + (f" ({', '.join(missing)})" if missing else ""),
-            flush=True,
-        )
+        # The coverage survey compares every action with every record. It only
+        # informs the report, so it is left to the first report instead of
+        # delaying the start of planning.
+        print(f"Motion cache: {len(self.library.records)} records", flush=True)
 
     @staticmethod
     def scene_record(scene):
@@ -783,7 +779,8 @@ class DrawingExperience:
             "checkpoint_sha256": self.checkpoint_hash,
             "counts": dict(self.stats),
             "seconds": dict(self.seconds),
-            "cache_coverage": self.cache_coverage(),
+            # A parallel build surveys coverage on a worker and reports it when ready.
+            "cache_coverage": getattr(self, "_coverage_pending", None) or self.cache_coverage(),
             "clearance_hits": sum(wrapper.hits for wrapper in self.wrappers),
             "clearance_misses": sum(wrapper.misses for wrapper in self.wrappers),
             "self_static_seconds": sum(
