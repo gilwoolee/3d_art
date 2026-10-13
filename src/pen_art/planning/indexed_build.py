@@ -231,7 +231,14 @@ class IndexedMotions:
         check = getattr(self.build, "progressive_structure", None)
         if check is None:
             return True  # Small synthetic callback fixtures have no structure model.
-        report = check(row, drawing, predecessor)
+        if self.build.planner.settings.get("structural_check", "action") != "member":
+            # Screen the structure once per completed action. The member-by-
+            # member screen of a half-drawn action is opt-in.
+            if self.build.stable(set(predecessor) | {row["id"]}):
+                return True
+            report = {"status": "ACTION_STRUCTURE_REJECTED", "modeled_pass": False}
+        else:
+            report = check(row, drawing, predecessor)
         if report["modeled_pass"]:
             return True
         self.build.planner.failure(

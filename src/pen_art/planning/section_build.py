@@ -253,6 +253,7 @@ class SectionBuild:
         adaptation_waypoint_checks=False,
         merge_deposits_m=0.0,
         retiming_grid="full",
+        structural_check="action",
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -265,6 +266,8 @@ class SectionBuild:
         self.motion_runtime = None
         settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
         settings.update(maximum_subdivision_depth=20, collision_scope="pen_candidate")
+        if structural_check == "member":
+            settings["structural_check"] = "member"
         if merge_deposits_m:
             # Saved with the plan, so its verification models the wire identically.
             settings["merge_deposits_m"] = merge_deposits_m
@@ -1174,6 +1177,13 @@ def main():
         help="Check new drawings as untimed paths and time them after the whole chain passes",
     )
     parser.add_argument(
+        "--structural-check",
+        choices=("action", "member"),
+        default="action",
+        help="Screen the partial structure after every completed action (default), or "
+        "also after every wire member of a half-drawn action",
+    )
+    parser.add_argument(
         "--retiming-grid",
         choices=("full", "midpoints", "knots"),
         help="Clock resolution for new drawings: every spline knot plus midpoints and 101 "
@@ -1235,6 +1245,7 @@ def main():
         adaptation_waypoint_checks=args.adaptation_waypoint_checks,
         merge_deposits_m=args.merge_deposits_um * 1e-6,
         retiming_grid=args.retiming_grid,
+        structural_check=args.structural_check,
     )
     try:
         build.run_build(

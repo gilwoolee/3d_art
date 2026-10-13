@@ -443,17 +443,26 @@ def _replay_cell_body(
             deposited.append(frozenset(members))
             members.update(row["members"])
 
+        # Every completed action's structure is screened. Screening a half-drawn
+        # action after each of its members is opt-in, saved with the plan.
+        member_screens = planner.settings.get("structural_check", "action") == "member"
+        section_audits["structural_check"] = "member" if member_screens else "action"
+
         def structural(index):
             # Each section's member prefixes and release state depend only on
             # the ordered members before it, never on another section's verdict.
             row = sections[index]
-            prefixes = analyze_member_prefixes(
-                planner.graph,
-                material,
-                planner.actions[row["stroke_id"]],
-                deposited_members=set(deposited[index]),
-                reverse=row.get("reverse", False),
-                start_visit=row.get("start_visit", 0),
+            prefixes = (
+                analyze_member_prefixes(
+                    planner.graph,
+                    material,
+                    planner.actions[row["stroke_id"]],
+                    deposited_members=set(deposited[index]),
+                    reverse=row.get("reverse", False),
+                    start_visit=row.get("start_visit", 0),
+                )
+                if member_screens
+                else {"modeled_pass": True, "status": "MEMBER_PREFIXES_NOT_SCREENED"}
             )
             screen = analyze_structure(
                 planner.graph, material, edge_ids=deposited[index] | set(row["members"])

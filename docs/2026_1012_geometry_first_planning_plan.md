@@ -38,6 +38,13 @@ lengthened the modelled print by 18% and 36% because one leg per object stalled;
 with stalled legs retimed on a finer grid the cost is 3.5% on both. `--geometry-first` now implies
 `--merge-deposits-um 20 --retiming-grid knots`; both can be overridden.
 
+Verification overhead found by profiling: the report embeds every structural
+release state (36 MB for the bottle) and was rewritten after each collision
+chunk; progress writes now omit it (bottle collision stage 83 s to 16 s). By
+decision on 2026-10-12 the structure is screened once per completed action, not
+after every wire member (`--structural-check member` restores that): bottle
+verification 83 s to 38 s, cube 59 s to 46 s.
+
 Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
 (not in the original list). Open: G5 (verification still re-derives deposits and
 re-proves orientation on the timed plan), G7, the waypoint-only adaptation
