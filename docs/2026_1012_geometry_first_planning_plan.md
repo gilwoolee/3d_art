@@ -45,6 +45,21 @@ decision on 2026-10-12 the structure is screened once per completed action, not
 after every wire member (`--structural-check member` restores that): bottle
 verification 83 s to 38 s, cube 59 s to 46 s.
 
+Clean end-to-end runs with the current defaults (`--geometry-first`, 16 workers,
+per-action structural screen), all `FULL_BUILD_VERIFIED`, no adaptation
+failures, no timing rejections:
+
+| Object | Actions | Chain collision-free | Timing | Verification | Total | Peak memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cube | 39 | 56.2 s | 26.6 s | 47.4 s | 143.8 s | 4.6 GB |
+| Narrowed cube | 41 | 77.0 s | 26.3 s | 47.3 s | 166.6 s | 4.7 GB |
+| Triangular prism | 29 | 40.8 s | 14.0 s | 25.4 s | 88.3 s | 3.8 GB |
+| Torus | 27 | 71.0 s | 15.4 s | 36.0 s | 137.2 s | 4.1 GB |
+| Bottle | 55 | 51.3 s | 13.4 s | 37.8 s | 121.8 s | 5.6 GB |
+
+Not yet built: vase (slices to 119 actions), branching shape, Palace (its mesh
+has 253,000 open edges and fails slicing at fine layer heights).
+
 Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
 (not in the original list). Open: G5 (verification still re-derives deposits and
 re-proves orientation on the timed plan), G7, the waypoint-only adaptation
