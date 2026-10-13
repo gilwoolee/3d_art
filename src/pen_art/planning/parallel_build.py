@@ -1077,7 +1077,47 @@ def _summarize(coordinator, schedule, workers, phases):
     }
 
 
-def prepare_context(build, action_budget=240.0):
+_SCREENED = None
+
+
+def _screen_prefix(ids):
+    _SCREENED.stable(ids)
+    return _SCREENED.structure[ids]
+
+
+def _prescreen(build, workers):
+    """Screen the expected order's material prefixes on the workers.
+
+    The order search asks for one structural screen per step, each independent
+    of the others. This only fills the build's cache with the screens the
+    search will request if every step passes; the search itself is unchanged
+    and computes any other subset it turns out to need.
+    """
+    from .regression import greedy_forward_order
+
+    global _SCREENED
+    expected = greedy_forward_order(
+        build.actions.values(), build.planner.ground, lambda ids: True
+    )
+    if not expected:
+        return
+    built, prefixes = set(), []
+    for row in expected[:-1]:
+        built.add(row["id"])
+        if frozenset(built) not in build.structure:
+            prefixes.append(frozenset(built))
+    _SCREENED = build
+    try:
+        with ProcessPoolExecutor(max_workers=workers, mp_context=get_context("fork")) as pool:
+            for ids, screen in zip(
+                prefixes, pool.map(_screen_prefix, prefixes, chunksize=2), strict=True
+            ):
+                build.structure[ids] = screen
+    finally:
+        _SCREENED = None
+
+
+def prepare_context(build, action_budget=240.0, workers=1):
     """Fix the order, freeze the library and publish the state workers inherit."""
     from .indexed_build import IndexedMotions
     from .regression import greedy_forward_order
@@ -1085,6 +1125,8 @@ def prepare_context(build, action_budget=240.0):
     global _CONTEXT
     if build.gpu is not None:
         raise ValueError("Forked planning workers cannot share an initialized GPU backend")
+    if workers > 1:
+        _prescreen(build, workers)
     order = greedy_forward_order(
         build.actions.values(), build.planner.ground, build.stable, deadline=build.planner.deadline
     )
@@ -1132,7 +1174,7 @@ def run_parallel_forward(
     started = launched = perf_counter()
     phases = {}
     build.report("PARALLEL_FORWARD_ORDER_RUNNING")
-    context = prepare_context(build, action_budget)
+    context = prepare_context(build, action_budget, workers)
     if context is None:
         build.report(
             "SEARCH_TIME_BUDGET"

@@ -113,8 +113,16 @@ Limits of these two results:
   of the build order, 366 solves on one core), chain 293 s, timing 69 s,
   verification 179 s. Chain worker time per action: adapting the library path
   3.8 s, retrieving it 2.0 s, approach and withdraw 1.1 s, material validation
-  1.2 s, connection 0.9 s. Next candidates: the single-core setup screen and the
-  2 s retrieval from an 80-record library.
+  1.2 s, connection 0.9 s.
+- Both followed up the same day (`runs/geomfirst_gf17_*`). The order search's
+  per-step structural screens are computed ahead on the workers
+  (`parallel_build._prescreen`; the search is unchanged and computes any subset
+  it was not handed): Palace setup 155 s to 67 s, branching 26 s to 7 s. Library
+  lookup re-serialized each multi-megabyte record to recompute a digest the
+  file hash already covers, and kept only four records loaded; the redundant
+  digest is dropped and eight are kept: 2.0 s to 0.8 s per action. Totals:
+  Palace 573.6 s, branching 190.1 s, cube 133.9 s; peak memory up 0.2-0.5 GB.
+  The Palace's remaining 67 s of setup is not profiled.
 
 Status: G0-G4 and G6 done; G8 done as a selectable clock; merged capsules added
 (not in the original list). Open: G5 (verification still re-derives deposits and

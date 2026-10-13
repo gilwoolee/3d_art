@@ -30,6 +30,8 @@ ORIENTATION_LIMIT_RAD = 0.003
 ADAPTATION_STAGES = ("no_inverse_kinematics", "off_target", "tracking", "collision")
 # Closest a retained cached knot may lie to a request sample or to another one.
 SEED_SAMPLE_GAP_M = 0.0005
+# Loaded records each lookup keeps per process (about 14 MB apiece).
+SELECTED_RECORDS = 8
 # Total backing-up steps per candidate, and how far behind the furthest point.
 ADAPTATION_BACKTRACKS, ADAPTATION_BACKTRACK_DEPTH = 24, 8
 VALIDATOR_VERSION = "motion-clearance-lipschitz-v1"
@@ -801,7 +803,10 @@ class MotionLibrary:
             return self._selected_records[key]
         envelope = json.loads(path.read_text())
         full = envelope["record"]
-        if envelope["digest"] != key or digest(full) != key:
+        # The file's bytes were just checked against the index, which also
+        # names this digest; re-serializing megabytes to recompute it per
+        # lookup cost more than the lookup.
+        if envelope["digest"] != key:
             raise ValueError("Corrupt selected motion record")
         self._validate_record(full)
         # Historical scenes and duplicate validation clocks remain in the
@@ -811,7 +816,7 @@ class MotionLibrary:
         full["validation"] = {name: value for name, value in full["validation"].items()
                               if name != "clock_record"}
         self._selected_records[key] = full
-        while len(self._selected_records) > 4:
+        while len(self._selected_records) > SELECTED_RECORDS:
             self._selected_records.popitem(last=False)
         return full
 
