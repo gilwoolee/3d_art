@@ -176,10 +176,10 @@ that keep their contact point. Metadata marks it `parameterization: geometric`.
   two are shared between objects. Today the library seeds every cube and bottle
   zigzag and none of the prism's 14 or the torus's 12. Report coverage per
   object with `check_motion_cache_coverage.py --require-zigzags`.
-  The reuse key currently hashes the whole cell profile, including the riser
-  sized to one object's footprint, so cube records cannot seed the bottle or
-  torus. Key retrieval on robot, tool and policy only; keep static geometry,
-  riser included, as a fresh check on every reuse.
+  Retrieval already ranks records from any cell context by shape, so a cube
+  zigzag can seed another object's zigzag; only unchanged reuse needs the same
+  context, which includes the riser sized to one object's footprint. Coverage
+  therefore depends on having a record of a similar family, not on re-keying.
   Palace is excluded for now: WirePrint slicing fails on its mesh with
   "Open contour at layer 1; repair the input mesh".
 
