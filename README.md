@@ -383,14 +383,14 @@ generation (seconds to under a minute) is not included.
 | Vase, outer shell only | 33 | 2.9 s | 2.6 s | 7.6 s | 14.5 s | 4.2 GB |
 | Branching shape, 8 mm feature, 1 mm strand | 151 | 5.8 s | 3.1 s | 9.0 s | 20.9 s | 6.5 GB |
 | Palace, 8 mm feature | 271 | 14.6 s | 5.9 s | 14.1 s | 42.6 s | 7.9 GB |
-| Torus | 15 | not planned | | | | |
+| Torus | 15 | 4.2 s | 1.9 s | 5.2 s | 12.3 s | 3.5 GB |
 
-The torus does not plan with member-length pieces: it rests on a tangent
-circle, so its inner and outer zigzags stand on two rings a fraction of a
-millimetre apart, and the pen's nose comes 0.979 mm from a neighbouring
-diagonal against the 1 mm margin on every candidate. It plans and verifies in
-18.5 s with `--build-option=--path-pieces=samples`. Runs:
-`runs/geomfirst_gf43_*_w24`. A violation reported by the pen's spheres is
+A torus rests on a tangent circle, so its inner and outer walls start from two
+rings a fraction of a millimetre apart. Zigzags on an inner wall therefore
+start half a spacing along, so the two walls do not share their feet; with
+shared feet the pen's nose came 0.979 mm from the neighbouring diagonal,
+inside the 1 mm margin. Runs: `runs/geomfirst_gf43_*_w24`, torus
+`runs/geomfirst_gf45_torus_w24`. A violation reported by the pen's spheres is
 confirmed against the exact pen shape at the same pose before an action is
 rejected.
 

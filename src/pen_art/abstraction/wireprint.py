@@ -209,7 +209,11 @@ def _mesh_framework_at_height(
                 outlines differ the tops are spaced evenly on the upper contour
                 and each foot is the nearest point beneath.
                 """
-                first, following = i / count, (i + 1) / count
+                # An inner wall can stand on almost the same ring as the outer
+                # wall beside it (a torus resting on the bed). Start its zigzags
+                # half a spacing along, so the two do not share their feet.
+                shift = 0.5 if down["depth"] % 2 else 0.0
+                first, following = (i + shift) / count, (i + 1 + shift) / count
                 if nearest:
                     a, c = (
                         beneath.project(Point(sample_loop(up["points"], f)[:2]), normalized=True)
