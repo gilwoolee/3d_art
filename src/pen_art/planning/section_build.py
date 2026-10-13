@@ -283,6 +283,7 @@ class SectionBuild:
         merge_deposits_m=0.0,
         retiming_grid="full",
         structural_check="action",
+        retiming_solver="toppra",
     ):
         self.run, self.profile = Path(run), Path(profile)
         if diffusion_checkpoint is not None and motion_library is None:
@@ -307,6 +308,12 @@ class SectionBuild:
             timing.update(
                 retiming_grid_samples=0, retiming_grid_midpoints=retiming_grid == "midpoints"
             )
+        if retiming_solver == "scan":
+            # The scanned clock already holds the tip under its speed limit over
+            # every interval, by the tangent bound it is rescaled against. The
+            # audit therefore checks joint limits and does not bound drawing
+            # tip speed a second time (decided 2026-10-13).
+            timing.update(retiming_solver="scan", audit_drawing_tip_speed=False)
         self.planner = CellPlanner(
             run, profile, settings, monotonic() + maximum_seconds, timing_override=timing
         )
@@ -652,8 +659,13 @@ class SectionBuild:
                     raise ValueError("Forward polynomial exceeds joint limits")
                 first, second = piece.derivatives(0, 1)
                 velocity, acceleration = first / duration, second / duration**2
-                speed = polynomial_tcp_speed_bound(
-                    edge, self.arm, limit, deadline=self.planner.deadline
+                speed = (
+                    0.0
+                    if edge.kind == "DRAW"
+                    and not self.planner.timing.get("audit_drawing_tip_speed", True)
+                    else polynomial_tcp_speed_bound(
+                        edge, self.arm, limit, deadline=self.planner.deadline
+                    )
                 )
             else:
                 dq = abs(edge.q1 - edge.q0)
@@ -1207,6 +1219,14 @@ def main():
         help="Check new drawings as untimed paths and time them after the whole chain passes",
     )
     parser.add_argument(
+        "--retiming-solver",
+        choices=("scan", "toppra"),
+        default=None,
+        help="How drawing clocks are found: a closed-form forward and backward pass, or the "
+        "TOPP-RA solver. Either is rescaled against exact bounds. Default: scan with "
+        "--geometry-first, otherwise toppra",
+    )
+    parser.add_argument(
         "--structural-check",
         choices=("action", "member"),
         default="action",
@@ -1242,6 +1262,8 @@ def main():
         help="Testing only: reject this action's first accepted parallel check, forcing repair",
     )
     args = parser.parse_args()
+    if args.retiming_solver is None:
+        args.retiming_solver = "scan" if args.geometry_first else "toppra"
     if args.retiming_grid is None:
         args.retiming_grid = "knots" if args.geometry_first else "full"
     if args.merge_deposits_um is None:
@@ -1276,6 +1298,7 @@ def main():
         merge_deposits_m=args.merge_deposits_um * 1e-6,
         retiming_grid=args.retiming_grid,
         structural_check=args.structural_check,
+        retiming_solver=args.retiming_solver,
     )
     try:
         build.run_build(

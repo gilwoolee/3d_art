@@ -1303,6 +1303,7 @@ class CellPlanner:
             acceleration_constraint=self.timing.get("acceleration_constraint", "interpolated"),
             grid_samples=self.timing.get("retiming_grid_samples", 101),
             grid_midpoints=self.timing.get("retiming_grid_midpoints", True),
+            solver=self.timing.get("retiming_solver", "toppra"),
             **reuse,
         )
 

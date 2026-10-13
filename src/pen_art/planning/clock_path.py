@@ -425,6 +425,7 @@ def timed_path(
     drawing_reuse=None,
     grid_samples=101,
     grid_midpoints=True,
+    solver="toppra",
 ):
     """Analytically time checked edges without changing their geometric sweep.
 
@@ -472,6 +473,7 @@ def timed_path(
                     continuous_acceleration=acceleration_constraint == "cubic_bernstein",
                     grid_samples=grid_samples,
                     grid_midpoints=grid_midpoints,
+                    solver=solver,
                 )
                 timed = {
                     "positions": q,
