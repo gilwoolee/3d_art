@@ -23,6 +23,9 @@ almost entirely how the work is organised, not the mathematics.
 
 ## Collision: the pen against the wire
 
+The agreed design for items 1-4 below is in
+[pen collision design](2026_1013_pen_collision_design.md).
+
 The arm is already cheap: clearances measured once certify 98.5% of edges. The
 remaining cost is the pen, which by design is within a millimetre of wire.
 
