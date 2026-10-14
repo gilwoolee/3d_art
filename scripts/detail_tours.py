@@ -736,9 +736,16 @@ def main():
         if not len(on):
             dropped += 1
             continue
-        if on[0] > len(p) - 1 - on[-1]:
-            p, tilt, on = p[::-1], tilt[::-1], len(p) - 1 - on[::-1]
-        p, tilt = p[on[0] : min(len(p), on[-1] + 9)], tilt[on[0] : min(len(p), on[-1] + 9)]
+        # Start on a contact; of the two directions keep the one that keeps
+        # more line, and when they keep about the same, the one that ends
+        # going up, so the pen backs away from wire it has just laid.
+        options = []
+        for flip in (False, True):
+            q, t, o = (p[::-1], tilt[::-1], len(p) - 1 - on[::-1]) if flip else (p, tilt, on)
+            q, t = q[o[0] : min(len(q), o[-1] + 9)], t[o[0] : min(len(q), o[-1] + 9)]
+            rising = len(q) > 5 and q[-1, 2] > q[-6, 2]
+            options.append((round(length(q) / 0.003), rising, q, t))
+        _, _, p, tilt = max(options, key=lambda r: (r[0], r[1]))
         if length(p) >= 0.006:
             ready[k] = (p, tilt)
         else:
