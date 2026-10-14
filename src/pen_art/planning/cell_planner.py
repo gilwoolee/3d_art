@@ -381,7 +381,12 @@ class CellPlanner:
         )
         source = Path(read_json(self.run / "run.json")["cell_source_run"])
         self.process = read_json(source / "fabrication_config.json")["process"]
-        self.transit = yaml.safe_load(Path("configs/transit.yaml").read_text())
+        # A profile may adjust transit settings (detail drawn on the outside
+        # backs away a shorter distance).
+        self.transit = {
+            **yaml.safe_load(Path("configs/transit.yaml").read_text()),
+            **self.profile.get("transit", {}),
+        }
         self.timing = (
             timing_override
             if timing_override is not None

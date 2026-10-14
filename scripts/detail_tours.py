@@ -331,6 +331,8 @@ def detail_profile(base, path, nose_clearance=0.0003):
     profile["environment"]["tool_clearance_m"] = {"tapered_nose": nose_clearance}
     # Tilted poses can fold the arm into itself: planning checks the arm too.
     profile["planning_checks_robot"] = True
+    # Detail lies on the outside; back away 15 mm rather than 30 mm.
+    profile["transit"] = {"withdraw_distance_m": 0.015}
     profile["setup_description"] = (
         profile.get("setup_description", "")
         + " Detail strokes after the frame may tilt the pen toward the robot; the nose"

@@ -640,7 +640,10 @@ def _propose(context, spec, seconds):
         # The planner's own cold sampler, one table index per ordinal. It
         # screens the nozzle against the predicted preceding material.
         # A stroke may name the turntable position it was made for (detail
-        # drawn after the frame); try that one first.
+        # drawn after the frame). It is drawn there or not at all: another
+        # position costs two quarter turns for one short stroke.
+        if "turntable_index" in row and spec["ordinal"] > 0:
+            return {"status": "NO_CANDIDATE", "failure": {"reason": "named turntable position"}}
         first = row.get("turntable_index", model.table.home_index)
         table_index = (first + spec["ordinal"]) % 4
 
