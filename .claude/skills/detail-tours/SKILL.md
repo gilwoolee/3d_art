@@ -134,9 +134,12 @@ background jobs); 24 workers.
 | Liberty | `geomfirst_gf94_liberty_detail_r14_w24` | 1.99 m | 33 | 11.5 min | 2.04 m, 16.0 min |
 | Ghost | `geomfirst_gf98_ghost_detail_r14_w24` | 1.98 m | 28 | 8.1 min | 2.21 m, 10.2 min |
 | Pumpkin | `geomfirst_gf98_pumpkin_detail_r24_w24` | 1.99 m | 17 | 7.7 min | 3.40 m, 15.0 min |
+| Palace | `geomfirst_gf100_palace_detail_r24_w24` | 1.98 m | 33 | 8.3 min | 2.29 m, 12.5 min |
 
 Liberty was generated before the bigger-pool settings and the 15 mm
-back-away; the ghost and pumpkin used the commands above. About half the
+back-away; the ghost, pumpkin and Palace used the commands above (Palace:
+`runs/geomfirst_palace_b10_source`, `palace_cylinder126.yaml`, frame run
+`geomfirst_gf71_palace_w24`; generation took an hour on this larger frame). About half the
 generated tours are dropped by planning; a round takes 40-80 s.
 
 ## How the generator works (`scripts/detail_tours.py`)
