@@ -55,6 +55,7 @@ def _mesh_framework_at_height(
     slice_simplification=0.00002,
     minimum_contour=0.0,
     maximum_branch_descent_deg=None,
+    base_line_spacing=None,
 ):
     if min(layer_height, zigzag_spacing, diameter, slice_simplification) <= 0:
         raise ValueError("Positive layer, zigzag, diameter and simplification are required")
@@ -148,25 +149,54 @@ def _mesh_framework_at_height(
         loops.sort(key=lambda loop: (loop["depth"], *loop["points"][0, :2]))
         layers.append(loops)
 
+    # A shape with a rounded underside has no contour on the bed: its lowest
+    # one starts a layer up. Posts under that contour would be the only thing
+    # holding the object, each stuck to the bed at a point. Draw the same
+    # outline flat on the bed instead, so the usual band of risers and
+    # diagonals carries the object on a base that grips along its whole length.
+    base_ring = None
+    first = next((index for index, loops in enumerate(layers) if loops), None)
+    if maximum_branch_descent_deg is not None and first:
+        base = []
+        for loop in layers[first]:
+            points = loop["points"].copy()
+            points[:, 2] = low
+            base.append({**loop, "points": points, "joins": {0.0}})
+        layers[first - 1] = base
+        base_ring = {
+            "contours": len(base),
+            "height_m": float(layers[first][0]["points"][0, 2] - low),
+        }
+
     # An inner contour that begins above the bed is the wall of a cavity, such
     # as the inside of a vase: a ring with nothing beneath it. Print the outer
     # shell only. Removing it bottom-up also removes the contours it would have
     # carried. Inner contours that start on the bed, like a torus's hole, stay.
-    omitted_cavities = 0
+    # An outer contour that begins in mid-air, above the object's lowest
+    # contour, has nothing to be drawn onto either: an overhanging tip that
+    # joins the shape a layer or two up. It is left out the same way, and the
+    # contour it joins covers that part of the shape.
+    omitted_cavities = omitted_floating = 0
+    started = bool(layers and layers[0])
     for index in range(1, len(layers)):
         kept = []
         for up in layers[index]:
-            if up["depth"] and not any(
+            carried = any(
                 up["depth"] == down["depth"] and up["polygon"].intersects(down["polygon"])
                 for down in layers[index - 1]
-            ):
+            )
+            if up["depth"] and not carried:
                 omitted_cavities += 1
+                continue
+            if started and not carried and maximum_branch_descent_deg is not None:
+                omitted_floating += 1
                 continue
             kept.append(up)
         layers[index] = kept
+        started = started or bool(kept)
 
     relations, bridges, spacing_adjustments, omitted_steep, nearest_pairs = [], [], [], 0, 0
-    two_zigzag_pairs = 0
+    stretched = 0
     for index in range(1, len(layers)):
         lower, upper = layers[index - 1], layers[index]
         pairs = []
@@ -205,10 +235,13 @@ def _mesh_framework_at_height(
             takes_chain = "chain" in down and down.setdefault("chain_user", ui) == ui
 
             def anchors(
-                i, count, nearest, up=up, down=down, beneath=beneath, overhead=overhead,
+                u, v, nearest, count, up=up, down=down, beneath=beneath, overhead=overhead,
                 chained=takes_chain,
             ):
                 """Foot, top and next foot of one zigzag: a riser and a diagonal.
+
+                ``u`` and ``v`` are how far round the loop this riser and the
+                next one stand, as fractions from the zigzag's starting point.
 
                 As in WirePrint, the riser goes straight up, or as near to it as
                 the two outlines allow, and only the stroke back down is
@@ -233,24 +266,26 @@ def _mesh_framework_at_height(
                         if chained
                         else origin
                     )
-                    first, following = start + i / count, start + (i + 1) / count
+                    first, following = start + u, start + v
                     a, c = (
                         beneath.project(Point(sample_loop(up["points"], f)[:2]), normalized=True)
                         for f in (first, following)
                     )
-                    return (origin if chained and i == 0 else a), first, c
-                first, following = origin + i / count, origin + (i + 1) / count
+                    return (origin if chained and u == 0 else a), first, c
+                first, following = origin + u, origin + v
                 foot = Point(sample_loop(down["points"], first)[:2])
                 top = overhead.project(foot, normalized=True)
                 return first, top, following
 
-            def steepest(count, nearest, up=up, down=down, anchors=anchors):
-                falls = []
-                for i in range(count - 1):
-                    _, b, c = anchors(i, count, nearest)
-                    fall = sample_loop(up["points"], b) - sample_loop(down["points"], c)
-                    falls.append(np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2]))))
-                return max(falls)
+            def descent(b, c, up=up, down=down):
+                fall = sample_loop(up["points"], b) - sample_loop(down["points"], c)
+                return np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2])))
+
+            def steepest(count, nearest, anchors=anchors, descent=descent):
+                return max(
+                    descent(*anchors(i / count, (i + 1) / count, nearest, count)[1:])
+                    for i in range(count - 1)
+                )
 
             count = max(3, int(np.ceil(perimeter / zigzag_spacing)))
             above = max(3, int(np.ceil(LineString(up["points"]).length / zigzag_spacing)))
@@ -267,19 +302,6 @@ def _mesh_framework_at_height(
             if nearest:
                 count = above
                 nearest_pairs += 1
-            # A small loop gives three zigzags too little run to come down in.
-            # Two give each diagonal the loop's full width; use them when that
-            # brings it within the limit, rather than thinning every layer.
-            if (
-                maximum_branch_descent_deg is not None
-                and not branching
-                and not minimum_anchor_spacing
-                and count == 3
-                and steepest(3, nearest) > maximum_branch_descent_deg - 1
-                and steepest(2, nearest) <= maximum_branch_descent_deg - 1
-            ):
-                count = 2
-                two_zigzag_pairs += 1
             original_count = count
             if minimum_anchor_spacing:
                 # Equal fractions on a large upper contour can crowd anchors
@@ -317,25 +339,63 @@ def _mesh_framework_at_height(
                         "closing_diagonal_omitted": True,
                     }
                 )
-            step = 0
-            for i in range(count):
-                a, b, c = anchors(i, count, nearest)
+            # Where equal spacing would make a diagonal too steep, its foot and
+            # the riser that follows stand further round the loop, far enough
+            # for the diagonal to come down within the limit.
+            stretch = (
+                maximum_branch_descent_deg is not None
+                and not branching
+                and not minimum_anchor_spacing
+            )
+            step, i, shift = 0, 0, 0.0
+            while i / count + shift < 1 - 1e-9:
+                u, v = i / count + shift, (i + 1) / count + shift
+                ended = False
+                a, b, c = anchors(u, v, nearest, count)
+                if stretch and v < 1 - 1e-9 and descent(b, c) > maximum_branch_descent_deg - 1:
+                    reach = v
+                    while (
+                        reach < min(u + 0.75, 1 - 0.5 / count)
+                        and descent(b, c) > maximum_branch_descent_deg - 1
+                    ):
+                        reach += 0.125 / count
+                        a, b, c = anchors(u, reach, nearest, count)
+                    if descent(b, c) <= maximum_branch_descent_deg - 1:
+                        shift += reach - v
+                        v = reach
+                        stretched += 1
+                    else:
+                        # No foot before the loop closes is far enough: this
+                        # riser ends the zigzag, as the closing one would.
+                        ended = reach >= 1 - 0.5 / count
+                        a, b, c = anchors(u, v, nearest, count)
+                # A riser that would stand within half a spacing of the first
+                # one is left out; this riser is then the zigzag's last.
+                last = (
+                    ended
+                    or v >= 1 - 1e-9
+                    or bool(stretch and shift and v > 1 - 0.5 / count)
+                )
+                if last:
+                    shift = 1.0
+                i += 1
                 if branching:
                     top = Point(sample_loop(up["points"], b)[:2])
                     if li != min(co_parents, key=lambda k: lower[k]["polygon"].distance(top)):
                         continue
                 # WirePrint omits the closing diagonal to leave print-head
                 # access. With one anchor this also avoids retracing the riser.
-                if (minimum_anchor_spacing or omit_closing_diagonal) and i == count - 1:
+                if last and (minimum_anchor_spacing or omit_closing_diagonal or v < 1 - 1e-9):
                     c = None
-                # A diagonal that still comes out too steep there is left out
-                # rather than thinning every layer; its riser still stands.
-                if c is not None and branching:
-                    fall = sample_loop(up["points"], b) - sample_loop(down["points"], c)
-                    steepness = np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2])))
-                    if steepness > maximum_branch_descent_deg - 1:
-                        omitted_steep += 1
-                        c = None
+                # A diagonal that still comes out too steep is left out rather
+                # than thinning every layer; its riser still stands.
+                if (
+                    c is not None
+                    and (branching or stretch)
+                    and descent(b, c) > maximum_branch_descent_deg - 1
+                ):
+                    omitted_steep += 1
+                    c = None
                 down["joins"].add(a % 1.0)
                 if c is not None:
                     down["joins"].add(c % 1.0)
@@ -359,6 +419,55 @@ def _mesh_framework_at_height(
         for li in range(len(lower)):
             if not any(parent == li for parent, _ in pairs):
                 relations.append({"layer": index, "lower": li, "event": "contour_end"})
+
+    # A grid of straight lines across each outline that lies on the bed. It
+    # ties the base together both ways and gives it more length gripping the
+    # bed than the outline alone. Lines meet at shared points, as a contour
+    # meets the riser tops it is drawn across.
+    base_lines = []
+    ground = next((index for index, loops in enumerate(layers) if loops), None)
+    if (
+        base_line_spacing
+        and ground is not None
+        and abs(layers[ground][0]["points"][0, 2] - low) < 1e-7
+    ):
+        loops = layers[ground]
+        rings = [LineString(loop["points"][:, :2]) for loop in loops]
+        inside = unary_union([loop["polygon"] for loop in loops if loop["depth"] % 2 == 0])
+        holes = [loop["polygon"] for loop in loops if loop["depth"] % 2]
+        if holes:
+            inside = inside.difference(unary_union(holes))
+        bounds = np.reshape(inside.bounds, (2, 2))
+        pieces = {0: [], 1: []}
+        for axis in (0, 1):
+            across = 1 - axis
+            count = int((bounds[1, across] - bounds[0, across]) // base_line_spacing)
+            for row in range(count):
+                level = bounds[:, across].mean() + (row - (count - 1) / 2) * base_line_spacing
+                ends = np.zeros((2, 2))
+                ends[:, axis] = bounds[0, axis] - 1, bounds[1, axis] + 1
+                ends[:, across] = level
+                crossing = inside.intersection(LineString(ends))
+                for piece in getattr(crossing, "geoms", [crossing]):
+                    if piece.geom_type == "LineString" and piece.length >= base_line_spacing:
+                        pieces[axis].append(np.asarray([piece.coords[0], piece.coords[-1]]))
+        for axis in (0, 1):
+            for piece in pieces[axis]:
+                for point in piece:
+                    li = min(range(len(loops)), key=lambda k: rings[k].distance(Point(point)))
+                    loops[li]["joins"].add(rings[li].project(Point(point), normalized=True) % 1.0)
+                stops = [piece[0], piece[1]]
+                for other in pieces[1 - axis]:
+                    meet = np.array(other[0])
+                    meet[axis] = other[0][axis]
+                    meet[1 - axis] = piece[0][1 - axis]
+                    if (
+                        piece[:, axis].min() < meet[axis] < piece[:, axis].max()
+                        and other[:, 1 - axis].min() < meet[1 - axis] < other[:, 1 - axis].max()
+                    ):
+                        stops.append(meet)
+                stops.sort(key=lambda point: point[axis])
+                base_lines.append([np.r_[point, low] for point in stops])
 
     nodes, edges, positions, by_edge = {}, [], [], {}
 
@@ -429,6 +538,17 @@ def _mesh_framework_at_height(
         if held:
             last = held[-1][1]
 
+    for number, stops in enumerate(base_lines):
+        # Drawn before the outlines they join, while the bed is still clear.
+        for step, (start, end) in enumerate(zip(stops[:-1], stops[1:], strict=True)):
+            add(
+                start,
+                end,
+                f"base-{number}",
+                [step, step + 1],
+                1000 * ground - len(base_lines) + number,
+                "framework",
+            )
     for index, loops in enumerate(layers):
         # Rising/descending strokes stand on the already completed lower contour.
         for layer, li, ui, a, b, c, step in (row for row in bridges if row[0] == index):
@@ -474,10 +594,13 @@ def _mesh_framework_at_height(
         contour_events=relations,
         contour_repairs=repairs,
         omitted_cavity_contours=omitted_cavities,
+        omitted_floating_contours=omitted_floating,
+        base_ring=base_ring,
+        base_lines=len(base_lines),
         omitted_small_contours=omitted_small,
         omitted_steep_branch_diagonals=omitted_steep,
         nearest_point_zigzags=nearest_pairs,
-        two_zigzag_loops=two_zigzag_pairs,
+        stretched_diagonals=stretched,
         anchor_spacing_adjustments=spacing_adjustments,
         generation={
             "layer_height_m": layer_height,
@@ -487,6 +610,7 @@ def _mesh_framework_at_height(
             "minimum_contour_m": minimum_contour,
             "junction_merge_m": 0.00002,
             "minimum_anchor_spacing_m": minimum_anchor_spacing,
+            "base_line_spacing_m": base_line_spacing,
         },
         physical_status="unverified",
         simulation_only=True,
@@ -519,6 +643,7 @@ def mesh_framework(
     maximum_descent_angle_deg=None,
     slice_simplification=0.00002,
     minimum_contour=0.0,
+    base_line_spacing=None,
 ):
     """Generate unchanged-scale contours with nozzle-aware descending chords.
 
@@ -558,6 +683,7 @@ def mesh_framework(
             slice_simplification=slice_simplification,
             minimum_contour=minimum_contour,
             maximum_branch_descent_deg=maximum_descent_angle_deg,
+            base_line_spacing=base_line_spacing,
         )
         layer_z = sorted({node["position"][2] for node in graph["nodes"]})
         effective_height = max(np.diff(layer_z), default=0.0)
@@ -630,6 +756,7 @@ def generate(run, **settings):
         "maximum_descent_angle_deg",
         "slice_simplification",
         "minimum_contour",
+        "base_line_spacing",
     }
     parameters = {
         "maximum_descent_angle_deg": 27.0,
@@ -715,7 +842,7 @@ def connect_framework_islands(graph, maximum_connector_m=0.035):
 
 
 def reinforce_base(graph, reason):
-    """Add spread bed posts to the first usable contour after a failed screen."""
+    """Add bed posts along the first usable contour after a failed screen."""
     nodes = {node["id"]: node for node in graph["nodes"]}
     active = {edge[end] for edge in graph["edges"] for end in ("start", "end")}
     diameter = graph["generation"]["strand_diameter_m"]
@@ -724,17 +851,29 @@ def reinforce_base(graph, reason):
         return graph
     height = min(nodes[key]["position"][2] for key in raised)
     first_layer = sorted(key for key in raised if nodes[key]["position"][2] <= height + 1e-7)
-    anchors = base_anchors(nodes, first_layer, 1e-7)
-    if len(first_layer) > len(anchors):
-        anchors.append(
-            max(
-                (key for key in first_layer if key not in anchors),
-                key=lambda key: min(
-                    np.linalg.norm(np.asarray(nodes[key]["position"]) - nodes[other]["position"])
-                    for other in anchors
-                ),
+    # Posts already stand under some of these nodes. Add more where the contour
+    # is furthest from any post, until none of it is a zigzag spacing away.
+    posted = {
+        edge["end"] for edge in graph["edges"] if edge.get("origin") == "explicit_bed_support"
+    }
+    spacing = graph["generation"]["zigzag_spacing_m"]
+    anchors = []
+    while True:
+        stood = [nodes[key]["position"][:2] for key in (*posted, *anchors)]
+        free = [key for key in first_layer if key not in posted and key not in anchors]
+        if not free:
+            break
+        gap = {
+            key: min(
+                (np.linalg.norm(np.subtract(nodes[key]["position"][:2], p)) for p in stood),
+                default=np.inf,
             )
-        )
+            for key in free
+        }
+        furthest = max(free, key=gap.get)
+        if gap[furthest] < spacing:
+            break
+        anchors.append(furthest)
     added = []
     for key in anchors:
         foot = f"reinforcement-foot-{key}"

@@ -357,13 +357,18 @@ above, so it is exactly vertical only where the outline does not move between
 layers. The Palace and branching rows below use this wireframe; the other rows
 predate it, and their wireframes would now come out different.
 
+The viewer's run list shows only the runs named in `runs/viewer_runs.json` when
+that file exists; any other run still opens by its address (`?run=<id>`).
+
 Long runs on Blondie go in tmux. Wireframe settings live in the source run's
 `fabrication_config.json` (defaults in `configs/fabrication.yaml`):
 
 | Setting under `wireprint` | Effect |
 | --- | --- |
 | `minimum_feature_m` | Opt-in. Rebuilds the mesh as a closed solid without parts thinner than this (`solidified.glb`), and ends rounded tips at the last printable contour. A simplification, recorded with its deviation. |
-| `layer_height` | Requested layer height. One slant steeper than 27 degrees thins every layer, and the step down overshoots, so ask for a height that passes as it is: 0.0055 for the Palace and branching shape. Taller layers mean less wire and coarser detail. |
+| `layer_height` | Requested layer height. Taller layers mean less wire and coarser detail. |
+| `base_line_spacing` | Spacing of the grid of lines across each outline on the bed. |
+| `maximum_wire_m` | Wire budget; a new mesh is shrunk to fit it. |
 | `heavier_strands_m` | Strand diameters tried in order when the frame fails the structural screen (default 1.5 mm, a tip not yet on hand). The choice is recorded as `strand_escalation` and is also the wire's collision size. |
 
 The structural model treats the strand as 3D pen PLA at 2.5 GPa, a typical
@@ -375,28 +380,48 @@ including setup; wireframe generation (seconds to under a minute) is not
 included. Print time is the modeled duration of the saved plan: its waits and
 speed limits are settings, not measurements of a real pen or arm.
 
-| Object | Strokes | Joins chained | Collision-free path | Timing | Verification | Total | Print time |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Triangular prism | 21 | 20 of 20 | 8.5 s | 0.9 s | 4.2 s | 14.4 s | 4.9 min |
-| Bottle | 31 | 30 of 30 | 14.1 s | 1.4 s | 6.0 s | 22.6 s | 5.7 min |
-| Torus | 15 | 8 of 14 | 4.4 s | 1.9 s | 5.1 s | 12.3 s | 5.8 min |
-| Cube | 21 | 20 of 20 | 10.7 s | 1.1 s | 3.8 s | 16.4 s | 7.0 min |
-| Narrowed cube | 21 | 20 of 20 | 10.1 s | 1.1 s | 4.4 s | 16.4 s | 6.9 min |
-| Vase, outer shell only | 33 | 32 of 32 | 15.8 s | 2.3 s | 5.2 s | 24.7 s | 9.9 min |
-| Branching shape, 8 mm feature, 5.2 mm layers | 85 | 65 of 84 | 8.9 s | 1.7 s | 6.4 s | 18.5 s | 9.1 min |
-| Palace, 8 mm feature, 5.4 mm layers | 146 | 81 of 145 | 13.0 s | 3.3 s | 8.1 s | 27.4 s | 18.7 min |
+| Object | Size (mm) | Layers | Wire | Strokes | Planning + verification | Print time |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Triangular prism | 80 x 60 x 80 | 10.0 mm | 4.3 m | 23 | 12.3 s | 4.4 min |
+| Bottle | 50 x 50 x 120 | 10.0 mm | 4.0 m | 30 | 18.5 s | 5.1 min |
+| Torus | 118 x 118 x 30 | 10.0 mm | 5.3 m | 16 | 12.2 s | 5.8 min |
+| Cube | 80 x 80 x 80 | 10.0 mm | 6.8 m | 26 | 14.3 s | 6.8 min |
+| Narrowed cube | 78 x 80 x 80 | 10.0 mm | 6.7 m | 25 | 14.3 s | 6.6 min |
+| Vase, outer shell only | 100 x 100 x 144 | 9.6 mm | 9.6 m | 38 | 24.7 s | 9.8 min |
+| Branching shape | 103 x 89 x 144 | 5.3 mm | 5.8 m | 86 | 16.3 s | 9.1 min |
+| Palace | 109 x 109 x 83 | 7.6 mm | 7.0 m | 140 | 24.9 s | 16.4 min |
+| Liberty statue | 73 x 43 x 115 | 9.6 mm | 2.7 m | 34 | 12.3 s | 3.6 min |
+| Ghost | 120 x 91 x 135 | 9.7 mm | 9.5 m | 39 | 24.7 s | 10.2 min |
+| Pumpkin | 116 x 107 x 126 | 9.7 mm | 9.6 m | 41 | 28.7 s | 10.9 min |
+
+The last five use an 8 mm minimum feature. The Liberty statue is thinner than
+that at this size, so its wireframe is a tapered post without arm, torch or
+crown. Runs: `runs/geomfirst_gf71_*_w24`.
+
+How the wireframe keeps a print short and standing:
+
+- **Wire budget.** `wireprint.maximum_wire_m` (10 m). A mesh given with
+  `--mesh` is shrunk until its wireframe fits; the size settled on is in the
+  source run's `wire_budget.json`. The vase, ghost and pumpkin were shrunk to
+  144, 144 and 136 mm from 150 mm.
+- **No steep slants.** Where equal spacing would make a zigzag's slanted
+  stroke steeper than 27 degrees, its foot and the next riser stand further
+  round the loop (`stretched_diagonals`). On a loop too small for any foot to
+  be far enough, the zigzag ends at that riser. One steep slant used to thin
+  every layer of the object.
+- **Base.** Each outline on the bed is filled with a crossed grid of lines
+  every 20 mm (`wireprint.base_line_spacing`), meeting at shared points and
+  drawn first. A shape with a rounded underside has no outline on the bed, so
+  its lowest outline is also drawn on the bed (`base_ring`) and joined by the
+  usual band of risers and slants. This adds a straight skirt one layer tall.
+- **No loops in mid-air.** An outline that starts above the object's lowest
+  one with nothing beneath it is left out (`omitted_floating_contours`); the
+  outline it would have joined covers that part.
 
 The pen holds for 1 s with the feed off at the top of each riser only
 (`vertex_cooling_policy: rising_edge_end`). The foot of a slanted stroke lands
 on solid wire and is assumed to need no hold; this has not been tried on a
 pen. `wireprint_nonhorizontal_edge_end` restores the hold at both ends.
-
-A loop too small for three zigzags at the requested layer height takes two, so
-each slanted stroke spans the loop's full width (`two_zigzag_loops` in
-`wireprint_graph.json`). On the Palace's 13 mm towers this raises the tallest
-layer that keeps every slant within 27 degrees from 4.3 mm to 5.4 mm. Before
-these two changes the branching shape and Palace, at 2.9 mm layers, took 18.5
-and 41.9 min.
 
 A stroke that starts where the previous one ended is drawn without lifting the
 pen (`--chain-strokes on`, the default with `--geometry-first`): no withdraw,

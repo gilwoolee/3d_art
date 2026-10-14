@@ -219,6 +219,28 @@ verification fell to 27.4 s and 18.5 s because there are fewer strokes.
   tower, which would remove most of the 65 lifts but leaves pen access beside
   a finished tower unchecked.
 
+**Wireframe changes for new objects (night)**, made while adding the ghost,
+pumpkin and Liberty meshes in `objs/`. Results are in the README table.
+
+- Slants are kept within 27 degrees by moving a zigzag's foot further round
+  the loop instead of thinning every layer. This replaces the two-zigzag rule.
+  The ghost went from 2.9 mm layers and 27.7 m of wire to 9.4 mm and 9.4 m;
+  the simple shapes keep 10 mm layers. At 8 mm layers the ghost has 182
+  slants, 170 of them under 27 degrees, so the limit only ever bound a few.
+- Steeper slants were tested with the pen upright: 38 degrees verified on the
+  Palace, 48 degrees failed (nose too close to wire). A pen lying over at 80
+  degrees would clear steep slants in every direction but not shallow ones or
+  contours, so it does not fit these wireframes. The limit stays at 27.
+- Bed posts under a rounded shape were replaced by a base outline on the bed.
+  The earlier reinforcement had put three posts where posts already stood,
+  which blocked planning.
+- A crossed grid every 20 mm fills each base outline, and a 10 m wire budget
+  shrinks a new mesh to fit.
+- Open: the planner accepts a stroke with nothing under it (the wireframe no
+  longer produces one); the branching shape fails to plan at 8 mm layers; the
+  Palace's 13 mm towers stand on risers alone at 7.6 mm layers; bed adhesion
+  of the base is assumed.
+
 Runs: `runs/geomfirst_gf65_*_w24`, sources `runs/geomfirst_*_vr4_source` and
 `runs/geomfirst_{palace,branching}vr4_f8_l5_source`.
 

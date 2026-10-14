@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from time import monotonic
@@ -264,6 +265,51 @@ def prepare_mesh(mesh, run, source_up, max_extent_m):
         {"source_up": source_up, "max_extent_m": max_extent_m, "geometry_faces": 80000},
     )
     stage_update(source, "asset", "complete", artifact="asset_manifest.json")
+    return source
+
+
+def prepare_mesh_within_wire(mesh, run, source_up, max_extent_m, fabrication=None):
+    """Prepare a mesh, shrunk until its wireframe fits ``wireprint.maximum_wire_m``.
+
+    Wire grows with about the square of the size, so each try scales the
+    longest side by the square root of the overshoot. The size settled on and
+    the wire at each try are written to ``wire_budget.json``.
+    """
+    from ..abstraction.wireprint import connect_framework_islands, generate
+
+    source = run.with_name(run.name + "_source")
+    record = source / "wire_budget.json"
+    if record.exists():
+        saved = read_json(record)
+        if saved["requested_max_extent_m"] != max_extent_m:
+            raise ValueError("Prepared mesh inputs changed; choose a fresh run")
+        return prepare_mesh(mesh, run, source_up, saved["max_extent_m"])
+    if fabrication is None:
+        fabrication = yaml.safe_load(Path("configs/fabrication.yaml").read_text())
+    budget = fabrication.get("wireprint", {}).get("maximum_wire_m")
+    extent, tries = max_extent_m, []
+    while True:
+        source = prepare_mesh(mesh, run, source_up, extent)
+        write_json(source / "fabrication_config.json", fabrication)
+        if budget is None:
+            break
+        graph = connect_framework_islands(generate(source))
+        wire = sum(edge["length_m"] for edge in graph["edges"])
+        tries.append({"max_extent_m": extent, "wire_m": wire})
+        if wire <= budget or len(tries) == 6:
+            break
+        shutil.rmtree(source)
+        extent *= 0.99 * (budget / wire) ** 0.5
+    write_json(
+        record,
+        {
+            "requested_max_extent_m": max_extent_m,
+            "max_extent_m": extent,
+            "maximum_wire_m": budget,
+            "within_budget": budget is None or tries[-1]["wire_m"] <= budget,
+            "tries": tries,
+        },
+    )
     return source
 
 
@@ -1314,7 +1360,9 @@ def main():
     elif args.source_run:
         prepare_framework(args.source_run, args.run, args.profile, args.wir3d_budget)
     elif args.mesh:
-        source = prepare_mesh(args.mesh, args.run, args.source_up, args.max_extent_m)
+        source = prepare_mesh_within_wire(
+            args.mesh, args.run, args.source_up, args.max_extent_m
+        )
         prepare_framework(source, args.run, args.profile, args.wir3d_budget)
     elif args.cell_source_run and not (args.run / "run.json").exists():
         prepare_cell(args.profile, args.run, args.cell_source_run)

@@ -38,49 +38,53 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     metadata = graph["generation"]
     assert metadata["requested_layer_height_m"] == 0.01
     # Each zigzag is a vertical riser and one slanted stroke down. The stroke
-    # across a square corner is the shortest, and it sets the layer height.
-    assert metadata["effective_layer_height_m"] == pytest.approx(0.008)
+    # across a square corner would be too steep, so its foot stands further
+    # round the loop and the layer keeps its requested height.
+    assert metadata["effective_layer_height_m"] == pytest.approx(0.01)
+    assert graph["stretched_diagonals"] == 29 and not metadata["descent_angle_refinements"]
     rising = [
         nodes[edge["end"]] - nodes[edge["start"]]
         for edges in groups.values()
         for edge in edges
         if nodes[edge["end"]][2] > nodes[edge["start"]][2]
     ]
-    assert len(rising) == 13 * len(groups)
+    assert len(rising) == 13 + 12 * (len(groups) - 1)
     # The end slices are cut a micron inside the mesh, hence the allowance.
     assert max(np.linalg.norm(delta[:2]) for delta in rising) < 2e-6
     assert metadata["actual_maximum_descent_angle_deg"] == pytest.approx(angles.max())
     assert metadata["descending_member_count"] == len(angles)
     assert metadata["closing_diagonal_omitted"]
     assert metadata["omitted_closing_diagonals"] == len(groups)
-    # 13 pairs at 24.6mm spacing survive; each final downward leg is omitted.
-    assert {len(edges) for edges in groups.values()} == {25}
+    # 13 or 12 pairs survive; each final downward leg is omitted.
+    assert {len(edges) for edges in groups.values()} == {25, 23}
     for edges in groups.values():
         final = max(edges, key=lambda edge: edge["source_interval"][-1])
         assert nodes[final["end"]][2] > nodes[final["start"]][2]
     # Each zigzag starts where the one below ended, so the pen can run from a
-    # zigzag round its contour into the next; the risers then form columns.
+    # zigzag round its contour into the next.
     ordered = sorted(groups, key=lambda name: int(name.split("-")[1]))
     ends = {}
     for name in ordered:
         legs = sorted(groups[name], key=lambda edge: edge["source_interval"][0])
         ends[name] = (legs[0]["start"], legs[-1]["end"])
     assert all(ends[a][1] == ends[b][0] for a, b in zip(ordered[:-1], ordered[1:], strict=True))
-    columns = {
-        tuple(np.round(nodes[edge["start"]][:2], 5))
-        for edges in groups.values()
-        for edge in edges
-        if nodes[edge["end"]][2] > nodes[edge["start"]][2]
-    }
-    assert len(columns) == 13
-    # A loop too small for three zigzags at this height takes two, each
-    # diagonal spanning its full width, rather than thinning every layer.
+    # Where equal spacing would make a diagonal too steep, its foot stands
+    # further round the loop, rather than every layer being thinned.
     tower = trimesh.creation.cylinder(radius=0.0065, height=0.03, sections=48)
     tower.apply_translation([0, 0, 0.015])
     slim = mesh_framework(tower, layer_height=0.006, maximum_descent_angle_deg=27)
-    assert slim["two_zigzag_loops"] == 5
+    assert slim["stretched_diagonals"] == 10
     assert slim["generation"]["effective_layer_height_m"] == pytest.approx(0.006)
     assert slim["generation"]["actual_maximum_descent_angle_deg"] <= 27
+    # The base is a grid of lines on the bed that meet at shared points, drawn
+    # before the outline they join.
+    gridded = mesh_framework(mesh, maximum_descent_angle_deg=27, base_line_spacing=0.02)
+    lines = [edge for edge in gridded["edges"] if edge["parent_curve"].startswith("base-")]
+    assert gridded["base_lines"] == 8 and len(lines) == 40
+    assert sum(edge["length_m"] for edge in lines) == pytest.approx(8 * 0.08, abs=1e-5)
+    assert max(edge["order_hint"] for edge in lines) < min(
+        edge["order_hint"] for edge in gridded["edges"] if edge not in lines
+    )
     hints = {edge["parent_curve"]: edge["order_hint"] for edge in graph["edges"]}
     drawn = sorted(hints, key=hints.get)
     assert [name.split("-")[0] for name in drawn[:5]] == [

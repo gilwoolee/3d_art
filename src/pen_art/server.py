@@ -43,6 +43,17 @@ def create_app(root: Path):
 
     @app.get("/api/runs")
     def list_runs():
+        # ``runs/viewer_runs.json`` names the runs to offer, in order. Without
+        # it every run is listed. Any run still opens by its own address.
+        chosen = runs / "viewer_runs.json"
+        if chosen.is_file():
+            return [
+                run_metadata(runs / name)
+                for name in read_json(chosen)
+                if isinstance(name, str)
+                and re.fullmatch(r"[A-Za-z0-9_-]+", name)
+                and (runs / name / "run.json").is_file()
+            ]
         return [run_metadata(path.parent) for path in sorted(runs.glob("*/run.json"))]
 
     @app.get("/api/runs/{run_id}")

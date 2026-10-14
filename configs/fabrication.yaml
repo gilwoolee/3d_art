@@ -6,6 +6,11 @@ wireprint:
   maximum_descent_angle_deg: 27.0
   layer_height: 0.01
   zigzag_spacing: 0.025
+  # A grid of lines across each outline on the bed: a base that grips the bed
+  # along more than its outline and cannot be pushed out of shape.
+  base_line_spacing: 0.020
+  # The mesh is shrunk until its wireframe needs no more wire than this.
+  maximum_wire_m: 10.0
   # Tried in order when the frame fails the structural screen. Assumes a
   # 1.5 mm tip for the pen, which is not yet on hand.
   heavier_strands_m: [0.0015]
