@@ -88,6 +88,32 @@ def create_app(root: Path):
             raise HTTPException(404, "Artifact not found")
         return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
+    @app.get("/api/runs/{run_id}/picture")
+    def get_picture(run_id: str):
+        """The object's original picture from objs/: beside its source mesh, or
+        a picture in objs/ named like the mesh's folder (ghost.jpg, cute_ghost/)."""
+        manifest = run_path(run_id) / "asset_manifest.json"
+        name = read_json(manifest).get("source", {}).get("name") if manifest.is_file() else None
+        objs = root / "objs"
+        if not name or not objs.is_dir():
+            raise HTTPException(404, "No picture")
+
+        def pictures(folder):
+            return sorted(
+                p for p in folder.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+            )
+
+        for mesh in sorted(p for p in objs.rglob(name) if p.is_file()):
+            beside = pictures(mesh.parent) if mesh.parent != objs else []
+            if beside:
+                return FileResponse(beside[0], headers={"Cache-Control": "no-cache"})
+            words = {mesh.parent.name.lower(), mesh.stem.lower()}
+            for picture in pictures(objs):
+                stem = picture.stem.lower()
+                if any(stem in word or word in stem for word in words):
+                    return FileResponse(picture, headers={"Cache-Control": "no-cache"})
+        raise HTTPException(404, "No picture")
+
     @app.get("/api/runs/{run_id}/checks/{filename}")
     def check_inputs(run_id: str, filename: str):
         directory = run_path(run_id)

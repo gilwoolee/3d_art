@@ -382,7 +382,7 @@ export class Viewer {
     if(this.cellReference)this.cellReference.matrix.copy(transform.clone().multiply(new THREE.Matrix4().fromArray(table.axis_from_build_zero.flat()).transpose()));
   }
 
-  clearSequence() { this.clear(this.deposited); this.clear(this.activePath); this.clear(this.contactRegion); }
+  clearSequence() { this.clear(this.deposited); this.depositedTubes=undefined; this.clear(this.activePath); this.clear(this.contactRegion); }
 
   setContactRegion(center?:number[], radius?:number) {
     this.clear(this.contactRegion);
@@ -392,22 +392,43 @@ export class Viewer {
     this.contactRegion.add(marker);
   }
 
+  // Deposited wire as 1 mm tubes, like the stroke view: one instanced
+  // cylinder per segment, reused across frames as the wire grows and turns.
+  private depositedTubes?: THREE.InstancedMesh;
   setDepositedPaths(paths:number[][][]) {
-    this.clear(this.deposited);
     const segments=paths.reduce((count,points)=>count+Math.max(0,points.length-1),0);
-    if(!segments)return;
-    const vertices=new Float32Array(segments*6);
-    let offset=0;
+    let tubes=this.depositedTubes;
+    if (!tubes || tubes.instanceMatrix.count < segments) {
+      this.clear(this.deposited);
+      const capacity=Math.max(1024, 2 ** Math.ceil(Math.log2(Math.max(1, segments))));
+      tubes=new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(.0005,.0005,1,8,1,false),
+        new THREE.MeshStandardMaterial({color:0xb77a3f,roughness:.6}),
+        capacity,
+      );
+      tubes.frustumCulled=false;
+      this.deposited.add(tubes);
+      this.depositedTubes=tubes;
+    }
+    const up=new THREE.Vector3(0,1,0), a=new THREE.Vector3(), b=new THREE.Vector3();
+    const direction=new THREE.Vector3(), turn=new THREE.Quaternion(), matrix=new THREE.Matrix4();
+    const scale=new THREE.Vector3(1,1,1);
+    let index=0;
     for (const points of paths) {
-      for(let i=1;i<points.length;i++){
-        vertices.set(points[i-1],offset);
-        vertices.set(points[i],offset+3);
-        offset+=6;
+      for (let i=1;i<points.length;i++) {
+        a.set(points[i-1][0],points[i-1][1],points[i-1][2]);
+        b.set(points[i][0],points[i][1],points[i][2]);
+        direction.subVectors(b,a);
+        const length=direction.length();
+        if (length < 1e-9) continue;
+        turn.setFromUnitVectors(up,direction.divideScalar(length));
+        scale.set(1,length+.0005,1);
+        matrix.compose(a.add(b).multiplyScalar(.5),turn,scale);
+        tubes.setMatrixAt(index++,matrix);
       }
     }
-    const geometry=new THREE.BufferGeometry();
-    geometry.setAttribute('position',new THREE.BufferAttribute(vertices,3));
-    this.deposited.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({color:0xb77a3f})));
+    tubes.count=index;
+    tubes.instanceMatrix.needsUpdate=true;
   }
 
   setActivePath(points:number[][], drawing:boolean) {

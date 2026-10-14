@@ -31,6 +31,7 @@ app.innerHTML = `<div class="simple">
     <a class="simple-link" id="simple-workbench">Full workbench ↗</a>
   </header>
   <main class="simple-panels">
+    <section><h2>0 · Original picture</h2><div class="simple-photo"><img id="simple-photo" alt="The object's original picture"></div><p id="simple-photo-note"></p></section>
     <section><h2>1 · Original model</h2><div class="simple-view" id="simple-model"></div><p id="simple-model-note"></p></section>
     <section><h2>2 · Wireframe strokes<label class="simple-toggle"><input type="checkbox" id="simple-ghost" checked> Show statue</label></h2><div class="simple-view" id="simple-strokes"></div><p id="simple-strokes-note"></p></section>
     <section><h2>3 · Robot motion</h2><div class="simple-view" id="simple-robot"></div><p id="simple-robot-note"></p></section>
@@ -59,7 +60,7 @@ async function show(runId: string) {
   stop();
   const url = (file: string) => `/api/runs/${runId}/artifacts/${file}`;
   const status = (text: string) => { if (current === request) $('#simple-status').textContent = text; };
-  for (const id of ['#simple-model-note', '#simple-strokes-note', '#simple-robot-note']) $(id).textContent = '';
+  for (const id of ['#simple-photo-note', '#simple-model-note', '#simple-strokes-note', '#simple-robot-note']) $(id).textContent = '';
   $<HTMLButtonElement>('#simple-play').disabled = $<HTMLInputElement>('#simple-seek').disabled = $<HTMLButtonElement>('#simple-focus').disabled = true;
   $('#simple-clock').textContent = '–';
   $<HTMLAnchorElement>('#simple-workbench').href = `/?workbench=1&run=${encodeURIComponent(runId)}`;
@@ -68,6 +69,17 @@ async function show(runId: string) {
   const run = await json<RunDetail>(`/api/runs/${runId}`);
   if (current !== request) return;
   const has = (file: string) => run.artifacts.includes(file);
+
+  // 0. The object's original picture from objs/, when there is one.
+  const photo = $<HTMLImageElement>('#simple-photo');
+  photo.hidden = false;
+  photo.onload = () => { if (current === request) $('#simple-photo-note').textContent = 'Picture from objs/.'; };
+  photo.onerror = () => {
+    if (current !== request) return;
+    photo.hidden = true;
+    $('#simple-photo-note').textContent = 'No picture in objs/ for this model.';
+  };
+  photo.src = `/api/runs/${runId}/picture`;
 
   // 1. The original model, textured when the run kept it.
   // (The run's file list names only its JSON files, so the models are simply tried.)
@@ -97,6 +109,7 @@ async function show(runId: string) {
   // 3. The saved robot motion, when the run has a plan.
   const robotDone = (async () => {
     views.robot.clearCell();
+    views.robot.clearSequence();
     const planFile = ['offline_dual_arm_plan.json', 'dual_arm_repair_plan.json', 'dual_arm_plan.json'].find(has);
     if (!has('cell_manifest.json') || !planFile) { $('#simple-robot-note').textContent = 'This run has no saved robot motion.'; return; }
     const cell = await json<CellManifest>(url('cell_manifest.json'));
