@@ -633,12 +633,24 @@ def main():
             out.append(ok)
         return out
 
+    from time import perf_counter
+
+    clock, mark = {}, [perf_counter()]
+
+    def lap(name):
+        now = perf_counter()
+        clock[name] = clock.get(name, 0.0) + now - mark[0]
+        mark[0] = now
+
+    candidates = sorted(candidate_lines(mesh, args), key=lambda c: -c[2])
+    lap("find crease lines")
     # 1-2. take lines by importance, skipping near-duplicates; lay each on the
     #      surface and cut it where it turns to another face or where no tilt
     #      clears the frame; stop once enough reachable line is collected
     pieces, stages = [], {"laid": 0.0, "one face": 0.0}
     chosen, taken, used, reachable = [], [], 0.0, 0.0
-    for name, p, importance, push in sorted(candidate_lines(mesh, args), key=lambda c: -c[2]):
+    laying = clearing = 0.0
+    for name, p, importance, push in candidates:
         if reachable >= args.collect * args.detail:
             break
         if importance != np.inf and length(p) < args.min_line:
@@ -649,6 +661,7 @@ def main():
         chosen.append((name, q, push))
         taken.append(q)
         used += length(q)
+        started = perf_counter()
         p, az = surface.lay(q, push)
         stages["laid"] += length(p)
         p = dip(p, frame, frame_tree, args.dip)
@@ -662,12 +675,19 @@ def main():
                 continue
             part, s = p[a:b], int(sec[a])
             stages["one face"] += length(part)
+            laying += perf_counter() - started
+            started = perf_counter()
             sets = clear_sets(part, s)
+            clearing += perf_counter() - started
+            started = perf_counter()
             ok = np.array([bool(x) for x in sets], int)
             for run in np.split(np.arange(len(part)), np.flatnonzero(np.diff(ok)) + 1):
                 if ok[run[0]] and len(run) >= 8:
                     pieces.append((part[run], s, [sets[i] for i in run], [name]))
                     reachable += length(part[run])
+    lap("lay lines and check tilts")
+    clock["  of which laying on the surface"] = laying
+    clock["  of which tilt checks against the frame"] = clearing
     stages["tilt clears frame"] = sum(length(r[0]) for r in pieces)
 
     # 3. join pieces of one face end to end into tours
@@ -718,6 +738,7 @@ def main():
     ]
     stages["8 mm or longer, stroke cap"] = sum(length(t[0]) for t in tours)
 
+    lap("join into tours")
     # 4. order tours so no nose meets detail drawn earlier. Peel from the end:
     #    the last tour must clear all others. When none can, cut the conflicting
     #    samples out of the tour that conflicts least.
@@ -875,6 +896,7 @@ def main():
         hints = [float(t) for t in dict.fromkeys([*whole, *common])]
         ready.append({"position": position, "k": k, "p": kept[0], "tilt": kept[1], "hints": hints})
 
+    lap("order tours")
     if args.check_with_planner:
         # Keep what the arm can draw; cut a failing tour at the failing point,
         # or trim the end it cannot reach, and check the pieces again.
@@ -913,6 +935,7 @@ def main():
         stages["arm can draw it"] = sum(length(e["p"]) for e in ready)
         print(f"planner check: {checks} lines checked, {len(ready)} drawable")
 
+    lap("planner check")
     keep, total = [], 0.0
     for entry in sorted(ready, key=lambda e: -length(e["p"])):
         L = length(entry["p"])
@@ -1031,6 +1054,7 @@ def main():
         method="wireprint_with_detail_tours",
     )
 
+    lap("build graph")
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source, target)
@@ -1070,6 +1094,8 @@ def main():
     steady = sum(1 for r in rows if len(set(r["tilt_deg"])) == 1)
     sag = 1e3 * screen.get("maximum_displacement_m", np.nan)
     stages["touches frame, trimmed"] = detail
+    lap("write and structure check")
+    print("time by stage (s): " + ", ".join(f"{k} {v:.0f}" for k, v in clock.items()))
     print("length by stage (m): " + ", ".join(f"{k} {v:.2f}" for k, v in stages.items()))
     print(f"lines {len(chosen)} ({used:.2f} m) -> {len(pieces)} pieces -> {len(tours)} tours")
     print(f"ordering cut {cut_out / 1000:.2f} m; {dropped} tours never touch the frame")

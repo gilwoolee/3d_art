@@ -1,0 +1,21 @@
+name: Liberty statue · WIR3D feature curves
+source: objs/liberty/liberty_statue_only.glb
+run_dir: runs/liberty_statue_wir3d
+source_up: y
+max_extent_m: 0.15
+seed: 42
+geometry_faces: 80000
+geometric_candidates:
+  sections_per_axis: 9
+  min_length_m: 0.012
+  max_curves: 64
+  fit_tolerance_m: 0.0007
+wir3d:
+  repository: external/wir3d
+  revision: 35171dfca522272eb113882acfaaf6de746a78ce
+  budgets:
+  - 12
+  - 24
+  geometry_iterations: 10000
+  semantic_iterations: 10000
+  keypoints: 15
