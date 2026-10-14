@@ -755,11 +755,15 @@ class CellPlanner:
         if identity not in self._pen_spheres:
             self._pen_spheres[identity] = PenSpheres(arm.tool.metadata)
         spheres, wires = self._pen_spheres[identity], wire_arrays(scene)
+        # A body may keep its own clearance from wire (the nose right behind a
+        # tip that runs along existing wire); every other body keeps the margin.
+        own = self.profile["environment"].get("tool_clearance_m", {})
+        margins = {None: self.margin, **{f"tool/{name}": value for name, value in own.items()}}
         self.verification_stats["pen_sphere_poses"] += len(fractions)
         for u, count in zip(fractions, marks, strict=True):
             flange = arm.robot.forward(position(u), np.eye(4))
             failure = spheres.violation(
-                flange, tuple(values[:count] for values in wires), self.margin
+                flange, tuple(values[:count] for values in wires), margins
             )
             if failure is None:
                 continue
@@ -770,19 +774,22 @@ class CellPlanner:
                 (
                     fcl.distance(
                         body, scene.objects[wire], fcl.DistanceRequest(), fcl.DistanceResult()
-                    ),
+                    )
+                    - margins.get(tool.name, self.margin),
                     wire,
                     tool.name,
                 )
                 for wire in failure.pop("wires")
                 for body, tool in zip(bodies, arm.tool.bodies, strict=True)
             )
-            if exact[0] >= self.margin:
+            if exact[0] >= 0:
                 self.verification_stats["pen_sphere_cleared_by_exact_shape"] += 1
                 continue
+            margin = margins.get(exact[2], self.margin)
             return {
                 **failure,
-                "distance_m": float(exact[0]),
+                "distance_m": float(exact[0] + margin),
+                "margin_m": margin,
                 "wire": scene.segments[exact[1]]["name"],
                 "body": exact[2],
                 "fraction": float(u),

@@ -84,6 +84,11 @@ def test_continuous_check_finds_collision_between_clear_endpoints(tmp_path):
             assert (spheres.violation(np.eye(4), wires, 0.001) is None) == (found >= 0.001 + 1e-9)
     assert exceeded == 0 and np.median(proud) < 0.0003
     assert spheres.violation(np.eye(4), tuple(values[:0] for values in wires), 1.0) is None
+    # A body may keep its own clearance; the others keep the shared margin.
+    hit = spheres.violation(np.eye(4), wires, 1.0)
+    own = {None: 1.0, hit["body"]: hit["distance_m"] - 1e-6}
+    other = spheres.violation(np.eye(4), wires, own)
+    assert other is None or (other["body"] != hit["body"] and other["margin_m"] == 1.0)
     from pen_art.planning.scene import MaterialScene
 
     scene = MaterialScene()

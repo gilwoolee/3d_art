@@ -32,6 +32,8 @@ def pen_clear(planner, arm, point, rotation, scene, clearance):
     target = np.eye(4)
     target[:3, :3], target[:3, 3] = rotation, point
     flange = target @ np.linalg.inv(arm.flange_to_tcp)
+    # A body may keep its own clearance from wire (see pen_wire_failure).
+    own = getattr(planner, "profile", {}).get("environment", {}).get("tool_clearance_m", {})
     for body in arm.tool.bodies:
         transform = flange @ body.origin
         obj = placed(body.geometry, transform)
@@ -39,7 +41,12 @@ def pen_clear(planner, arm, point, rotation, scene, clearance):
             optimization_distance(obj, other) < clearance for other in planner.obstacles.values()
         ):
             return False
-        if scene.possibly_near_body(obj, clearance):
+        wire_clearance = (
+            clearance - planner.margin + own[body.name.removeprefix("tool/")]
+            if body.name.removeprefix("tool/") in own
+            else clearance
+        )
+        if scene.possibly_near_body(obj, wire_clearance):
             try:
                 nearest = scene.nearest(
                     obj,
@@ -48,7 +55,7 @@ def pen_clear(planner, arm, point, rotation, scene, clearance):
                 )
             except TimeoutError:
                 return False  # A sample timeout is not an infeasibility certificate.
-            if nearest and nearest["distance_m"] < clearance:
+            if nearest and nearest["distance_m"] < wire_clearance:
                 return False
     return True
 
