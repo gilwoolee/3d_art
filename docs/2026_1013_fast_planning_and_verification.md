@@ -207,6 +207,18 @@ verification fell to 27.4 s and 18.5 s because there are fewer strokes.
   6 mm layers (one stroke found no arm path) but does at 5.2 mm; not
   investigated.
 
+- A 1.5 mm strand does not change the stroke count or the modeled print
+  time. At 4.3 mm layers it halves the Palace's sag (0.005 to 0.002 mm) and
+  more than doubles its mass (12 g to 28 g). It carries 2.25 times the
+  plastic per millimetre, so on a real pen it would cool more slowly. The
+  1 mm strand stays.
+- Not built, to go past 5.4 mm layers: thin layers on small loops with tall
+  layers on the main body (the generator assumes one height throughout), and
+  tilting the pen along a slant so it may descend steeper than 27 degrees
+  (changes the pen collision assumptions). Also open: building tower by
+  tower, which would remove most of the 65 lifts but leaves pen access beside
+  a finished tower unchecked.
+
 Runs: `runs/geomfirst_gf65_*_w24`, sources `runs/geomfirst_*_vr4_source` and
 `runs/geomfirst_{palace,branching}vr4_f8_l5_source`.
 
