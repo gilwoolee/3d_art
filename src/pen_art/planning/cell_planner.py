@@ -409,11 +409,14 @@ class CellPlanner:
             radius = arm.tool.tip_radius_m or self.transit["virtual_tip_radius_m"]
             tip = Body("virtual_tip", arm.robot.tip, arm.flange_to_tcp, fcl.Sphere(radius), radius)
             self.tip_models[identity] = RobotCollisionModel(arm.robot, [*arm.tool.bodies, tip])
+            # Pen-scope planning checks the pen; a profile may add the robot's
+            # links, so tilted poses that fold the arm into itself fail early.
+            with_robot = bool(self.profile.get("planning_checks_robot", False))
             self.pen_models[identity] = RobotCollisionModel(
-                arm.robot, arm.tool.bodies, include_robot=False
+                arm.robot, arm.tool.bodies, include_robot=with_robot
             )
             self.pen_tip_models[identity] = RobotCollisionModel(
-                arm.robot, [*arm.tool.bodies, tip], include_robot=False
+                arm.robot, [*arm.tool.bodies, tip], include_robot=with_robot
             )
         # A tool body may keep its own clearance from wire (the nose right
         # behind a tip that runs along existing wire): every collision model.
