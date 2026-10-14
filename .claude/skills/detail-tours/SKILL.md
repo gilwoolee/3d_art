@@ -67,10 +67,13 @@ background jobs); 24 workers.
      --profile PROFILE --check-with-planner --margin 0.0008 --detail 12 --minutes 40 --collect 2.0
    ```
 
-   `--check-with-planner` builds a cell from the detail profile and, at each
-   tour's turntable position, keeps only the tilts that pass the planner's
-   own pen screen and drawing sampler (IK along the whole tour); tours with
-   none are left out. Generate well above the budget: the planner check and
+   `--check-with-planner` builds a cell from the detail profile and asks the
+   planner's own samplers, at each tour's turntable position, whether the
+   whole arm can draw it: pen screen against the frame, drawing path (IK,
+   self and fixed obstacles), the posture limit, an approach and a
+   withdrawal. A failing tour is cut at the failing point (or trimmed at the
+   end it cannot reach) and the pieces are checked again; each kept tour
+   carries the tilts that worked. Generate well above the budget: the planner check and
    the planning rounds both remove tours, and the plan step trims to 5 m /
    15 min at the end. Read the "length by stage" line to see where length is
    lost (faces the pen cannot reach, no clear tilt, arm cannot draw it, not
@@ -120,8 +123,12 @@ background jobs); 24 workers.
 4. Order the tours by peeling from the end: the last tour's nose must clear
    every other tour and its own wire more than 4 mm away. When nothing can go
    last, cut the conflicting points out of the tour that conflicts least.
-5. Start each tour on a contact, overhang at most 8 mm, drop tours that never
-   touch the frame; keep the longest tours within `--detail` and `--minutes`.
+5. Start each tour on a contact (ending uphill when either way works),
+   overhang at most 8 mm, drop tours that never touch the frame. With
+   `--check-with-planner`, check each tour with the planner and cut failing
+   ones into drawable pieces. Keep the longest tours within `--detail` and
+   `--minutes`, in an order that stays on one turntable face as long as it
+   can.
 6. Write the source run: frame members split at contacts, tour members,
    fused contacts, per-tour tilt candidates, `detail_tours.json`.
 
