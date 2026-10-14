@@ -182,7 +182,8 @@ def main():
                     rec[0] += curve_length(action)
                     rec[1] += per_action.get(action["id"], 0.0)
             detail, added = sum(r[0] for r in tours.values()), (total - baseline) / 60
-            row.update(detail_m=detail, added_minutes=added, tours=len(tours))
+            own = sum(r[1] for r in tours.values()) / 60
+            row.update(detail_m=detail, added_minutes=added, detail_minutes=own, tours=len(tours))
             print(
                 f"round {number}: {status}; {detail:.2f} m detail in {len(tours)} tours, "
                 f"{added:.1f} min added",
@@ -219,6 +220,7 @@ def main():
             "final_source": final["source"],
             "detail_m": final.get("detail_m"),
             "added_minutes": final.get("added_minutes"),
+            "detail_minutes": final.get("detail_minutes"),
             "frame_seconds": baseline,
             "profile": str(profile),
         },
