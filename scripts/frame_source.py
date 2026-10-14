@@ -3,10 +3,13 @@
     .venv/bin/python scripts/frame_source.py NAME MESH [--up y] [--layer 0.0097]
         [--feature 0.008] [--coil-width M] [--template PROFILE]
 
+The default template is the cell all current frames were planned in
+(``configs/profiles/frame_template.yaml``); only the riser radius changes.
+
 Writes ``runs/geomfirst_NAME_source`` (the frame within the 10 m wire budget,
 longest side up to 150 mm) and ``runs/geomfirst_profiles/NAME.yaml``: the
 template profile with the build riser sized to the frame's footprint. Plan
-the frame with ``TAG=gfNN ./runs/geomfirst_one.sh NAME SOURCE PROFILE`` and keep
+the frame with ``TAG=gfNN scripts/plan_frame.sh NAME SOURCE PROFILE`` and keep
 the run as the detail harness's ``--frame-run``.
 """
 
@@ -29,7 +32,7 @@ def main():
     parser.add_argument("--feature", type=float, default=0.008, help="m; thinner parts dropped")
     parser.add_argument("--coil-width", type=float, help="m; parts this narrow are wound")
     parser.add_argument(
-        "--template", type=Path, default=Path("runs/geomfirst_profiles/ghost_b10.yaml")
+        "--template", type=Path, default=Path("configs/profiles/frame_template.yaml")
     )
     args = parser.parse_args()
 
@@ -47,6 +50,7 @@ def main():
     radius = float(np.linalg.norm(ground[:, :2], axis=1).max()) + 0.003
     profile["environment"]["build_riser"]["radius_m"] = round(radius, 3)
     out = Path(f"runs/geomfirst_profiles/{args.name}.yaml")
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(yaml.safe_dump(profile, sort_keys=False))
     screen = read_json(source / "structural_screen.json")
     wire = sum(e["length_m"] for e in graph["edges"])

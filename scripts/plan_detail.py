@@ -10,7 +10,8 @@ tip may run along existing wire). FRAME_RUN is the frame's own planned run; its
 print time is the baseline for the added time.
 
 Each round plans the current source with ``scripts/benchmark_parallel_build.py``
-(geometry-first, like ``runs/geomfirst_one.sh``).
+(geometry-first, like ``scripts/plan_frame.sh``, with the same empty motion
+library: geometry-first planning takes no seeds from it).
 
 * Planning stops and every blocked stroke is a detail tour: those tours are
   removed (members, nodes, fused contacts), the plan is rebuilt, next round.
@@ -37,6 +38,8 @@ from pen_art.structure import analyze_structure
 
 sys.path.insert(0, str(Path(__file__).parent))
 from detail_tours import detail_profile, tilt_hints  # noqa: E402
+
+EMPTY_LIBRARY = Path("runs/empty_motion_library")
 
 
 def drop_tours(source, target, tours):
@@ -122,6 +125,7 @@ def main():
         args.base_profile, args.base_profile.parent / f"{Path(args.output).name}_profile.yaml"
     )
     baseline, _ = planned_seconds(args.frame_run)
+    EMPTY_LIBRARY.mkdir(parents=True, exist_ok=True)
     source = group_faces(args.source, Path(f"{args.output}_r00_source"))
     rounds, dropped = [], []
     for number in range(args.maximum_rounds):
@@ -141,6 +145,8 @@ def main():
                     str(args.workers),
                     "--maximum-seconds",
                     "7200",
+                    "--motion-library",
+                    str(EMPTY_LIBRARY),
                     "--build-option=--geometry-first",
                     "--verification-option=--accept-geometry-proofs",
                 ],

@@ -73,7 +73,7 @@ plus drawing at about 14 mm/s; budget 2 m and 15 minutes per object.
   candidates in the build frame.
 - `src/pen_art/server.py:92` `get_picture` and `web/src/simple.ts:34` panel 0:
   the original picture for an object, used as the agent's reference.
-- `runs/geomfirst_one.sh`, `scripts/benchmark_parallel_build.py`: frame planning
+- `scripts/plan_frame.sh`, `scripts/benchmark_parallel_build.py`: frame planning
   and each plan round.
 
 ## Phased Breakdown

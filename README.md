@@ -31,7 +31,10 @@ in the [active plan](docs/PLAN.md).
 Pen, material, tool dimensions, physical robot variant, and turntable
 parameters remain uncalibrated.
 
-Continuing on Blondie: read the [handoff](docs/HANDOFF.md) first.
+**Start with the [handoff](docs/HANDOFF.md)**: current state, setting up a new
+machine (`scripts/setup_machine.sh`, plus the runs archive from
+`scripts/pack_runs.sh`), and the next work. Much of the status above and
+below describes the earlier cube/bottle/Palace searches.
 
 ## Work on Blondie
 
@@ -458,18 +461,12 @@ limits it:
 
 ## Repository contents
 
-Git tracks source, tests, configs, documentation, reference fixtures, and research
-evidence. Generated `runs/`, original Palace meshes, external checkouts, installed
-environments, and tool binaries remain on disk on Blondie; a Git clone does not
-download those artifacts. Nothing from the existing workspace is deleted by pulling.
-
-For a fresh machine, install Python dependencies as below, then fetch the pinned
-Flexiv description before running `scripts/prepare_single_arm_cell.py`:
-
-```bash
-git clone https://github.com/flexivrobotics/flexiv_description.git external/flexiv_description
-git -C external/flexiv_description checkout --detach 92ef7865d76585e6e08d291bdfe652d32f7740f4
-```
+Git tracks source, tests, configs, documentation, reference fixtures, research
+evidence, and the meshes and pictures in `objs/` (Git LFS: Liberty, ghost,
+pumpkin, Palace). Generated `runs/`, external checkouts, installed environments
+and tool binaries are not in git. On a fresh machine run `scripts/setup_machine.sh`
+(LFS files, `.venv`, the pinned Flexiv description, the robot cell, Node and the
+viewer build) and unpack the runs archive; see the [handoff](docs/HANDOFF.md).
 
 ## Local fallback and history
 

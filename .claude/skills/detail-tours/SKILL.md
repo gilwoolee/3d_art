@@ -52,12 +52,13 @@ background jobs); 24 workers.
    | Liberty (cut statue) | `runs/geomfirst_libertystatue_c1_source` | `runs/geomfirst_profiles/liberty_statue.yaml` | `runs/geomfirst_gf75_liberty_statue_w24` |
    | Ghost | `runs/geomfirst_ghost_b10_source` | `runs/geomfirst_profiles/ghost_b10.yaml` | `runs/geomfirst_gf71_ghost_w24` |
    | Pumpkin | `runs/geomfirst_pumpkin_b10_source` | `runs/geomfirst_profiles/pumpkin_b10.yaml` | `runs/geomfirst_gf71_pumpkin_w24` |
+   | Palace (new frame) | `runs/geomfirst_palace2_source` | `runs/geomfirst_profiles/palace2.yaml` | `runs/geomfirst_gf101_palace2_w24` |
 
    For a new mesh:
 
    ```bash
    PYTHONPATH=src .venv/bin/python scripts/frame_source.py NAME objs/NAME/NAME.glb --up y
-   TAG=gfNN ./runs/geomfirst_one.sh NAME runs/geomfirst_NAME_source runs/geomfirst_profiles/NAME.yaml
+   TAG=gfNN scripts/plan_frame.sh NAME runs/geomfirst_NAME_source runs/geomfirst_profiles/NAME.yaml
    ```
 
    The frame must reach `FULL_BUILD_VERIFIED` (see `runs/geomfirst_gfNN_progress.txt`).
@@ -134,7 +135,7 @@ background jobs); 24 workers.
 | Liberty | `geomfirst_gf94_liberty_detail_r14_w24` | 1.99 m | 33 | 11.5 min | 2.04 m, 16.0 min |
 | Ghost | `geomfirst_gf98_ghost_detail_r14_w24` | 1.98 m | 28 | 8.1 min | 2.21 m, 10.2 min |
 | Pumpkin | `geomfirst_gf98_pumpkin_detail_r24_w24` | 1.99 m | 17 | 7.7 min | 3.40 m, 15.0 min |
-| Palace | `geomfirst_gf100_palace_detail_r24_w24` | 1.98 m | 33 | 8.3 min | 2.29 m, 12.5 min |
+| Palace (old frame) | `geomfirst_gf100_palace_detail_r24_w24` | 1.98 m | 33 | 8.3 min | 2.29 m, 12.5 min |
 
 Liberty was generated before the bigger-pool settings and the 15 mm
 back-away; the ghost, pumpkin and Palace used the commands above (Palace:
