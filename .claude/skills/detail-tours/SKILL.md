@@ -78,7 +78,7 @@ background jobs); 24 workers.
    withdrawal. A failing tour is cut at the failing point (or trimmed at the
    end it cannot reach) and the pieces are checked again; each kept tour
    carries the tilts that worked. Generate well above the budget: the planner check and
-   the planning rounds both remove tours, and the plan step trims to 5 m /
+   the planning rounds both remove tours, and the plan step trims to 2 m /
    15 min at the end. Read the "length by stage" line to see where length is
    lost (faces the pen cannot reach, no clear tilt, arm cannot draw it, not
    touching the frame). The pool of distinct crease lines is the real cap on
