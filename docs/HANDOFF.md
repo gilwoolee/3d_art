@@ -23,7 +23,8 @@ over the surface, drawn after the frame.
 
 Git carries the code, docs, configs, the four meshes in `objs/` (Git LFS) and
 one cell profile template. Planned runs are not in git: the `runs/` folder here
-is 108 GB. A 1.6 GB archive holds the runs worth keeping.
+is 108 GB. A 2.3 GB archive holds the runs worth keeping and the motion
+library.
 
 1. **Clone** and switch to the branch:
 
@@ -53,10 +54,22 @@ is 108 GB. A 1.6 GB archive holds the runs worth keeping.
    tar --zstd -xf 3d_art_runs.tar.zst
    ```
 
-   It holds `runs/viewer_runs.json`, all profiles (`runs/geomfirst_profiles/`),
-   the frame sources and detail sources behind the results below, the verified
-   frame and detail runs, and the detail reports. Without it you can regenerate
-   every frame from `objs/` (see **Running**), but you lose the planned results.
+   It holds:
+   - `runs/viewer_runs.json` and all profiles (`runs/geomfirst_profiles/`);
+   - the frame and detail sources behind the results below;
+   - the verified frame and detail runs, and the detail reports;
+   - the motion library `runs/motion_library_phase1_upright27_v1`, without its
+     `attempts/` folder.
+
+   **The library matters.** Frame strokes are drawings adapted from library
+   records. Without it they fall back to the planner's cold sampler. On the
+   ghost that gives 13.0 min of print time instead of 10.1. The library still
+   works after the move, although the robot cell's file paths change: in a
+   fresh clone at another path, all 38 ghost strokes came from it, with the same
+   10.08 min. Detail strokes, which name their own tilts, never use it.
+
+   Without the archive you can still regenerate every frame from `objs/` (see
+   **Running**), but the planned results are lost and frames plan slower.
 
 4. **Check:**
 
@@ -67,15 +80,24 @@ is 108 GB. A 1.6 GB archive holds the runs worth keeping.
    ```
 
    Then plan one frame to check the planner end to end (half a minute):
-   `TAG=gf102 scripts/plan_frame.sh ghost runs/geomfirst_ghost_b10_source runs/geomfirst_profiles/ghost_b10.yaml`,
-   and look for `FULL_BUILD_VERIFIED` in `runs/geomfirst_gf102_progress.txt`.
+   `TAG=gf102 scripts/plan_frame.sh ghost runs/geomfirst_ghost_b10_source runs/geomfirst_profiles/ghost_b10.yaml`.
+   - `runs/geomfirst_gf102_progress.txt` should end in `FULL_BUILD_VERIFIED`.
+   - `runs/geomfirst_gf102_ghost_w24/parallel_build.json` should show
+     `"selected": {"cache": 38, ...}`.
+   - The seed count in `motion_reuse.json` reads 0 even when every stroke
+     came from the library. Read `selected` instead.
+
+These steps were tested on 2026-10-14 in a fresh clone from GitHub at another
+path on the old machine:
+- setup completed;
+- 25 Python and 4 browser tests passed;
+- the ghost frame planned and verified at 10.08 min;
+- the Palace frame regenerated from `objs/` matched `geomfirst_palace2_source`
+  node for node.
 
 **Left behind on purpose:**
-- **The motion library** (`runs/motion_library_phase1_upright27_v1`, 4.2 GB).
-  Geometry-first planning takes no seeds from it: 0 of 18,400 requests on the
-  Palace and 0 of 10,296 on the ghost detail run. `scripts/plan_frame.sh` and
-  `scripts/plan_detail.py` point at an empty one. A prism planned with an empty
-  library in 12.1 s, the same as with it.
+- **The library's `attempts/` folder** (2 GB). It records past misses for
+  training data, and planning does not read it.
 - **Every other run:** older experiments, intermediate detail rounds, and the
   cube, bottle and Palace searches from before geometry-first.
 - **The WIR3D GPU environment and its checkouts:** `.venv-wir3d`, and under
