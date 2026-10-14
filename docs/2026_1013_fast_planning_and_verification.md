@@ -236,6 +236,14 @@ pumpkin and Liberty meshes in `objs/`. Results are in the README table.
   which blocked planning.
 - A crossed grid every 20 mm fills each base outline, and a 10 m wire budget
   shrinks a new mesh to fit.
+- Coil towers were added for parts too narrow for loops, first for the
+  Liberty statue's raised arm. With loops, the arm's first riser stood 1.7 mm
+  from the head's zigzag at the fork and could not be drawn in either order.
+  Starting the coil as a funnel lying on the supporting outline did not plan;
+  it starts from the nearest point of that outline instead, which leaves a
+  few steep pieces at the start (19 holds across the arm's eight strokes).
+  Whether touching turns fuse into a tube, and whether the pen can lay a turn
+  on the one below, are untested on a pen.
 - Open: the planner accepts a stroke with nothing under it (the wireframe no
   longer produces one); the branching shape fails to plan at 8 mm layers; the
   Palace's 13 mm towers stand on risers alone at 7.6 mm layers; bed adhesion

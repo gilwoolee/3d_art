@@ -56,6 +56,8 @@ def _mesh_framework_at_height(
     minimum_contour=0.0,
     maximum_branch_descent_deg=None,
     base_line_spacing=None,
+    coil_maximum_width=None,
+    coil_pitch=0.001,
 ):
     if min(layer_height, zigzag_spacing, diameter, slice_simplification) <= 0:
         raise ValueError("Positive layer, zigzag, diameter and simplification are required")
@@ -194,6 +196,65 @@ def _mesh_framework_at_height(
             kept.append(up)
         layers[index] = kept
         started = started or bool(kept)
+
+    # A coil tower: a part too narrow for loops and zigzags, such as a raised
+    # arm, is wound as one strand that climbs by its own thickness each turn,
+    # so the turns touch and form a thin tube. It applies to a run of narrow
+    # outlines that ends without widening again, standing on one wider outline
+    # or on the bed. Those outlines leave the layers and are wound instead.
+    towers = []
+    if coil_maximum_width:
+
+        def narrow(loop):
+            x0, y0, x1, y1 = loop["polygon"].bounds
+            return not loop["depth"] and max(x1 - x0, y1 - y0) <= coil_maximum_width
+
+        def touching(loop, others):
+            return [
+                other
+                for other in others
+                if other["depth"] == loop["depth"] and other["polygon"].intersects(loop["polygon"])
+            ]
+
+        wound = set()
+        for index in range(len(layers) - 1, -1, -1):
+            for loop in layers[index]:
+                ends = index + 1 == len(layers) or not touching(loop, layers[index + 1])
+                if id(loop) in wound or not narrow(loop) or not ends:
+                    continue
+                chain, level = [loop], index
+                while level > 0:
+                    below = touching(chain[0], layers[level - 1])
+                    if (
+                        len(below) != 1
+                        or not narrow(below[0])
+                        or len(touching(below[0], layers[level])) != 1
+                    ):
+                        break
+                    chain.insert(0, below[0])
+                    level -= 1
+                support = touching(chain[0], layers[level - 1]) if level else []
+                grounded = abs(chain[0]["points"][0, 2] - low) < 1e-7
+                if len(support) != 1 and not (grounded and len(chain) > 1):
+                    continue
+                # The first layer leans from the supporting outline to the
+                # tower. More than two strand widths per turn and its turns
+                # would hang in air, so such a part is not wound.
+                if support and not grounded:
+                    below = LineString(support[0]["points"][:, :2])
+                    reach = max(below.distance(Point(p)) for p in chain[0]["points"][:, :2])
+                    rise = chain[0]["points"][0, 2] - support[0]["points"][0, 2]
+                    if reach > 2 * diameter / coil_pitch * rise:
+                        continue
+                towers.append(
+                    {
+                        "level": level,
+                        "loops": chain,
+                        "support": None if grounded or not support else support[0],
+                    }
+                )
+                wound.update(id(member) for member in chain)
+        layers = [[loop for loop in loops if id(loop) not in wound] for loops in layers]
 
     relations, bridges, spacing_adjustments, omitted_steep, nearest_pairs = [], [], [], 0, 0
     stretched = 0
@@ -538,6 +599,58 @@ def _mesh_framework_at_height(
         if held:
             last = held[-1][1]
 
+    coil_turns, fused = 0, []
+    for number, tower in enumerate(towers):
+        loops, support, level = tower["loops"], tower["support"], tower["level"]
+        stack, reference = [], loops[0]["points"][0]
+        if support is not None:
+            # The strand leaves the supporting outline at its nearest point and
+            # widens to the tower's own outline over the first layer.
+            centre = np.asarray(loops[0]["polygon"].centroid.coords[0])
+            ring = LineString(support["points"][:, :2])
+            fraction = ring.project(Point(centre), normalized=True)
+            support["joins"].add(fraction % 1.0)
+            reference = sample_loop(support["points"], fraction)
+            stack.append(reference)
+        for loop in loops:
+            stack.append(align_loop(loop["points"], reference))
+            reference = stack[-1][0]
+        first, beneath = level + (support is None), []
+        for step, (lower, upper) in enumerate(zip(stack[:-1], stack[1:], strict=True)):
+            z0, z1 = (lower[2] if lower.ndim == 1 else lower[0, 2]), upper[0, 2]
+            turns_here = max(1, int(round((z1 - z0) / coil_pitch)))
+            per_turn = max(8, int(np.ceil(LineString(upper[:, :2]).length / 0.0015)))
+            points = []
+            for sample in range(turns_here * per_turn + 1):
+                along = sample / (turns_here * per_turn)
+                around = (sample % per_turn) / per_turn
+                high = sample_loop(upper, around)
+                base = lower if lower.ndim == 1 else sample_loop(lower, around)
+                point = (1 - along) * base + along * high
+                point[2] = z0 + along * (z1 - z0)
+                points.append(point)
+            coil_turns += turns_here
+            # Each point rests on the turn below it: the same place one turn
+            # back, or the nearest point of the section beneath.
+            for sample, point in enumerate(points):
+                if sample >= per_turn:
+                    under = points[sample - per_turn]
+                elif beneath:
+                    under = min(beneath, key=lambda other: np.linalg.norm(other - point))
+                else:
+                    continue
+                if np.linalg.norm(under - point) <= 2 * diameter:
+                    fused.append([node(under), node(point)])
+            beneath = points[-per_turn - 1 :]
+            for sample, (start, end) in enumerate(zip(points[:-1], points[1:], strict=True)):
+                add(
+                    start,
+                    end,
+                    f"coil-{number}-{first + step}",
+                    [sample, sample + 1],
+                    1000 * (first + step) + 900 + number,
+                    "framework",
+                )
     for number, stops in enumerate(base_lines):
         # Drawn before the outlines they join, while the bed is still clear.
         for step, (start, end) in enumerate(zip(stops[:-1], stops[1:], strict=True)):
@@ -597,6 +710,8 @@ def _mesh_framework_at_height(
         omitted_floating_contours=omitted_floating,
         base_ring=base_ring,
         base_lines=len(base_lines),
+        coil_towers={"count": len(towers), "turns": coil_turns},
+        fused_turns=[pair for pair in fused if pair[0] != pair[1]],
         omitted_small_contours=omitted_small,
         omitted_steep_branch_diagonals=omitted_steep,
         nearest_point_zigzags=nearest_pairs,
@@ -611,6 +726,8 @@ def _mesh_framework_at_height(
             "junction_merge_m": 0.00002,
             "minimum_anchor_spacing_m": minimum_anchor_spacing,
             "base_line_spacing_m": base_line_spacing,
+            "coil_maximum_width_m": coil_maximum_width,
+            "coil_pitch_m": coil_pitch,
         },
         physical_status="unverified",
         simulation_only=True,
@@ -644,6 +761,8 @@ def mesh_framework(
     slice_simplification=0.00002,
     minimum_contour=0.0,
     base_line_spacing=None,
+    coil_maximum_width=None,
+    coil_pitch=0.001,
 ):
     """Generate unchanged-scale contours with nozzle-aware descending chords.
 
@@ -684,6 +803,8 @@ def mesh_framework(
             minimum_contour=minimum_contour,
             maximum_branch_descent_deg=maximum_descent_angle_deg,
             base_line_spacing=base_line_spacing,
+            coil_maximum_width=coil_maximum_width,
+            coil_pitch=coil_pitch,
         )
         layer_z = sorted({node["position"][2] for node in graph["nodes"]})
         effective_height = max(np.diff(layer_z), default=0.0)
@@ -757,6 +878,8 @@ def generate(run, **settings):
         "slice_simplification",
         "minimum_contour",
         "base_line_spacing",
+        "coil_maximum_width",
+        "coil_pitch",
     }
     parameters = {
         "maximum_descent_angle_deg": 27.0,

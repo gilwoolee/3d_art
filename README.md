@@ -369,6 +369,7 @@ Long runs on Blondie go in tmux. Wireframe settings live in the source run's
 | `layer_height` | Requested layer height. Taller layers mean less wire and coarser detail. |
 | `base_line_spacing` | Spacing of the grid of lines across each outline on the bed. |
 | `maximum_wire_m` | Wire budget; a new mesh is shrunk to fit it. |
+| `coil_maximum_width`, `coil_pitch` | When a narrow part becomes a coil tower, and how far it climbs per turn. |
 | `heavier_strands_m` | Strand diameters tried in order when the frame fails the structural screen (default 1.5 mm, a tip not yet on hand). The choice is recorded as `strand_escalation` and is also the wire's collision size. |
 
 The structural model treats the strand as 3D pen PLA at 2.5 GPa, a typical
@@ -390,13 +391,15 @@ speed limits are settings, not measurements of a real pen or arm.
 | Vase, outer shell only | 100 x 100 x 144 | 9.6 mm | 9.6 m | 38 | 24.7 s | 9.8 min |
 | Branching shape | 103 x 89 x 144 | 5.3 mm | 5.8 m | 86 | 16.3 s | 9.1 min |
 | Palace | 109 x 109 x 83 | 7.6 mm | 7.0 m | 140 | 24.9 s | 16.4 min |
-| Liberty statue | 73 x 43 x 115 | 9.6 mm | 2.7 m | 34 | 12.3 s | 3.6 min |
+| Liberty statue, cut at the feet, 4 mm feature | 47 x 48 x 143 | 5.3 mm | 4.9 m | 57 | 18.5 s | 7.1 min |
 | Ghost | 120 x 91 x 135 | 9.7 mm | 9.5 m | 39 | 24.7 s | 10.2 min |
 | Pumpkin | 116 x 107 x 126 | 9.7 mm | 9.6 m | 41 | 28.7 s | 10.9 min |
 
-The last five use an 8 mm minimum feature. The Liberty statue is thinner than
-that at this size, so its wireframe is a tapered post without arm, torch or
-crown. Runs: `runs/geomfirst_gf71_*_w24`.
+The branching shape, Palace, ghost and pumpkin use an 8 mm minimum feature. The
+Liberty statue is the mesh cut at the statue's feet
+(`objs/liberty/liberty_statue_only.glb`) with a 4 mm minimum feature; its
+raised arm is a coil tower. Crown spikes and flame are too fine to appear.
+Runs: `runs/geomfirst_gf71_*_w24` and `runs/geomfirst_gf75_liberty_statue_w24`.
 
 How the wireframe keeps a print short and standing:
 
@@ -414,6 +417,15 @@ How the wireframe keeps a print short and standing:
   drawn first. A shape with a rounded underside has no outline on the bed, so
   its lowest outline is also drawn on the bed (`base_ring`) and joined by the
   usual band of risers and slants. This adds a straight skirt one layer tall.
+- **Coil tower.** A part too narrow for loops and zigzags, such as a raised
+  arm, is wound as one strand that climbs `wireprint.coil_pitch` (1 mm, the
+  strand's thickness) per turn, so the turns touch and form a thin tube. It
+  applies to a run of outlines no wider than `wireprint.coil_maximum_width`
+  (10 mm) that ends without widening again and stands on the rim of one wider
+  outline or on the bed. It is drawn a layer at a time with everything else at
+  that height. The structural check ties touching turns together
+  (`fused_turns`), and a gently climbing strand is drawn without the riser
+  hold. The statue's arm is 35 turns and 0.7 m of wire.
 - **No loops in mid-air.** An outline that starts above the object's lowest
   one with nothing beneath it is left out (`omitted_floating_contours`); the
   outline it would have joined covers that part.

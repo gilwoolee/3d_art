@@ -9,6 +9,11 @@ wireprint:
   # A grid of lines across each outline on the bed: a base that grips the bed
   # along more than its outline and cannot be pushed out of shape.
   base_line_spacing: 0.020
+  # Coil tower: a run of outlines no wider than this that ends without
+  # widening again is wound as one strand climbing coil_pitch per turn. At the
+  # strand's own thickness the turns touch and form a thin tube.
+  coil_maximum_width: 0.010
+  coil_pitch: 0.001
   # The mesh is shrunk until its wireframe needs no more wire than this.
   maximum_wire_m: 10.0
   # Tried in order when the frame fails the structural screen. Assumes a

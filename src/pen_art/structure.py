@@ -207,6 +207,15 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
         for a, b in zip(chain, chain[1:], strict=False):
             if np.linalg.norm(np.asarray(positions[a]) - positions[b]) > 1e-9:
                 elements.append((a, b, edge))
+    # Turns of a coil tower that touch are one piece of plastic. Tie each pair
+    # of touching points with a short weightless strand, or the model would
+    # see a loose spring.
+    for a, b in graph.get("fused_turns", []):
+        if a in indices and b in indices:
+            diameter = graph["generation"]["strand_diameter_m"]
+            elements.append(
+                (indices[a], indices[b], {"id": "fused", "diameter_m": diameter, "fused": True})
+            )
     positions = np.asarray(positions)
     count = 6 * len(positions)
     rows, cols, data = [], [], []
@@ -221,7 +230,7 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
             edge["diameter_m"],
             material["young_modulus_pa"],
             material["poisson_ratio"],
-            material["density_kg_m3"],
+            0.0 if edge.get("fused") else material["density_kg_m3"],
         )
         dofs = np.r_[np.arange(6 * a, 6 * a + 6), np.arange(6 * b, 6 * b + 6)]
         global_k = transform.T @ k @ transform
@@ -230,7 +239,7 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
         data.extend(global_k.ravel())
         force[dofs] += transform.T @ local_load
         records.append((edge, dofs, k, transform, local_load, area, inertia, length))
-        mass = material["density_kg_m3"] * area * length
+        mass = 0.0 if edge.get("fused") else material["density_kg_m3"] * area * length
         total_mass += mass
         mass_center += mass * (positions[a] + positions[b]) / 2
     if nodal_loads:
@@ -306,6 +315,8 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
     maximum = float(np.linalg.norm(translational, axis=1).max())
     stresses = {edge["id"]: 0.0 for edge in edges}
     for edge, dofs, k, transform, load, area, inertia, _ in records:
+        if edge.get("fused"):
+            continue
         forces = (k @ transform @ displacement[dofs] - load).reshape(2, 6)
         normal_stress = np.abs(forces[:, 0]) / area + np.linalg.norm(forces[:, 4:6], axis=1) * edge[
             "diameter_m"

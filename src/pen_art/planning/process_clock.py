@@ -131,7 +131,9 @@ def source_vertex_schedule(action, drawing, targets, transform, cooling_s, proce
         if not 0 < index < len(targets) - 1:
             raise ValueError("Physical source vertex does not have an interior path knot")
         breaks.append(index)
-        if (abs(incoming[2]) if feet_hold else incoming[2]) > 1e-5 and cooling_s:
+        # Under ``rising_edge_end`` only a riser counts: a strand that climbs
+        # gently, like one turn of a coil tower, is drawn without holding.
+        if (abs(incoming[2]) > 1e-5 if feet_hold else incoming[2] > 0.5) and cooling_s:
             holds[index] = {"duration_s": cooling_s, "contact_m": targets[index].tolist()}
     return breaks, holds, abs(segments[-1][-1, 2] - segments[-1][0, 2]) > 1e-8
 

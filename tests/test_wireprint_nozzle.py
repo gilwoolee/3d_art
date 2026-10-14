@@ -85,6 +85,29 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     assert max(edge["order_hint"] for edge in lines) < min(
         edge["order_hint"] for edge in gridded["edges"] if edge not in lines
     )
+    # A post too narrow for loops and zigzags is wound as a coil tower: one
+    # strand climbing its own thickness per turn, drawn a layer at a time, with
+    # touching turns recorded as fused.
+    block = trimesh.creation.cylinder(radius=0.009, height=0.025, sections=32)
+    block.apply_translation([0, 0, 0.0125])
+    post = trimesh.creation.cylinder(radius=0.003, height=0.03, sections=24)
+    post.apply_translation([0.002, 0, 0.035])
+    wound = mesh_framework(
+        trimesh.util.concatenate([block, post]),
+        maximum_descent_angle_deg=27,
+        coil_maximum_width=0.01,
+    )
+    coil = [edge for edge in wound["edges"] if edge["parent_curve"].startswith("coil-")]
+    assert wound["coil_towers"] == {"count": 1, "turns": 30}
+    assert {edge["parent_curve"] for edge in coil} == {"coil-0-3", "coil-0-4", "coil-0-5"}
+    spots = {node["id"]: np.asarray(node["position"]) for node in wound["nodes"]}
+    rise = [
+        (spots[edge["end"]] - spots[edge["start"]])[2] / edge["length_m"] for edge in coil
+    ]
+    assert 0 < min(rise) and np.median(rise) < 0.1 and len(wound["fused_turns"]) > 300
+    assert not mesh_framework(mesh, maximum_descent_angle_deg=27, coil_maximum_width=0.01)[
+        "coil_towers"
+    ]["count"]
     hints = {edge["parent_curve"]: edge["order_hint"] for edge in graph["edges"]}
     drawn = sorted(hints, key=hints.get)
     assert [name.split("-")[0] for name in drawn[:5]] == [
