@@ -63,6 +63,36 @@ def drop_tours(source, target, tours):
     return screen["modeled_pass"]
 
 
+def group_faces(source, target):
+    """Draw the detail one turntable face at a time, turning a quarter each time.
+
+    Keeps the generator's order within a face. Tours on different faces seldom
+    meet each other's pen nose; the planner checks it either way.
+    """
+    graph = read_json(source / "stroke_graph.json")
+    art = [e for e in graph["edges"] if e.get("stage") == "artistic"]
+    tours = {}
+    for e in art:
+        hint = tours.setdefault(e["parent_curve"], [e["order_hint"], e["turntable_index"]])
+        hint[0] = min(hint[0], e["order_hint"])
+    first = min(tours.values())[1] if tours else 0
+    ranked = sorted(tours, key=lambda t: ((tours[t][1] - first) % 4, tours[t][0]))
+    rank = {t: i for i, t in enumerate(ranked)}
+    for e in art:
+        e["order_hint"] = 20000 + rank[e["parent_curve"]]
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
+    construction = tilt_hints(section_actions(graph, group_sources=True), graph)
+    write_json(target / "stroke_graph.json", graph)
+    write_json(target / "construction_plan.json", construction)
+    write_section_artifacts(target, graph, construction)
+    run = read_json(target / "run.json")
+    run["id"] = target.name
+    write_json(target / "run.json", run)
+    return target
+
+
 def planned_seconds(run):
     plan = read_json(run / "offline_dual_arm_plan.json")
     per_action = {
@@ -92,7 +122,8 @@ def main():
         args.base_profile, args.base_profile.parent / f"{Path(args.output).name}_profile.yaml"
     )
     baseline, _ = planned_seconds(args.frame_run)
-    source, rounds, dropped = args.source, [], []
+    source = group_faces(args.source, Path(f"{args.output}_r00_source"))
+    rounds, dropped = [], []
     for number in range(args.maximum_rounds):
         output = f"{args.output}_r{number:02d}"
         with open(f"{output}_benchmark.out", "w") as log:
