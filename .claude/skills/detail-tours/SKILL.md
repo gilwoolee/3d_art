@@ -101,8 +101,15 @@ background jobs); 24 workers.
    tilted pose). Once everything plans, it trims the tours with the least
    detail per planned second until the detail is at most 2 m and the added
    time at most 15 minutes. A blocked frame stroke stops the loop.
-   Detail tours carry their turntable position; the planner tries it first,
-   so the drawing order keeps the face grouping.
+   Before the first round the tours are ordered one turntable face at a
+   time (quarter-turn steps). Each tour carries its turntable position and is
+   planned there or dropped (another position costs two quarter turns). The
+   detail profile also sets `planning_checks_robot: true` (planning checks
+   the arm's links, so tilted poses that fold the arm fail early) and backs
+   away 15 mm instead of 30 mm after a stroke (`transit.withdraw_distance_m`).
+   Added minutes are the whole plan minus the frame's own plan; the shorter
+   back-away also speeds the frame a little, so the report also lists the
+   detail strokes' own time.
 
 4. **Check.** `runs/geomfirst_gfNN_NAME_detail_detail.json`: final run,
    `detail_m`, `added_minutes`, every dropped tour with its round and reason.
