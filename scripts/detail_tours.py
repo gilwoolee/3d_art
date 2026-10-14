@@ -50,8 +50,8 @@ WIRE_R = 0.0005
 TILTS = (0, 15, 30, 45, 60)
 # Measured on planned runs (cube, vase, palace, liberty): about 6 s per stroke
 # (pen start and stop waits, approach, withdraw, travel), drawing about
-# 20 mm/s on curvy paths. A 90 degree turntable step takes about 8 s.
-SECONDS_PER_STROKE, DRAW_SPEED, SECONDS_PER_TURN = 6.0, 0.020, 8.0
+# 20 mm/s on curvy paths. A 90 degree turntable step takes about 12 s.
+SECONDS_PER_STROKE, DRAW_SPEED, SECONDS_PER_TURN = 6.0, 0.020, 12.0
 
 
 # --- geometry helpers ------------------------------------------------------------
@@ -654,8 +654,15 @@ def main():
         pick = next(
             (
                 (k, a)
+                # Stay on the face of the tour picked last, so the drawing
+                # order turns the turntable as few times as possible.
                 for k in sorted(
-                    remaining, key=lambda k: (-items[k][1], -allp[items[k][0], 2].min())
+                    remaining,
+                    key=lambda k: (
+                        items[k][1] != (items[order[-1]][1] if order else items[k][1]),
+                        -items[k][1],
+                        -allp[items[k][0], 2].min(),
+                    ),
                 )
                 for a in [allowed(k)]
                 if all(a)
