@@ -424,7 +424,9 @@ class IndexedMotions:
         # zigzag. Try the outward 70/80-degree families before broad repair.
         points, _ = flatten_curve(row, 0.00005, 0.003)
         points = transform_points(points, transform)
-        tilts = planner.profile.get("drawing_pen_tilt_candidates_deg", DEFAULT_PEN_TILTS_DEG)
+        tilts = row.get("pen_tilt_candidates_deg") or planner.profile.get(
+            "drawing_pen_tilt_candidates_deg", DEFAULT_PEN_TILTS_DEG
+        )
         policy = planner.profile.get("drawing_orientation_policy", "fixed")
         fixed = policy in {"fixed", "fixed_axis"}
         families = list(

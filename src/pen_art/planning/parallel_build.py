@@ -608,6 +608,10 @@ def _propose(context, spec, seconds):
     if spec["mode"] == "cache":
         if model.experience is None:
             return {"status": "NO_CANDIDATE", "failure": {"reason": "no motion library"}}
+        if row.get("pen_tilt_candidates_deg"):
+            # The library holds upright drawings; a stroke that names its own
+            # tilts is sampled cold, with those tilts.
+            return {"status": "NO_CANDIDATE", "failure": {"reason": "stroke names its own tilts"}}
 
         chain = spec.get("chain_from")
 

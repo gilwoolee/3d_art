@@ -250,8 +250,12 @@ def drawing_alternatives(
             oriented, settings["flatten_tolerance_m"], settings["maximum_chord_m"]
         )
         points = transform_points(points, world_from_build)
+        # A stroke may name its own tilts, best first (detail drawn after the
+        # frame knows which tilts clear it); otherwise the profile's apply.
         tilts = (
-            pen_tilt_candidates_deg
+            stroke["pen_tilt_candidates_deg"]
+            if stroke.get("pen_tilt_candidates_deg")
+            else pen_tilt_candidates_deg
             if pen_tilt_candidates_deg is not None
             else tuple(dict.fromkeys([pen_tilt_deg, *DEFAULT_PEN_TILTS_DEG]))
         )
