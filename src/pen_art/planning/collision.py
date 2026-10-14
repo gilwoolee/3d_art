@@ -70,6 +70,9 @@ class RobotCollisionModel:
     def __init__(self, robot, extra_bodies=(), *, include_robot=True):
         self.robot = robot
         self.bodies = []
+        # Body name -> its own clearance from deposited material; other bodies
+        # use the margin each check is given.
+        self.material_margins = {}
         # Candidate tool-only checks retain robot kinematics and joint limits,
         # but do not construct URDF collision bodies or their pair caches.
         for link in robot.xml.findall("link") if include_robot else ():
@@ -356,11 +359,13 @@ class RobotCollisionModel:
                     }
                 )
         if material is not None:
-            bounds = dict.fromkeys((body.name for body in self.bodies), margin_m)
+            bounds = {
+                body.name: self.material_margins.get(body.name, margin_m) for body in self.bodies
+            }
             for name1, name2, distance in self.material_distances(
                 positions, material, bounds, deadline=deadline
             ):
-                if distance <= margin_m:
+                if distance <= bounds[name1]:
                     overlaps.append(
                         {
                             "first": name1,
@@ -508,7 +513,9 @@ class RobotCollisionModel:
             unresolved_pairs = {(row["first"], row["second"]) for row in uncertain}
             if material is not None and bodies != set():
                 bounds = {
-                    body.name: float(self.motion_radii[body.name] @ half_delta) + margin_m + 1e-6
+                    body.name: float(self.motion_radii[body.name] @ half_delta)
+                    + self.material_margins.get(body.name, margin_m)
+                    + 1e-6
                     for body in self.bodies
                 }
                 started = perf_counter()
@@ -524,7 +531,7 @@ class RobotCollisionModel:
                                 "pairs": [{"first": name1, "second": name2}],
                             }
                         bound = float(self.motion_radii[name1] @ half_delta)
-                        if distance <= bound + margin_m + 1e-6:
+                        if distance <= bound + self.material_margins.get(name1, margin_m) + 1e-6:
                             uncertain.append(
                                 {
                                     "first": name1,

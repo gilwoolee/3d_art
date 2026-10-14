@@ -415,6 +415,19 @@ class CellPlanner:
             self.pen_tip_models[identity] = RobotCollisionModel(
                 arm.robot, [*arm.tool.bodies, tip], include_robot=False
             )
+        # A tool body may keep its own clearance from wire (the nose right
+        # behind a tip that runs along existing wire): every collision model.
+        own = self.profile["environment"].get("tool_clearance_m", {})
+        if own:
+            margins = {f"tool/{name}": value for name, value in own.items()}
+            for identity, arm in self.arms.items():
+                for model in (
+                    arm.collision,
+                    self.tip_models[identity],
+                    self.pen_models[identity],
+                    self.pen_tip_models[identity],
+                ):
+                    model.material_margins = margins
         for row in self.candidates["variants"]:
             self.drawings.setdefault((row["arm"], row["stroke_id"]), []).append(row)
         self.initial_pose_repairs = self.choose_initial_poses(source)
