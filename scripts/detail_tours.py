@@ -337,64 +337,94 @@ def detail_profile(base, path, nose_clearance=0.0003):
     return Path(path)
 
 
-def planner_tilts(graph, frame_source, profile_path, cell_dir, seconds=5.0):
-    """Tilts the planner's own sampler can draw each tour with, best first.
+def cubic_pieces(p, spacing=0.003):
+    """C1 cubic pieces through knots every ``spacing`` along a polyline."""
+    knots = resample(p, spacing)
+    if len(knots) == 2:
+        return np.array([np.linspace(knots[0], knots[1], 4)])
+    kk = np.vstack([2 * knots[0] - knots[1], knots, 2 * knots[-1] - knots[-2]])
+    segs = np.array(
+        [
+            [
+                kk[i],
+                kk[i] + (kk[i + 1] - kk[i - 1]) / 6,
+                kk[i + 1] - (kk[i + 2] - kk[i]) / 6,
+                kk[i + 1],
+            ]
+            for i in range(1, len(kk) - 2)
+        ]
+    )
+    segs[..., 2] = np.maximum(segs[..., 2], 0.0)
+    return segs
 
-    At the tour's turntable position, each tilt must pass the planner's pen
-    screen against the frame (start, middle, end) and give a drawing path
-    (IK along the whole tour). This is the check the planner's cold sampler
-    makes; tours with no tilt left would only cost a planning round.
+
+class PlannerCheck:
+    """Ask the planner's own samplers whether the arm can draw a line.
+
+    At the line's turntable position, a tilt must pass the planner's pen
+    screen against the frame (start, middle, end), give a drawing path with
+    the whole arm (IK along the line, self and fixed obstacles), keep the
+    planner's posture limit, and allow an approach and a withdrawal. When no
+    tilt works, ``check`` says where to cut: at the failing point, or a few
+    millimetres off the end that cannot be approached or left.
     """
-    from time import monotonic
 
-    from pen_art.curves import flatten_curve, transform_points
-    from pen_art.planning.axis_corridor import pen_clear
-    from pen_art.planning.cell_motion import drawing_alternatives, fixed_rotation_families
-    from pen_art.planning.cell_planner import CellPlanner
-    from pen_art.planning.scene import MaterialScene
-    from pen_art.planning.turntable import IndexedTurntable
+    def __init__(self, frame_source, framework, profile_path, cell_dir, seconds=5.0):
+        from pen_art.cell import prepare_cell
+        from pen_art.planning.cell_planner import CellPlanner
+        from pen_art.planning.section_build import prepare_candidates
+        from pen_art.planning.turntable import IndexedTurntable
 
-    settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
-    settings.update(maximum_subdivision_depth=20)
-    from pen_art.cell import prepare_cell
-    from pen_art.planning.section_build import prepare_candidates
+        settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
+        settings.update(maximum_subdivision_depth=20)
+        shutil.rmtree(cell_dir, ignore_errors=True)
+        prepare_cell(profile_path, cell_dir, frame_source)
+        prepare_candidates(cell_dir)
+        self.planner = CellPlanner(cell_dir, profile_path, settings, float("inf"))
+        self.identity = next(iter(self.planner.arms))
+        # The whole arm, not only the pen: planning screens the pen, and the
+        # final replay rejects tilted poses where the arm folds into itself.
+        self.arm = self.planner.arms[self.identity]
+        self.table = IndexedTurntable.from_profile(self.planner.profile)
+        self.frame = [np.asarray(e["segments"][0])[[0, -1]] for e in framework["edges"]]
+        self.scenes, self.seconds = {}, seconds
 
-    shutil.rmtree(cell_dir, ignore_errors=True)
-    prepare_cell(profile_path, cell_dir, frame_source)
-    prepare_candidates(cell_dir)
-    planner = CellPlanner(cell_dir, profile_path, settings, float("inf"))
-    # The whole arm, not only the pen: planning screens the pen, and the final
-    # replay rejects tilted poses where the arm folds into itself.
-    arm = planner.arms[next(iter(planner.arms))]
-    table = IndexedTurntable.from_profile(planner.profile)
-    actions = section_actions(graph, group_sources=True)["actions"]
-    frame = [
-        np.asarray(seg)[[0, -1]]
-        for a in actions
-        if a["stage"] != "artistic"
-        for seg in a["segments"]
-    ]
-    hints = {
-        e["parent_curve"]: e["pen_tilt_candidates_deg"]
-        for e in graph["edges"]
-        if "pen_tilt_candidates_deg" in e
-    }
-    scenes, out = {}, {}
-    for action in actions:
-        tour = action.get("parent_curve")
-        if action["stage"] != "artistic" or tour in out:
-            continue
-        index = action["turntable_index"]
-        world = table.build_transform(index)
-        if index not in scenes:
-            scenes[index] = MaterialScene()
-            for k, seg in enumerate(frame):
+    def scene(self, index):
+        from pen_art.curves import transform_points
+        from pen_art.planning.scene import MaterialScene
+
+        if index not in self.scenes:
+            world = self.table.build_transform(index)
+            scene = MaterialScene()
+            for k, seg in enumerate(self.frame):
                 a, b = transform_points(seg, world)
-                scenes[index].add(a, b, WIRE_R, f"frame/{k}")
-        points = transform_points(flatten_curve(action, 0.00005, 0.003)[0], world)
-        tried = [*hints.get(tour, []), *[float(t) for t in sorted(TILTS, reverse=True)]]
-        works = []
-        for tilt in dict.fromkeys(tried):
+                scene.add(a, b, WIRE_R, f"frame/{k}")
+            self.scenes[index] = scene
+        return self.scenes[index]
+
+    def check(self, p, index, hints):
+        """(tilts that work, where to cut: None, "start", "end" or a sample index)."""
+        from time import monotonic
+
+        from pen_art.curves import flatten_curve, transform_points
+        from pen_art.planning.axis_corridor import pen_clear
+        from pen_art.planning.cell_motion import drawing_alternatives, fixed_rotation_families
+
+        planner, arm = self.planner, self.arm
+        world = self.table.build_transform(index)
+        stroke = {
+            "id": "check",
+            "start": "s",
+            "end": "e",
+            "closed": False,
+            "junction_visits": [],
+            "members": ["m"],
+            "segments": cubic_pieces(p).tolist(),
+            "length_m": length(p),
+        }
+        points = transform_points(flatten_curve(stroke, 0.00005, 0.003)[0], world)
+        works, cut = [], None
+        for tilt in dict.fromkeys([*hints, *[float(t) for t in sorted(TILTS, reverse=True)]]):
             screened = [
                 f
                 for f in fixed_rotation_families(arm, world, [tilt])
@@ -404,7 +434,7 @@ def planner_tilts(graph, frame_source, profile_path, cell_dir, seconds=5.0):
                         arm,
                         points[i],
                         f["rotations"],
-                        scenes[index],
+                        self.scene(index),
                         planner.margin + 2e-6,
                     )
                     for i in (0, len(points) // 2, -1)
@@ -414,24 +444,75 @@ def planner_tilts(graph, frame_source, profile_path, cell_dir, seconds=5.0):
                 continue
             for drawing in drawing_alternatives(
                 arm,
-                action,
-                {action["start"], action["end"]},
+                stroke,
+                {"s"},
                 world,
                 planner.obstacles,
-                deadline=monotonic() + seconds,
+                deadline=monotonic() + self.seconds,
                 seeds=[arm.initial_positions],
                 settings={"maximum_subdivision_depth": 20},
                 clearance_m=planner.margin,
                 rotations=screened,
                 orientation_policy="fixed",
             ):
-                if drawing["status"] == "SAMPLED_DRAWING_PATH":
+                if drawing["status"] != "SAMPLED_DRAWING_PATH":
+                    failed = drawing.get("failed_sample")
+                    if cut is None and failed is not None:
+                        cut = int(round(failed / max(1, len(points) - 1) * (len(p) - 1)))
+                    continue
+                result = self.in_and_out(drawing, index)
+                if result is True:
                     works.append(tilt)
                     break
+                if cut is None:
+                    cut = (
+                        result
+                        if isinstance(result, str)
+                        else int(
+                            round(result / max(1, len(drawing["positions"]) - 1) * (len(p) - 1))
+                        )
+                    )
             if len(works) >= 2:
                 break
-        out[tour] = works
-    return out
+        return works, (None if works else cut)
+
+    def in_and_out(self, drawing, index, posture_deg_per_mm=0.8):
+        """True, or what failed: a sample index (posture), "start" or "end"."""
+        from time import monotonic
+
+        from pen_art.planning.transit import find_departure
+
+        planner = self.planner
+        arm = planner.collision_arm(self.identity)
+        q = np.asarray(drawing["positions"], float)
+        tips = np.array([arm.robot.forward(x, arm.flange_to_tcp)[:3, 3] for x in q])
+        step = np.linalg.norm(np.diff(tips, axis=0), axis=1)
+        swing = np.degrees(np.abs(np.diff(q, axis=0))).max(axis=1)
+        over = swing - posture_deg_per_mm * np.maximum(step * 1000, 0.1)
+        if np.any(over > 0):
+            return int(np.argmax(over))
+        if np.degrees(np.abs(q[-1] - q[0])).max() > posture_deg_per_mm * (step.sum() * 1000 + 1):
+            return int(np.argmax(swing))
+        scene = self.scene(index)
+        after = scene.copy()
+        for k, (a, b) in enumerate(zip(tips[:-1], tips[1:], strict=True)):
+            after.add(a, b, WIRE_R, f"own/{k}")
+        for end, start, material in (("start", q[0], scene), ("end", q[-1], after)):
+            axis = (-arm.robot.forward(start, arm.flange_to_tcp)[:3, 2]).tolist()
+            lift = find_departure(
+                arm.robot,
+                arm.flange_to_tcp,
+                start,
+                {
+                    **planner.transit,
+                    "departure_directions": [axis, *planner.transit["departure_directions"]],
+                },
+                planner.lift_check(self.identity, material, start),
+                monotonic() + self.seconds,
+            )
+            if lift["status"] != "SAMPLED_DRAWING_PATH":
+                return end
+        return True
 
 
 # --- main ---------------------------------------------------------------------------
@@ -734,46 +815,34 @@ def main():
         return nid
 
     fused, art_edges, rows, rank, dropped = [], [], [], -1, 0
-    # Trim each tour to start on a contact and overhang at most 8 mm; leave out
-    # tours that never touch the frame. Then keep the longest tours (most detail
-    # per stroke) within the detail length and the added print time.
-    ready = {}
-    for k in order:
-        p, tilt = allp[items[k][0]], tilt_profile(allowed_at[k])
+
+    def supported(p, tilt):
+        """Start on a contact, overhang at most 8 mm; None if it never touches.
+
+        Of the two directions keep the one that keeps more line, and when they
+        keep about the same, the one that ends going up, so the pen backs away
+        from wire it has just laid.
+        """
         d, _ = ftree.query(p)
         on = np.flatnonzero(d <= touch)
         if not len(on):
-            dropped += 1
-            continue
-        # Start on a contact; of the two directions keep the one that keeps
-        # more line, and when they keep about the same, the one that ends
-        # going up, so the pen backs away from wire it has just laid.
+            return None
         options = []
         for flip in (False, True):
             q, t, o = (p[::-1], tilt[::-1], len(p) - 1 - on[::-1]) if flip else (p, tilt, on)
             q, t = q[o[0] : min(len(q), o[-1] + 9)], t[o[0] : min(len(q), o[-1] + 9)]
             rising = len(q) > 5 and q[-1, 2] > q[-6, 2]
             options.append((round(length(q) / 0.003), rising, q, t))
-        _, _, p, tilt = max(options, key=lambda r: (r[0], r[1]))
-        if length(p) >= 0.006:
-            ready[k] = (p, tilt)
-        else:
+        _, _, q, t = max(options, key=lambda r: (r[0], r[1]))
+        return (q, t) if length(q) >= 0.006 else None
+
+    ready = []
+    for position, k in enumerate(order):
+        tilt = tilt_profile(allowed_at[k])
+        kept = supported(allp[items[k][0]], tilt)
+        if kept is None:
             dropped += 1
-    keep, total = set(), 0.0
-    for k in sorted(ready, key=lambda k: -length(ready[k][0])):
-        L = length(ready[k][0])
-        strokes = len(keep) + 1
-        minutes = (
-            (total + L) / DRAW_SPEED
-            + SECONDS_PER_STROKE * strokes
-            + SECONDS_PER_TURN * min(strokes, 12)
-        ) / 60
-        if total + L <= args.detail and minutes <= args.minutes:
-            keep.add(k)
-            total += L
-    stages["within detail and time"] = total
-    for k in [k for k in order if k in keep]:
-        (p, tilt), sec = ready[k], items[k][1]
+            continue
         # The planner holds one tilt per stroke: offer the tilts clear along the
         # whole tour first (steepest first), then the tour's most common ones.
         whole = sorted(set.intersection(*allowed_at[k]), reverse=True)
@@ -784,6 +853,62 @@ def main():
             )
         ]
         hints = [float(t) for t in dict.fromkeys([*whole, *common])]
+        ready.append({"position": position, "k": k, "p": kept[0], "tilt": kept[1], "hints": hints})
+
+    if args.check_with_planner:
+        # Keep what the arm can draw; cut a failing tour at the failing point,
+        # or trim the end it cannot reach, and check the pieces again.
+        checker = PlannerCheck(
+            source,
+            framework,
+            detail_profile(args.profile, args.profile.parent / f"{target.name}_check_profile.yaml"),
+            target.parent / f"{target.name}_check_cell",
+        )
+        queue, ready, checks = list(ready), [], 0
+        while queue:
+            entry = queue.pop(0)
+            p, tilt = entry["p"], entry["tilt"]
+            works, cut = checker.check(p, items[entry["k"]][1], entry["hints"])
+            checks += 1
+            if works:
+                ready.append({**entry, "hints": works})
+                continue
+            if cut is None or entry.get("depth", 0) >= 4:
+                continue
+            if cut == "start":
+                parts = [(p[5:], tilt[5:])]
+            elif cut == "end":
+                parts = [(p[:-5], tilt[:-5])]
+            else:
+                parts = [
+                    (p[: max(0, cut - 2)], tilt[: max(0, cut - 2)]),
+                    (p[cut + 3 :], tilt[cut + 3 :]),
+                ]
+            for q, t in parts:
+                kept = supported(q, t) if len(q) >= 8 else None
+                if kept is not None and length(kept[0]) >= 0.010:
+                    queue.append(
+                        {**entry, "p": kept[0], "tilt": kept[1], "depth": entry.get("depth", 0) + 1}
+                    )
+        stages["arm can draw it"] = sum(length(e["p"]) for e in ready)
+        print(f"planner check: {checks} lines checked, {len(ready)} drawable")
+
+    keep, total = [], 0.0
+    for entry in sorted(ready, key=lambda e: -length(e["p"])):
+        L = length(entry["p"])
+        strokes = len(keep) + 1
+        minutes = (
+            (total + L) / DRAW_SPEED
+            + SECONDS_PER_STROKE * strokes
+            + SECONDS_PER_TURN * min(strokes, 12)
+        ) / 60
+        if total + L <= args.detail and minutes <= args.minutes:
+            keep.append(entry)
+            total += L
+    stages["within detail and time"] = total
+    for entry in sorted(keep, key=lambda e: e["position"]):
+        p, tilt, hints, k = entry["p"], entry["tilt"], entry["hints"], entry["k"]
+        sec = items[k][1]
         rank += 1
         # The planner starts a stroke on a built node, so the tour begins on
         # the frame wire itself, at a node it shares with the frame.
@@ -885,26 +1010,6 @@ def main():
         fused_turns=graph.get("fused_turns", []) + fused,
         method="wireprint_with_detail_tours",
     )
-
-    if args.check_with_planner:
-        profile_path = detail_profile(
-            args.profile, args.profile.parent / f"{target.name}_check_profile.yaml"
-        )
-        cell_dir = target.parent / f"{target.name}_check_cell"
-        works = planner_tilts(graph, source, profile_path, cell_dir)
-        gone = {tour for tour, tilts in works.items() if not tilts}
-        for e in graph["edges"]:
-            if works.get(e.get("parent_curve")):
-                e["pen_tilt_candidates_deg"] = works[e["parent_curve"]]
-        graph["edges"] = [e for e in graph["edges"] if e.get("parent_curve") not in gone]
-        used_nodes = {n for e in graph["edges"] for n in (e["start"], e["end"])}
-        graph["nodes"] = [n for n in graph["nodes"] if n["id"] in used_nodes]
-        graph["fused_turns"] = [
-            p for p in graph["fused_turns"] if p[0] in used_nodes and p[1] in used_nodes
-        ]
-        rows = [r for r in rows if r["id"] not in gone]
-        stages["arm can draw it"] = sum(r["length_m"] for r in rows)
-        print(f"planner sampler: {len(gone)} of {len(works)} tours have no drawable tilt")
 
     if target.exists():
         shutil.rmtree(target)
