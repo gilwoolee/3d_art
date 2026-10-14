@@ -363,7 +363,9 @@ def planner_tilts(graph, frame_source, profile_path, cell_dir, seconds=5.0):
     prepare_cell(profile_path, cell_dir, frame_source)
     prepare_candidates(cell_dir)
     planner = CellPlanner(cell_dir, profile_path, settings, float("inf"))
-    arm = planner.collision_arm(next(iter(planner.arms)))
+    # The whole arm, not only the pen: planning screens the pen, and the final
+    # replay rejects tilted poses where the arm folds into itself.
+    arm = planner.arms[next(iter(planner.arms))]
     table = IndexedTurntable.from_profile(planner.profile)
     actions = section_actions(graph, group_sources=True)["actions"]
     frame = [
