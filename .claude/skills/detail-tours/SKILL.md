@@ -127,6 +127,18 @@ background jobs); 24 workers.
 5. **Report** per object: detail metres and added minutes from the plan,
    tours kept and dropped (and why), the frame's own time, and a screenshot.
 
+## Results (2026-10-14, all FULL_BUILD_VERIFIED, 24 workers)
+
+| Object | Final run | Detail | Tours | Added time | Before trim |
+|---|---|---:|---:|---:|---|
+| Liberty | `geomfirst_gf94_liberty_detail_r14_w24` | 1.99 m | 33 | 11.5 min | 2.04 m, 16.0 min |
+| Ghost | `geomfirst_gf98_ghost_detail_r14_w24` | 1.98 m | 28 | 8.1 min | 2.21 m, 10.2 min |
+| Pumpkin | `geomfirst_gf98_pumpkin_detail_r24_w24` | 1.99 m | 17 | 7.7 min | 3.40 m, 15.0 min |
+
+Liberty was generated before the bigger-pool settings and the 15 mm
+back-away; the ghost and pumpkin used the commands above. About half the
+generated tours are dropped by planning; a round takes 40-80 s.
+
 ## How the generator works (`scripts/detail_tours.py`)
 
 1. Candidate lines: slice creases along x, y and z at several depths (a
