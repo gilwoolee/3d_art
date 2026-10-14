@@ -1,6 +1,6 @@
 ---
 name: detail-tours
-description: Add about 5 m of surface detail (folds, hems, face, ribs, crown, torch, book) on top of a planned WirePrint frame as a few long strokes the robot draws after the frame, within 15 extra minutes of print time, and get the motion planner to plan it, dropping what it cannot draw. Use for any object in objs/ (Liberty, ghost, pumpkin, or a new mesh) when asked to add detail to a wireframe or rerun the detail harness.
+description: Add about 2 m of surface detail (folds, hems, face, ribs, crown, torch, book) on top of a planned WirePrint frame as a few long strokes the robot draws after the frame, within 15 extra minutes of print time, and get the motion planner to plan it, dropping what it cannot draw. Use for any object in objs/ (Liberty, ghost, pumpkin, or a new mesh) when asked to add detail to a wireframe or rerun the detail harness.
 ---
 
 # Detail tours on a WirePrint frame
@@ -14,8 +14,9 @@ to the budget.
 
 ## Budget and rules
 
-- **Budget per object: at most 5 m of detail and 15 minutes of added print
-  time** (planned time, compared with the frame's own planned run). The frame
+- **Budget per object: about 2 m of detail and at most 15 minutes of added
+  print time** (planned time, compared with the frame's own planned run; the
+  user lowered the length from 5 m on 2026-10-14 after the timing below). The frame
   keeps its own 10 m wire budget; detail is on top of it.
 - **Overlay.** Detail lies one wire (1 mm) outside the surface, resting on the
   frame wire like a coil turn on the turn below, and is bent onto frame wire
@@ -90,7 +91,7 @@ background jobs); 24 workers.
 
    ```bash
    PYTHONPATH=src .venv/bin/python -u scripts/plan_detail.py runs/geomfirst_NAME_detail_source PROFILE \
-     runs/geomfirst_gfNN_NAME_detail --frame-run FRAME_RUN --detail 5 --minutes 15
+     runs/geomfirst_gfNN_NAME_detail --frame-run FRAME_RUN --detail 2 --minutes 15
    ```
 
    It writes a detail profile beside PROFILE (tilts and nose clearance;
@@ -98,8 +99,10 @@ background jobs); 24 workers.
    planning blocked on, or that the full-robot replay rejected (planning
    checks the pen; replay checks the whole arm, e.g. self-collision at a
    tilted pose). Once everything plans, it trims the tours with the least
-   detail per planned second until the detail is at most 5 m and the added
+   detail per planned second until the detail is at most 2 m and the added
    time at most 15 minutes. A blocked frame stroke stops the loop.
+   Detail tours carry their turntable position; the planner tries it first,
+   so the drawing order keeps the face grouping.
 
 4. **Check.** `runs/geomfirst_gfNN_NAME_detail_detail.json`: final run,
    `detail_m`, `added_minutes`, every dropped tour with its round and reason.

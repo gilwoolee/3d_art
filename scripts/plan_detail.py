@@ -81,7 +81,7 @@ def main():
     parser.add_argument("base_profile", type=Path)
     parser.add_argument("output", help="run prefix, e.g. runs/geomfirst_gf90_liberty_detail")
     parser.add_argument("--frame-run", type=Path, required=True)
-    parser.add_argument("--detail", type=float, default=5.0, help="m of detail at most")
+    parser.add_argument("--detail", type=float, default=2.0, help="m of detail at most")
     parser.add_argument("--minutes", type=float, default=15.0, help="added print time at most")
     parser.add_argument("--workers", type=int, default=24)
     parser.add_argument("--maximum-rounds", type=int, default=80)
