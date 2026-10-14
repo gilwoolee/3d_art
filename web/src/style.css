@@ -54,7 +54,8 @@
 .simple-link{font-size:12px;white-space:nowrap}
 .simple-panels{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px}
 .simple-panels section{display:flex;flex-direction:column;min-height:0;background:#fafaf6;border:1px solid var(--line);border-radius:7px;overflow:hidden}
-.simple-panels h2{font-size:13px;font-weight:600;margin:0;padding:10px 14px}
+.simple-panels h2{font-size:13px;font-weight:600;margin:0;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.simple-toggle{font-size:11px;font-weight:400;color:var(--muted);display:flex;align-items:center;gap:5px}.simple-toggle input{accent-color:#67836b}
 .simple-panels p{font-size:11px;color:var(--muted);margin:0;padding:8px 14px;min-height:31px}
 .simple-view{flex:1;min-height:0;position:relative}
 .simple-view canvas{display:block;width:100%;height:100%}

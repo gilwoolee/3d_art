@@ -32,7 +32,7 @@ app.innerHTML = `<div class="simple">
   </header>
   <main class="simple-panels">
     <section><h2>1 · Original model</h2><div class="simple-view" id="simple-model"></div><p id="simple-model-note"></p></section>
-    <section><h2>2 · Wireframe strokes</h2><div class="simple-view" id="simple-strokes"></div><p id="simple-strokes-note"></p></section>
+    <section><h2>2 · Wireframe strokes<label class="simple-toggle"><input type="checkbox" id="simple-ghost" checked> Show statue</label></h2><div class="simple-view" id="simple-strokes"></div><p id="simple-strokes-note"></p></section>
     <section><h2>3 · Robot motion</h2><div class="simple-view" id="simple-robot"></div><p id="simple-robot-note"></p></section>
   </main>
   <footer class="simple-controls">
@@ -52,6 +52,7 @@ const views = {
 let request = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
 const stop = () => { if (timer) clearInterval(timer); timer = null; $('#simple-play').textContent = 'Play'; };
+$<HTMLInputElement>('#simple-ghost').addEventListener('change', event => views.strokes.setSource((event.target as HTMLInputElement).checked, true));
 
 async function show(runId: string) {
   const current = ++request;
@@ -85,7 +86,7 @@ async function show(runId: string) {
       views.strokes.load(url('geometry.glb'), () => {}),
     ]);
     if (current !== request) return;
-    views.strokes.setSource(true, true);
+    views.strokes.setSource($<HTMLInputElement>('#simple-ghost').checked, true);
     views.strokes.setCurves(construction.actions);
     const contours = construction.actions.filter(a => a.parent_curve?.startsWith('contour-')).length;
     const zigzags = construction.actions.filter(a => a.parent_curve?.startsWith('zigzag-')).length;
