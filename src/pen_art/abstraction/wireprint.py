@@ -44,6 +44,54 @@ def align_loop(loop, reference):
     return vertices[keep]
 
 
+def _layer_heights(
+    mesh, layer_height, descent_deg, connectors, minimum_contour, coil_width, floor=0.003
+):
+    """Slice heights: ``layer_height`` apart, thinner where a loop is short.
+
+    Between two loops a zigzag spreads its diagonals around the loop, each
+    sloping no steeper than the descent limit. A loop of perimeter P therefore
+    holds ``connectors`` of them only when the layer is at most
+    P / connectors * tan(limit) high. Bands containing such a short loop get
+    thinner layers (never below ``floor``); the rest keep ``layer_height``.
+    Loops left out (too small) or wound as coils do not count.
+    """
+    low, high = mesh.bounds[:, 2]
+    uniform = np.linspace(low, high, int(np.ceil((high - low) / layer_height)) + 1)
+    if descent_deg is None or not connectors:
+        return uniform
+    slope = np.tan(np.radians(descent_deg - 1))
+    margin = min(0.000001, (high - low) / 1000)
+
+    def shortest(z):
+        section = mesh.section(
+            plane_origin=[0, 0, float(np.clip(z, low + margin, high - margin))],
+            plane_normal=[0, 0, 1],
+        )
+        lengths = []
+        for points in [] if section is None else section.discrete:
+            xy = np.asarray(points)[:, :2]
+            length = float(np.linalg.norm(np.diff(xy, axis=0), axis=1).sum())
+            width = float(np.ptp(xy, axis=0).max())
+            if length < np.pi * minimum_contour or (coil_width and width <= coil_width):
+                continue
+            lengths.append(length)
+        return min(lengths, default=np.inf)
+
+    heights, z = [low], low
+    while high - z > 1e-9:
+        h = layer_height
+        for _ in range(4):
+            need = min(shortest(z), shortest(min(high, z + h))) / connectors * slope
+            thinner = min(layer_height, max(floor, need))
+            if thinner >= h - 1e-9:
+                break
+            h = thinner
+        z = high if high - (z + h) < 0.25 * h else z + h
+        heights.append(z)
+    return np.asarray(heights)
+
+
 def _mesh_framework_at_height(
     mesh,
     *,
@@ -58,6 +106,7 @@ def _mesh_framework_at_height(
     base_line_spacing=None,
     coil_maximum_width=None,
     coil_pitch=0.001,
+    minimum_connectors=None,
 ):
     if min(layer_height, zigzag_spacing, diameter, slice_simplification) <= 0:
         raise ValueError("Positive layer, zigzag, diameter and simplification are required")
@@ -68,7 +117,14 @@ def _mesh_framework_at_height(
     low, high = mesh.bounds[:, 2]
     if high <= low:
         raise ValueError("Mesh must have positive height")
-    heights = np.linspace(low, high, int(np.ceil((high - low) / layer_height)) + 1)
+    heights = _layer_heights(
+        mesh,
+        layer_height,
+        maximum_branch_descent_deg,
+        minimum_connectors,
+        minimum_contour,
+        coil_maximum_width,
+    )
     layers, repairs, omitted_small = [], [], 0
     for layer, height in enumerate(heights):
         # Stay beyond trimesh's plane/vertex tolerance at the extrema. Projecting
@@ -351,8 +407,9 @@ def _mesh_framework_at_height(
                     for i in range(count - 1)
                 )
 
-            count = max(3, int(np.ceil(perimeter / zigzag_spacing)))
-            above = max(3, int(np.ceil(LineString(up["points"]).length / zigzag_spacing)))
+            fewest = max(3, minimum_connectors or 3)
+            count = max(fewest, int(np.ceil(perimeter / zigzag_spacing)))
+            above = max(fewest, int(np.ceil(LineString(up["points"]).length / zigzag_spacing)))
             # Two contours of different outline can also pair badly by equal
             # fractions. Use the nearest part beneath when that alone brings
             # the diagonals within the limit; like outlines keep equal fractions.
@@ -366,6 +423,13 @@ def _mesh_framework_at_height(
             if nearest:
                 count = above
                 nearest_pairs += 1
+            if branching and len(co_parents) > 1 and minimum_connectors:
+                # Contours merging into one (pillars into a roof): risers stand
+                # round the upper contour and go to the nearest one beneath.
+                # Space them so each merging contour gets at least its share.
+                narrowest = min(LineString(lower[k]["points"]).length for k in co_parents)
+                length = LineString(up["points"]).length
+                count = max(count, int(np.ceil(length * fewest / narrowest)))
             original_count = count
             if minimum_anchor_spacing:
                 # Equal fractions on a large upper contour can crowd anchors
@@ -731,6 +795,8 @@ def _mesh_framework_at_height(
         generation={
             "layer_height_m": layer_height,
             "zigzag_spacing_m": zigzag_spacing,
+            "minimum_connectors": minimum_connectors,
+            "layer_heights_m": np.round(np.diff(heights), 6).tolist(),
             "strand_diameter_m": diameter,
             "slice_simplification_m": slice_simplification,
             "minimum_contour_m": minimum_contour,
@@ -774,6 +840,7 @@ def mesh_framework(
     base_line_spacing=None,
     coil_maximum_width=None,
     coil_pitch=0.001,
+    minimum_connectors=None,
 ):
     """Generate unchanged-scale contours with nozzle-aware descending chords.
 
@@ -816,6 +883,7 @@ def mesh_framework(
             base_line_spacing=base_line_spacing,
             coil_maximum_width=coil_maximum_width,
             coil_pitch=coil_pitch,
+            minimum_connectors=minimum_connectors,
         )
         layer_z = sorted({node["position"][2] for node in graph["nodes"]})
         effective_height = max(np.diff(layer_z), default=0.0)
@@ -891,6 +959,7 @@ def generate(run, **settings):
         "base_line_spacing",
         "coil_maximum_width",
         "coil_pitch",
+        "minimum_connectors",
     }
     parameters = {
         "maximum_descent_angle_deg": 27.0,

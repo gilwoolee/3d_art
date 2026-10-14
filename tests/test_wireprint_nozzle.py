@@ -124,6 +124,21 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     assert analyze_structure(rest, material).get("failure") == "UNSUPPORTED_COMPONENT"
     rest["fused_turns"] = wound["fused_turns"] + [["rest-a", coil[-1]["end"]]]
     assert analyze_structure(rest, material).get("failure") != "UNSUPPORTED_COMPONENT"
+    # A 13 mm pillar at 8 mm layers fits only two diagonals per loop within the
+    # descent limit; it is sliced thinner so every loop carries four risers.
+    pillar = mesh_framework(
+        trimesh.creation.cylinder(radius=0.0065, height=0.04, sections=48),
+        layer_height=0.008,
+        maximum_descent_angle_deg=27,
+        minimum_connectors=4,
+    )
+    assert max(pillar["generation"]["layer_heights_m"]) < 0.006
+    at = {node["id"]: node["position"][2] for node in pillar["nodes"]}
+    risers = defaultdict(int)
+    for edge in pillar["edges"]:
+        if edge["parent_curve"].startswith("zigzag-"):
+            risers[round(min(at[edge["start"]], at[edge["end"]]), 4)] += 1
+    assert len(risers) >= 6 and min(risers.values()) >= 5
     assert not mesh_framework(mesh, maximum_descent_angle_deg=27, coil_maximum_width=0.01)[
         "coil_towers"
     ]["count"]

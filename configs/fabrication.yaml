@@ -6,6 +6,10 @@ wireprint:
   maximum_descent_angle_deg: 27.0
   layer_height: 0.01
   zigzag_spacing: 0.025
+  # Every loop gets at least this many risers and diagonals. A narrow part
+  # (a pillar) is sliced thinner where its loops are too short to hold them
+  # within the descent angle, down to 3 mm layers.
+  minimum_connectors: 4
   # A grid of lines across each outline on the bed: a base that grips the bed
   # along more than its outline and cannot be pushed out of shape.
   base_line_spacing: 0.020
