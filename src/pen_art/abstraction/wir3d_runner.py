@@ -336,13 +336,26 @@ def progress(bundle, job, status, step, completed):
     temporary.replace(path)
 
 
-def export_budget(bundle, job, budget, patch_hash):
+def export_budget(bundle, job, budget, patch_hash, shortest=0.05):
     import torch
 
     paths = list((bundle / "outputs" / str(budget)).glob("seed*/sem/tot_bestcurves.pt"))
     if len(paths) != 1:
         raise RuntimeError(f"Expected one final WIR3D checkpoint for budget {budget}")
-    tensor = torch.load(paths[0], weights_only=True, map_location="cpu")
+    def load(name):
+        return torch.load(paths[0].with_name(name), weights_only=True, map_location="cpu")
+
+    # ``tot_bestcurves`` is the frozen geometry curves followed by every semantic
+    # curve, including the ones WIR3D pruned. Keep only what WIR3D kept.
+    total, best, keep = load("tot_bestcurves.pt"), load("bestcurves.pt"), load("bestkeep.pt")
+    tensor = torch.cat([total[: len(total) - len(best)], best[keep]])
+    # Pruning only drops curves that stayed short for 400 steps; drop any still
+    # shorter than WIR3D's own prune length (0.05 in its normalized units).
+    t = torch.linspace(0, 1, 200)[:, None]
+    weights = torch.cat([(1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t**2, t**3], dim=1)
+    samples = torch.einsum("sk,nkd->nsd", weights, tensor)
+    lengths = (samples[:, 1:] - samples[:, :-1]).norm(dim=2).sum(dim=1)
+    tensor = tensor[lengths >= shortest]
     output = {
         "input_sha256": job["input_sha256"],
         "revision": job["revision"],
@@ -351,6 +364,8 @@ def export_budget(bundle, job, budget, patch_hash):
         "provenance": {
             "seed": job["seed"],
             "checkpoint": str(paths[0].relative_to(bundle)),
+            "dropped_pruned": int((~keep).sum()),
+            "dropped_short": int((lengths < shortest).sum()),
             "keypoint_patch_sha256": patch_hash,
             "torch": torch.__version__,
             "cuda": torch.version.cuda,
