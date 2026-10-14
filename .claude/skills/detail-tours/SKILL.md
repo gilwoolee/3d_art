@@ -81,8 +81,8 @@ background jobs); 24 workers.
      runs/geomfirst_gfNN_NAME_detail --frame-run FRAME_RUN --detail 5 --minutes 15
    ```
 
-   It derives `runs/geomfirst_gfNN_NAME_detail_profile.yaml` (tilts and nose
-   clearance) and plans round after round. A round drops the tours that
+   It writes a detail profile beside PROFILE (tilts and nose clearance;
+   robot paths in profiles are relative to their folder) and plans round after round. A round drops the tours that
    planning blocked on, or that the full-robot replay rejected (planning
    checks the pen; replay checks the whole arm, e.g. self-collision at a
    tilted pose). Once everything plans, it trims the tours with the least

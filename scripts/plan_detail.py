@@ -4,7 +4,7 @@
         --frame-run RUN [--detail 5.0] [--minutes 15] [--workers 24]
 
 SOURCE is a source run from ``scripts/detail_tours.py``. BASE_PROFILE is the
-profile the frame was planned with; ``OUTPUT_profile.yaml`` is derived from it
+profile the frame was planned with; a detail profile is written beside it
 with the pen tilts detail needs and a smaller clearance for the pen nose (its
 tip may run along existing wire). FRAME_RUN is the frame's own planned run; its
 print time is the baseline for the added time.
@@ -106,7 +106,10 @@ def main():
     parser.add_argument("--maximum-rounds", type=int, default=80)
     args = parser.parse_args()
 
-    profile = detail_profile(args.base_profile, Path(f"{args.output}_profile.yaml"))
+    # Beside the base profile: its robot and tool paths are relative to it.
+    profile = detail_profile(
+        args.base_profile, args.base_profile.parent / f"{Path(args.output).name}_profile.yaml"
+    )
     baseline, _ = planned_seconds(args.frame_run)
     source, rounds, dropped = args.source, [], []
     for number in range(args.maximum_rounds):
