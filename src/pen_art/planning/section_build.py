@@ -343,7 +343,13 @@ class SectionBuild:
         self.learning_device = learning_device
         self.motion_runtime = None
         settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
-        settings.update(maximum_subdivision_depth=20, collision_scope="pen_candidate")
+        # Planning screens the pen; a profile may ask for the whole robot, so
+        # tilted poses that fold the arm into itself are rejected while planning
+        # rather than by the final replay.
+        scope = (yaml.safe_load(self.profile.read_text()) or {}).get(
+            "planning_collision_scope", "pen_candidate"
+        )
+        settings.update(maximum_subdivision_depth=20, collision_scope=scope)
         if structural_check == "member":
             settings["structural_check"] = "member"
         if merge_deposits_m:
