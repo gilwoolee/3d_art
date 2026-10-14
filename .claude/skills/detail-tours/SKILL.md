@@ -33,8 +33,11 @@ to the budget.
   upright motion library.
 - **Start on a built node.** Each tour starts exactly on a frame wire, at a
   node it shares with the frame; the planner only starts strokes there.
-- **Print time is mostly strokes** (about 6 s each; drawing about 20 mm/s; a
-  turntable step about 8 s), so detail must be long tours, not many lines.
+- **Print time is mostly strokes.** Measured per detail tour: about 20 s
+  besides drawing (travel into a tilted pose, approach, withdrawal, waits),
+  drawing about 10 mm/s, a 90 degree turntable step about 12 s. 5 m in 15
+  minutes therefore needs about 20 tours averaging 250 mm; with the 40-60 mm
+  tours the checks leave today, 15 minutes holds roughly 1.5-3 m.
 
 ## Steps
 

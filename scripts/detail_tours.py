@@ -48,10 +48,11 @@ from pen_art.structure import analyze_structure
 
 WIRE_R = 0.0005
 TILTS = (0, 15, 30, 45, 60)
-# Measured on planned runs (cube, vase, palace, liberty): about 6 s per stroke
-# (pen start and stop waits, approach, withdraw, travel), drawing about
-# 20 mm/s on curvy paths. A 90 degree turntable step takes about 12 s.
-SECONDS_PER_STROKE, DRAW_SPEED, SECONDS_PER_TURN = 6.0, 0.020, 12.0
+# Measured on planned detail runs (pumpkin, ghost, 2026-10-14): each detail
+# tour costs about 20 s besides drawing (travel into a tilted pose 9-11 s,
+# approach and withdrawal 6-7 s, waits and join about 4 s); detail draws at
+# about 10 mm/s; a 90 degree turntable step takes about 12 s.
+SECONDS_PER_STROKE, DRAW_SPEED, SECONDS_PER_TURN = 20.0, 0.010, 12.0
 
 
 # --- geometry helpers ------------------------------------------------------------
