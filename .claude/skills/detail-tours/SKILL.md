@@ -68,8 +68,14 @@ background jobs); 24 workers.
 
    ```bash
    PYTHONPATH=src .venv/bin/python scripts/detail_tours.py FRAME_SOURCE runs/geomfirst_NAME_detail_source \
-     --profile PROFILE --check-with-planner --margin 0.0008 --detail 12 --minutes 40 --collect 2.0
+     --profile PROFILE --check-with-planner --margin 0.0008 --detail 12 --minutes 40 --collect 2.5 \
+     --crease-threshold 0.12 0.08 0.05 0.03 --bridge 0.03 --fine-region X0 X1 Y0 Y1 Z0 Z1
    ```
+
+   Use the frame's whole bounding box (mm) as `--fine-region` for smooth
+   objects (ghost, pumpkin): their features are small, and the finer pass plus
+   shallow creases gave the ghost 5.5 m of drawable detail instead of 3.7 m.
+   Too small a pool leaves the plan short of 2 m with time to spare.
 
    `--check-with-planner` builds a cell from the detail profile and asks the
    planner's own samplers, at each tour's turntable position, whether the
