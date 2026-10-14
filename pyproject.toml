@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Mesh abstraction and one- or two-arm spatial extrusion research workbench"
 requires-python = ">=3.11"
 dependencies = [
-  "numpy>=2,<3", "scipy>=1.14,<2", "trimesh>=4.6,<5",
+  "numpy>=2,<3", "scipy>=1.14,<2", "trimesh[easy]>=4.6,<5",
   "Pillow>=11,<13", "PyYAML>=6,<7", "networkx>=3.4,<4",
   "fast-simplification>=0.1.10,<1", "fastapi>=0.115,<1", "uvicorn>=0.34,<1",
   "xacro>=2.1,<3", "python-fcl>=0.7.0.11,<0.8", "toppra==0.6.3",

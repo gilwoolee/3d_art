@@ -23,7 +23,7 @@ git lfs pull
 
 echo "== 2. Python environment"
 [ -x .venv/bin/python ] || uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e '.[dev]'
+uv pip install --python .venv/bin/python -e '.[dev]' -c requirements.lock
 
 echo "== 3. Robot description and cell"
 flexiv=92ef7865d76585e6e08d291bdfe652d32f7740f4
