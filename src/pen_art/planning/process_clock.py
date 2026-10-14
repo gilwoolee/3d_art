@@ -89,8 +89,15 @@ def action_ready_times(path, action, cooling_s):
     return result
 
 
-def source_vertex_schedule(action, drawing, targets, transform, cooling_s):
-    """Locate actual tangent discontinuities, never smooth-curve sampling knots."""
+def source_vertex_schedule(action, drawing, targets, transform, cooling_s, process=None):
+    """Locate actual tangent discontinuities, never smooth-curve sampling knots.
+
+    The pen stops at each one. It holds with the feed off after a rising
+    member, and after a falling one too unless the policy is
+    ``rising_edge_end``, which trusts a foot laid on solid wire to need none.
+    """
+    process = process or {}
+    feet_hold = process.get("vertex_cooling_policy") != "rising_edge_end"
     oriented = orient_stroke(
         action, reverse=drawing.get("reverse", False), start_visit=drawing.get("start_visit", 0)
     )
@@ -124,7 +131,7 @@ def source_vertex_schedule(action, drawing, targets, transform, cooling_s):
         if not 0 < index < len(targets) - 1:
             raise ValueError("Physical source vertex does not have an interior path knot")
         breaks.append(index)
-        if abs(incoming[2]) > 1e-5 and cooling_s:
+        if (abs(incoming[2]) if feet_hold else incoming[2]) > 1e-5 and cooling_s:
             holds[index] = {"duration_s": cooling_s, "contact_m": targets[index].tolist()}
     return breaks, holds, abs(segments[-1][-1, 2] - segments[-1][0, 2]) > 1e-8
 
@@ -184,6 +191,7 @@ def audit_process_clock(path, action, process, cooling_s, transform, *, require_
         points,
         transform,
         float(process.get("vertex_cooling_s", 1.0)),
+        process,
     )
     for index in corners:
         before, after = draws[index - 1], draws[index]

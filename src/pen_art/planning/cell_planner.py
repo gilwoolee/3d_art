@@ -1162,7 +1162,7 @@ class CellPlanner:
                 drawing,
                 np.r_[ends[:1, 0], ends[:, 1]],
                 lambda reached: source_vertex_schedule(
-                    self.actions[task], drawing, reached, transform, vertex_cooling
+                    self.actions[task], drawing, reached, transform, vertex_cooling, self.process
                 )[0],
                 self.deadline,
             )
@@ -1193,7 +1193,7 @@ class CellPlanner:
         # can name a neighbouring knot when two lie within tracking error.
         reached = np.array([arm.robot.forward(joints, arm.flange_to_tcp)[:3, 3] for joints in q])
         corners, holds, vertical_end = source_vertex_schedule(
-            self.actions[task], drawing, reached, transform, vertex_cooling
+            self.actions[task], drawing, reached, transform, vertex_cooling, self.process
         )
         for index, hold in holds.items():
             # The join stays centred on the source vertex itself.

@@ -44,7 +44,9 @@ process:
   # Timing assumptions only, not measurements or pen specifications.
   nominal_speed_m_s: 0.030
   vertex_cooling_s: 1.0
-  vertex_cooling_policy: wireprint_nonhorizontal_edge_end
+  # Hold after a rising member only. A falling member ends on solid wire and
+  # is assumed to need no hold; wireprint_nonhorizontal_edge_end holds at both.
+  vertex_cooling_policy: rising_edge_end
   vertex_feed_policy: stop_with_lag_then_restart
   join_s: 1.0
   stop_lag_s: 0.5

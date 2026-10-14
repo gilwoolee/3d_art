@@ -73,6 +73,14 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
         if nodes[edge["end"]][2] > nodes[edge["start"]][2]
     }
     assert len(columns) == 13
+    # A loop too small for three zigzags at this height takes two, each
+    # diagonal spanning its full width, rather than thinning every layer.
+    tower = trimesh.creation.cylinder(radius=0.0065, height=0.03, sections=48)
+    tower.apply_translation([0, 0, 0.015])
+    slim = mesh_framework(tower, layer_height=0.006, maximum_descent_angle_deg=27)
+    assert slim["two_zigzag_loops"] == 5
+    assert slim["generation"]["effective_layer_height_m"] == pytest.approx(0.006)
+    assert slim["generation"]["actual_maximum_descent_angle_deg"] <= 27
     hints = {edge["parent_curve"]: edge["order_hint"] for edge in graph["edges"]}
     drawn = sorted(hints, key=hints.get)
     assert [name.split("-")[0] for name in drawn[:5]] == [

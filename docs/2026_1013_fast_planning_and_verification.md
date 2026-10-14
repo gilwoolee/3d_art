@@ -179,6 +179,37 @@ shape 31.0 to 18.5 min, Palace 56.6 to 41.9 min, with 120 of 150 and 158 of
 [stroke chaining plan](2026_1013_stroke_chaining_plan.md). The paragraph below
 describes the state before it.
 
+**Taller layers and fewer holds (evening)** brought the Palace from 41.9 to
+18.7 min and the branching shape from 18.5 to 9.1 min; planning plus
+verification fell to 27.4 s and 18.5 s because there are fewer strokes.
+
+| Palace step | Print time |
+| --- | ---: |
+| 2.9 mm layers, hold at both ends of every slanted stroke | 41.9 min |
+| 4.3 mm layers | 29.1 min |
+| and hold at riser tops only | 24.8 min |
+| and two zigzags on the small towers, 5.4 mm layers | 18.7 min |
+
+- The layer height was capped by the Palace's 13 mm towers: three zigzags
+  leave a slant about 9 mm of run, which at 27 degrees allows 4.7 mm. Two
+  zigzags let it span the tower.
+- The self-weight frame check is not the limit. At 4.3 mm layers the Palace
+  sags 0.005 mm with zigzags every 25 mm and 0.06 mm with one every 100 mm,
+  against a 1 mm limit; wider spacing saves only 1.5 m of 12.7 m of wire
+  because every loop keeps its minimum number of zigzags.
+- Tried and removed: drawing through contour bends under 45 degrees without
+  stopping. Fitting one curve through the corners made drawing slower (502 s
+  against 473 s on the Palace), because contours are 3 mm chords, a stop
+  costs only about 0.04 s at this acceleration, and the curve has flat spots.
+  Contours as true arcs would be the way to gain here.
+- Left of the Palace's 1,122 s: drawing 473 s, feed stop and restart 300 s,
+  65 lifts at about 5.4 s each. The branching shape did not plan at 4.4 mm or
+  6 mm layers (one stroke found no arm path) but does at 5.2 mm; not
+  investigated.
+
+Runs: `runs/geomfirst_gf65_*_w24`, sources `runs/geomfirst_*_vr4_source` and
+`runs/geomfirst_{palace,branching}vr4_f8_l5_source`.
+
 Not done, and why: withdrawing without a hold from a closed contour, and
 starting the feed during the approach. The planner's state between strokes
 requires all wire to have cooled, and feed commands exist only as hold edges;

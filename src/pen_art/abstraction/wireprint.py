@@ -166,6 +166,7 @@ def _mesh_framework_at_height(
         layers[index] = kept
 
     relations, bridges, spacing_adjustments, omitted_steep, nearest_pairs = [], [], [], 0, 0
+    two_zigzag_pairs = 0
     for index in range(1, len(layers)):
         lower, upper = layers[index - 1], layers[index]
         pairs = []
@@ -266,6 +267,19 @@ def _mesh_framework_at_height(
             if nearest:
                 count = above
                 nearest_pairs += 1
+            # A small loop gives three zigzags too little run to come down in.
+            # Two give each diagonal the loop's full width; use them when that
+            # brings it within the limit, rather than thinning every layer.
+            if (
+                maximum_branch_descent_deg is not None
+                and not branching
+                and not minimum_anchor_spacing
+                and count == 3
+                and steepest(3, nearest) > maximum_branch_descent_deg - 1
+                and steepest(2, nearest) <= maximum_branch_descent_deg - 1
+            ):
+                count = 2
+                two_zigzag_pairs += 1
             original_count = count
             if minimum_anchor_spacing:
                 # Equal fractions on a large upper contour can crowd anchors
@@ -463,6 +477,7 @@ def _mesh_framework_at_height(
         omitted_small_contours=omitted_small,
         omitted_steep_branch_diagonals=omitted_steep,
         nearest_point_zigzags=nearest_pairs,
+        two_zigzag_loops=two_zigzag_pairs,
         anchor_spacing_adjustments=spacing_adjustments,
         generation={
             "layer_height_m": layer_height,

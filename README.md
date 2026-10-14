@@ -363,7 +363,7 @@ Long runs on Blondie go in tmux. Wireframe settings live in the source run's
 | Setting under `wireprint` | Effect |
 | --- | --- |
 | `minimum_feature_m` | Opt-in. Rebuilds the mesh as a closed solid without parts thinner than this (`solidified.glb`), and ends rounded tips at the last printable contour. A simplification, recorded with its deviation. |
-| `layer_height` | Requested layer height. Use 0.003 for solidified shapes; from the default 0.01 the refinement overshoots to sub-millimetre layers. |
+| `layer_height` | Requested layer height. One slant steeper than 27 degrees thins every layer, and the step down overshoots, so ask for a height that passes as it is: 0.0055 for the Palace and branching shape. Taller layers mean less wire and coarser detail. |
 | `heavier_strands_m` | Strand diameters tried in order when the frame fails the structural screen (default 1.5 mm, a tip not yet on hand). The choice is recorded as `strand_escalation` and is also the wire's collision size. |
 
 The structural model treats the strand as 3D pen PLA at 2.5 GPa, a typical
@@ -377,14 +377,26 @@ speed limits are settings, not measurements of a real pen or arm.
 
 | Object | Strokes | Joins chained | Collision-free path | Timing | Verification | Total | Print time |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Triangular prism | 21 | 20 of 20 | 8.1 s | 0.9 s | 4.4 s | 14.3 s | 6.2 min |
-| Bottle | 31 | 30 of 30 | 14.1 s | 1.4 s | 6.0 s | 22.6 s | 7.0 min |
-| Torus | 15 | 8 of 14 | 4.6 s | 1.8 s | 4.9 s | 12.2 s | 7.0 min |
-| Cube | 21 | 20 of 20 | 10.3 s | 1.1 s | 4.1 s | 16.4 s | 9.0 min |
-| Narrowed cube | 21 | 20 of 20 | 9.9 s | 1.1 s | 4.4 s | 16.3 s | 8.9 min |
-| Vase, outer shell only | 33 | 32 of 32 | 15.9 s | 2.4 s | 6.8 s | 26.6 s | 12.6 min |
-| Branching shape, 8 mm feature | 151 | 120 of 150 | 16.3 s | 2.7 s | 7.4 s | 29.5 s | 18.5 min |
-| Palace, 8 mm feature | 273 | 158 of 272 | 26.1 s | 5.3 s | 13.2 s | 52.8 s | 41.9 min |
+| Triangular prism | 21 | 20 of 20 | 8.5 s | 0.9 s | 4.2 s | 14.4 s | 4.9 min |
+| Bottle | 31 | 30 of 30 | 14.1 s | 1.4 s | 6.0 s | 22.6 s | 5.7 min |
+| Torus | 15 | 8 of 14 | 4.4 s | 1.9 s | 5.1 s | 12.3 s | 5.8 min |
+| Cube | 21 | 20 of 20 | 10.7 s | 1.1 s | 3.8 s | 16.4 s | 7.0 min |
+| Narrowed cube | 21 | 20 of 20 | 10.1 s | 1.1 s | 4.4 s | 16.4 s | 6.9 min |
+| Vase, outer shell only | 33 | 32 of 32 | 15.8 s | 2.3 s | 5.2 s | 24.7 s | 9.9 min |
+| Branching shape, 8 mm feature, 5.2 mm layers | 85 | 65 of 84 | 8.9 s | 1.7 s | 6.4 s | 18.5 s | 9.1 min |
+| Palace, 8 mm feature, 5.4 mm layers | 146 | 81 of 145 | 13.0 s | 3.3 s | 8.1 s | 27.4 s | 18.7 min |
+
+The pen holds for 1 s with the feed off at the top of each riser only
+(`vertex_cooling_policy: rising_edge_end`). The foot of a slanted stroke lands
+on solid wire and is assumed to need no hold; this has not been tried on a
+pen. `wireprint_nonhorizontal_edge_end` restores the hold at both ends.
+
+A loop too small for three zigzags at the requested layer height takes two, so
+each slanted stroke spans the loop's full width (`two_zigzag_loops` in
+`wireprint_graph.json`). On the Palace's 13 mm towers this raises the tallest
+layer that keeps every slant within 27 degrees from 4.3 mm to 5.4 mm. Before
+these two changes the branching shape and Palace, at 2.9 mm layers, took 18.5
+and 41.9 min.
 
 A stroke that starts where the previous one ended is drawn without lifting the
 pen (`--chain-strokes on`, the default with `--geometry-first`): no withdraw,
