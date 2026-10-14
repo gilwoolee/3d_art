@@ -219,7 +219,10 @@ def _mesh_framework_at_height(
         wound = set()
         for index in range(len(layers) - 1, -1, -1):
             for loop in layers[index]:
-                ends = index + 1 == len(layers) or not touching(loop, layers[index + 1])
+                # It ends, or everything it carries is itself wound.
+                ends = index + 1 == len(layers) or all(
+                    id(above) in wound for above in touching(loop, layers[index + 1])
+                )
                 if id(loop) in wound or not narrow(loop) or not ends:
                     continue
                 chain, level = [loop], index
@@ -599,7 +602,8 @@ def _mesh_framework_at_height(
         if held:
             last = held[-1][1]
 
-    coil_turns, fused = 0, []
+    coil_turns, fused, tops = 0, [], {}
+    towers.sort(key=lambda tower: tower["level"])
     for number, tower in enumerate(towers):
         loops, support, level = tower["loops"], tower["support"], tower["level"]
         stack, reference = [], loops[0]["points"][0]
@@ -607,10 +611,16 @@ def _mesh_framework_at_height(
             # The strand leaves the supporting outline at its nearest point and
             # widens to the tower's own outline over the first layer.
             centre = np.asarray(loops[0]["polygon"].centroid.coords[0])
-            ring = LineString(support["points"][:, :2])
-            fraction = ring.project(Point(centre), normalized=True)
-            support["joins"].add(fraction % 1.0)
-            reference = sample_loop(support["points"], fraction)
+            if id(support) in tops:
+                # Standing on another tower: start from a point of its last turn.
+                reference = min(
+                    tops[id(support)], key=lambda point: np.linalg.norm(point[:2] - centre)
+                )
+            else:
+                ring = LineString(support["points"][:, :2])
+                fraction = ring.project(Point(centre), normalized=True)
+                support["joins"].add(fraction % 1.0)
+                reference = sample_loop(support["points"], fraction)
             stack.append(reference)
         for loop in loops:
             stack.append(align_loop(loop["points"], reference))
@@ -642,6 +652,7 @@ def _mesh_framework_at_height(
                 if np.linalg.norm(under - point) <= 2 * diameter:
                     fused.append([node(under), node(point)])
             beneath = points[-per_turn - 1 :]
+            tops[id(loops[-1])] = beneath
             for sample, (start, end) in enumerate(zip(points[:-1], points[1:], strict=True)):
                 add(
                     start,
