@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-14, branch `geometry-first-planning` (Gilwoo Lee). Read this
+Updated 2026-10-14, branch `main` (Gilwoo Lee). Read this
 first. The previous handoff, about the cube/bottle work before geometry-first
 planning, is in [archive/2026_1012_handoff.md](archive/2026_1012_handoff.md).
 
@@ -26,11 +26,10 @@ one cell profile template. Planned runs are not in git: the `runs/` folder here
 is 108 GB. A 2.3 GB archive holds the runs worth keeping and the motion
 library.
 
-1. **Clone** and switch to the branch:
+1. **Clone:**
 
    ```bash
    git clone git@github.com:gilwoolee/3d_art.git && cd 3d_art
-   git checkout geometry-first-planning
    ```
 
 2. **Set up** (needs git, git-lfs, curl and [uv](https://docs.astral.sh/uv/);
