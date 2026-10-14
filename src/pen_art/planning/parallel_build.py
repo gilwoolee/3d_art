@@ -639,7 +639,10 @@ def _propose(context, spec, seconds):
     else:
         # The planner's own cold sampler, one table index per ordinal. It
         # screens the nozzle against the predicted preceding material.
-        table_index = (model.table.home_index + spec["ordinal"]) % 4
+        # A stroke may name the turntable position it was made for (detail
+        # drawn after the frame); try that one first.
+        first = row.get("turntable_index", model.table.home_index)
+        table_index = (first + spec["ordinal"]) % 4
 
         def candidates():
             scene = _prefix(context).scene_for(spec["chain"], final_index=table_index)
