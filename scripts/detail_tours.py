@@ -407,8 +407,13 @@ class PlannerCheck:
             self.scenes[index] = scene
         return self.scenes[index]
 
-    def check(self, p, index, hints):
-        """(tilts that work, where to cut: None, "start", "end" or a sample index)."""
+    def check(self, p, index, hints, clear=None):
+        """(tilts that work, where to cut: None, "start", "end" or a sample index).
+
+        ``clear(p, index)`` gives the tilts clear of the frame at each sample;
+        only tilts clear along the whole line are tried (the planner checks the
+        nose at every pose). Where no tilt stays clear, cut there.
+        """
         from time import monotonic
 
         from pen_art.curves import flatten_curve, transform_points
@@ -428,8 +433,18 @@ class PlannerCheck:
             "length_m": length(p),
         }
         points = transform_points(flatten_curve(stroke, 0.00005, 0.003)[0], world)
+        tried = list(dict.fromkeys([*hints, *[float(t) for t in sorted(TILTS, reverse=True)]]))
+        if clear is not None:
+            sets = clear(p, index)
+            common, end = set(sets[0]), 0
+            while end + 1 < len(sets) and common & sets[end + 1]:
+                end += 1
+                common &= sets[end]
+            if end + 1 < len(sets):
+                return [], max(1, end)  # no single tilt clears the whole line
+            tried = [t for t in tried if t in common]
         works, cut = [], None
-        for tilt in dict.fromkeys([*hints, *[float(t) for t in sorted(TILTS, reverse=True)]]):
+        for tilt in tried:
             screened = [
                 f
                 for f in fixed_rotation_families(arm, world, [tilt])
@@ -873,7 +888,7 @@ def main():
         while queue:
             entry = queue.pop(0)
             p, tilt = entry["p"], entry["tilt"]
-            works, cut = checker.check(p, items[entry["k"]][1], entry["hints"])
+            works, cut = checker.check(p, items[entry["k"]][1], entry["hints"], clear_sets)
             checks += 1
             if works:
                 ready.append({**entry, "hints": works})
