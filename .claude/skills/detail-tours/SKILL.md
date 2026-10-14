@@ -23,8 +23,9 @@ to the budget.
   are no struts. The structural check counts fused points as connections.
 - **The pen tip may touch existing wire.** The planner leaves the tip out of
   wire collision. The tapered nose right behind it keeps 0.3 mm
-  (`environment.tool_clearance_m: {tapered_nose: 0.0003}`); the barrel, arm
-  and everything else keep `clearance_m` (1 mm).
+  (`environment.tool_clearance_m: {tapered_nose: 0.0003}`, used by drawing,
+  approach and withdrawal checks); the barrel, arm and everything else keep
+  `clearance_m` (1 mm).
 - **Pose.** The pen body leans toward the robot, 0-60 degrees. The turntable
   turns in 90 degree steps, so one stroke stays on the face that looks at the
   robot. The planner holds one tilt per stroke; each tour carries its own
@@ -59,17 +60,22 @@ background jobs); 24 workers.
    If it stops, change `--layer`, `--feature` or `--coil-width` before adding
    detail; detail never fixes a frame.
 
-2. **Generate the tours** (2-7 minutes):
+2. **Generate the tours** (5-10 minutes):
 
    ```bash
    PYTHONPATH=src .venv/bin/python scripts/detail_tours.py FRAME_SOURCE runs/geomfirst_NAME_detail_source \
-     --profile PROFILE --margin 0.0008 --detail 7 --minutes 20
+     --profile PROFILE --check-with-planner --margin 0.0008 --detail 12 --minutes 40 --collect 2.0
    ```
 
-   Generate more than the budget (7 m, 20 estimated minutes): the planner
-   drops some tours. Read the "length by stage" line: it shows where line
-   length is lost (faces the pen cannot reach, no clear tilt, not touching
-   the frame). For Liberty add `--liberty --fine-region -11 2 -15 15 95 111`
+   `--check-with-planner` builds a cell from the detail profile and, at each
+   tour's turntable position, keeps only the tilts that pass the planner's
+   own pen screen and drawing sampler (IK along the whole tour); tours with
+   none are left out. Generate well above the budget: the planner check and
+   the planning rounds both remove tours, and the plan step trims to 5 m /
+   15 min at the end. Read the "length by stage" line to see where length is
+   lost (faces the pen cannot reach, no clear tilt, arm cannot draw it, not
+   touching the frame). The pool of distinct crease lines is the real cap on
+   a small or smooth object. For Liberty add `--liberty --fine-region -11 2 -15 15 95 111`
    (crown rays, crown band, torch, book; finer creases on the face). For
    another object a `--fine-region` box (mm) around a small detailed part
    (a face) helps.
@@ -120,6 +126,11 @@ background jobs); 24 workers.
    fused contacts, per-tour tilt candidates, `detail_tours.json`.
 
 ## Known gaps
+
+- Tilted poses sit near arm singularities: approaches need fine sampling
+  (down to 0.5 mm steps) and some tours fail the posture-change limit.
+- A tour that ends going downhill can trap its own last wire under the nose
+  when backing out.
 
 - The drop loop replans everything each round (about 40-60 s); many failing
   tours make it slow.

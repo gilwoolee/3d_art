@@ -90,7 +90,7 @@ def find_departure(robot, offset, start, settings, edge_valid, deadline=np.inf):
         # Refine the same Cartesian ray only after a tracking-bound rejection.
         # Every new joint edge still needs the original tracking and collision
         # checks; neither a collision nor missing IK alone triggers refinement.
-        for subdivisions in (1, 2, 4, 8, 16):
+        for subdivisions in (1, 2, 4, 8, 16, 32, 64):
             if hasattr(edge_valid, "failures"):
                 edge_valid.failures.clear()
             local_settings = {
