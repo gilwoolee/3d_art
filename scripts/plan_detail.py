@@ -29,8 +29,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import yaml
-
 from pen_art.curves import curve_length
 from pen_art.io import read_json, write_json
 from pen_art.planning.section_build import write_section_artifacts
@@ -38,24 +36,7 @@ from pen_art.planning.sections import section_actions
 from pen_art.structure import analyze_structure
 
 sys.path.insert(0, str(Path(__file__).parent))
-from detail_tours import tilt_hints  # noqa: E402
-
-DETAIL_TILTS = [0.0, 60.0, 45.0, 30.0, 15.0]
-NOSE_CLEARANCE_M = 0.0003
-
-
-def detail_profile(base, path):
-    """The frame's profile, plus pen tilts for detail and the nose clearance."""
-    profile = yaml.safe_load(base.read_text())
-    profile["drawing_pen_tilt_candidates_deg"] = DETAIL_TILTS
-    profile["environment"]["tool_clearance_m"] = {"tapered_nose": NOSE_CLEARANCE_M}
-    profile["setup_description"] = (
-        profile.get("setup_description", "")
-        + " Detail strokes after the frame may tilt the pen toward the robot; the nose"
-        + f" keeps {NOSE_CLEARANCE_M * 1000:g} mm from wire."
-    )
-    path.write_text(yaml.safe_dump(profile, sort_keys=False))
-    return path
+from detail_tours import detail_profile, tilt_hints  # noqa: E402
 
 
 def drop_tours(source, target, tours):

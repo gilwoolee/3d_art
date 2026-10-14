@@ -323,6 +323,115 @@ def candidate_lines(mesh, args):
     return out
 
 
+def detail_profile(base, path, nose_clearance=0.0003):
+    """The frame's profile, plus pen tilts for detail and the nose clearance."""
+    profile = yaml.safe_load(Path(base).read_text())
+    profile["drawing_pen_tilt_candidates_deg"] = [0.0, 60.0, 45.0, 30.0, 15.0]
+    profile["environment"]["tool_clearance_m"] = {"tapered_nose": nose_clearance}
+    profile["setup_description"] = (
+        profile.get("setup_description", "")
+        + " Detail strokes after the frame may tilt the pen toward the robot; the nose"
+        + f" keeps {nose_clearance * 1000:g} mm from wire."
+    )
+    Path(path).write_text(yaml.safe_dump(profile, sort_keys=False))
+    return Path(path)
+
+
+def planner_tilts(graph, frame_source, profile_path, cell_dir, seconds=5.0):
+    """Tilts the planner's own sampler can draw each tour with, best first.
+
+    At the tour's turntable position, each tilt must pass the planner's pen
+    screen against the frame (start, middle, end) and give a drawing path
+    (IK along the whole tour). This is the check the planner's cold sampler
+    makes; tours with no tilt left would only cost a planning round.
+    """
+    from time import monotonic
+
+    from pen_art.curves import flatten_curve, transform_points
+    from pen_art.planning.axis_corridor import pen_clear
+    from pen_art.planning.cell_motion import drawing_alternatives, fixed_rotation_families
+    from pen_art.planning.cell_planner import CellPlanner
+    from pen_art.planning.scene import MaterialScene
+    from pen_art.planning.turntable import IndexedTurntable
+
+    settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
+    settings.update(maximum_subdivision_depth=20)
+    from pen_art.cell import prepare_cell
+    from pen_art.planning.section_build import prepare_candidates
+
+    shutil.rmtree(cell_dir, ignore_errors=True)
+    prepare_cell(profile_path, cell_dir, frame_source)
+    prepare_candidates(cell_dir)
+    planner = CellPlanner(cell_dir, profile_path, settings, float("inf"))
+    arm = planner.collision_arm(next(iter(planner.arms)))
+    table = IndexedTurntable.from_profile(planner.profile)
+    actions = section_actions(graph, group_sources=True)["actions"]
+    frame = [
+        np.asarray(seg)[[0, -1]]
+        for a in actions
+        if a["stage"] != "artistic"
+        for seg in a["segments"]
+    ]
+    hints = {
+        e["parent_curve"]: e["pen_tilt_candidates_deg"]
+        for e in graph["edges"]
+        if "pen_tilt_candidates_deg" in e
+    }
+    scenes, out = {}, {}
+    for action in actions:
+        tour = action.get("parent_curve")
+        if action["stage"] != "artistic" or tour in out:
+            continue
+        index = action["turntable_index"]
+        world = table.build_transform(index)
+        if index not in scenes:
+            scenes[index] = MaterialScene()
+            for k, seg in enumerate(frame):
+                a, b = transform_points(seg, world)
+                scenes[index].add(a, b, WIRE_R, f"frame/{k}")
+        points = transform_points(flatten_curve(action, 0.00005, 0.003)[0], world)
+        tried = [*hints.get(tour, []), *[float(t) for t in sorted(TILTS, reverse=True)]]
+        works = []
+        for tilt in dict.fromkeys(tried):
+            screened = [
+                f
+                for f in fixed_rotation_families(arm, world, [tilt])
+                if all(
+                    pen_clear(
+                        planner,
+                        arm,
+                        points[i],
+                        f["rotations"],
+                        scenes[index],
+                        planner.margin + 2e-6,
+                    )
+                    for i in (0, len(points) // 2, -1)
+                )
+            ]
+            if not screened:
+                continue
+            for drawing in drawing_alternatives(
+                arm,
+                action,
+                {action["start"], action["end"]},
+                world,
+                planner.obstacles,
+                deadline=monotonic() + seconds,
+                seeds=[arm.initial_positions],
+                settings={"maximum_subdivision_depth": 20},
+                clearance_m=planner.margin,
+                rotations=screened,
+                orientation_policy="fixed",
+            ):
+                if drawing["status"] == "SAMPLED_DRAWING_PATH":
+                    works.append(tilt)
+                    break
+            if len(works) >= 2:
+                break
+        out[tour] = works
+    return out
+
+
 # --- main ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -351,6 +460,11 @@ def main():
     parser.add_argument("--bridge", type=float, default=0.022, help="m; longest connecting run")
     parser.add_argument(
         "--margin", type=float, default=0.001, help="m nose clearance (planner clearance_m)"
+    )
+    parser.add_argument(
+        "--check-with-planner",
+        action="store_true",
+        help="keep only tours the planner's sampler can draw, with the tilts it can use",
     )
     parser.add_argument("--detail", type=float, default=5.0, help="m of detail to aim for")
     parser.add_argument("--minutes", type=float, default=15.0, help="added print-time limit")
@@ -755,6 +869,26 @@ def main():
         fused_turns=graph.get("fused_turns", []) + fused,
         method="wireprint_with_detail_tours",
     )
+
+    if args.check_with_planner:
+        profile_path = detail_profile(
+            args.profile, args.profile.parent / f"{target.name}_check_profile.yaml"
+        )
+        cell_dir = target.parent / f"{target.name}_check_cell"
+        works = planner_tilts(graph, source, profile_path, cell_dir)
+        gone = {tour for tour, tilts in works.items() if not tilts}
+        for e in graph["edges"]:
+            if works.get(e.get("parent_curve")):
+                e["pen_tilt_candidates_deg"] = works[e["parent_curve"]]
+        graph["edges"] = [e for e in graph["edges"] if e.get("parent_curve") not in gone]
+        used_nodes = {n for e in graph["edges"] for n in (e["start"], e["end"])}
+        graph["nodes"] = [n for n in graph["nodes"] if n["id"] in used_nodes]
+        graph["fused_turns"] = [
+            p for p in graph["fused_turns"] if p[0] in used_nodes and p[1] in used_nodes
+        ]
+        rows = [r for r in rows if r["id"] not in gone]
+        stages["arm can draw it"] = sum(r["length_m"] for r in rows)
+        print(f"planner sampler: {len(gone)} of {len(works)} tours have no drawable tilt")
 
     if target.exists():
         shutil.rmtree(target)
