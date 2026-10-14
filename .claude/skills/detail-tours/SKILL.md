@@ -1,119 +1,133 @@
 ---
 name: detail-tours
-description: Add surface detail (folds, hems, face, crown, torch, book) to an already generated WirePrint frame as a few long, motion-plannable strokes drawn after the frame, then hand the result to the motion planner. Use when asked to add artistic detail on top of a wireframe, to regenerate the Liberty detail tours, or to keep added detail within a print-time budget.
+description: Add about 5 m of surface detail (folds, hems, face, ribs, crown, torch, book) on top of a planned WirePrint frame as a few long strokes the robot draws after the frame, within 15 extra minutes of print time, and get the motion planner to plan it, dropping what it cannot draw. Use for any object in objs/ (Liberty, ghost, pumpkin, or a new mesh) when asked to add detail to a wireframe or rerun the detail harness.
 ---
 
 # Detail tours on a WirePrint frame
 
-The frame is generated as-is (`prepare_framework`) and planned as before. This
-skill adds the detail: lines that make the object recognisable, laid on top of
-the frame and drawn after it. The goal is detail the motion planner can plan;
-the planner plans the frame and then the detail strokes.
+The frame is generated and planned as before. Detail is extra wire laid on
+top of it after it is built: a few long continuous strokes ("tours") that
+follow the object's creases. An agent generates the tours to be plannable;
+the motion planner then plans frame and tours, and the harness drops the
+tours the planner (or the final full-robot check) rejects and trims the rest
+to the budget.
 
-## Rules the detail must follow
+## Budget and rules
 
-These come from the user and from the planner. Do not relax them silently.
-
-- **Overlay, not clearance.** Detail lies on the frame like a coil turn on the
-  turn below: 1 mm (one wire) outside the mesh surface. Touching points are
-  fused (recorded in `fused_turns`); no struts. The planner already omits the
-  pen tip from material collision while drawing; only the nose behind the tip
-  (estimated tapered nose, 3 mm and up) keeps `clearance_m` (1 mm), and the
-  nose must stay above the bed.
-- **Drawn after the frame**, with the pen tilted. The pen body leans toward the
-  robot; the turntable turns in 90 degree steps. One stroke keeps one turntable
-  position, so a stroke stays on the face that looks at the robot. The tilt may
-  change along a stroke (user, 2026-10-13), but the planner today holds one
-  tilt per stroke (`drawing_orientation_policy: fixed`), so prefer strokes
-  that keep one tilt.
-- **Print time.** Added detail must cost at most 15 minutes. Strokes dominate
-  (about 6 s each, measured on planned runs: pen start/stop waits, approach,
-  withdraw, travel), drawing is about 20 mm/s on curvy paths, and a turntable
-  step about 8 s. So detail must be a few long continuous strokes, not many
-  short ones. Aim for at most ~80 strokes.
-- **Wire.** The detail is extra wire on top of the frame's 10 m budget; the
-  user asked for about 5 m.
-- **Every stroke starts on a built node.** The planner's order search only
-  starts a stroke at a node already built; fused contacts do not count. Each
-  tour therefore begins exactly on a frame wire at a node it shares with the
-  frame.
-- **The structure check must pass** with fused contacts counted as
-  connections (`src/pen_art/structure.py`).
+- **Budget per object: at most 5 m of detail and 15 minutes of added print
+  time** (planned time, compared with the frame's own planned run). The frame
+  keeps its own 10 m wire budget; detail is on top of it.
+- **Overlay.** Detail lies one wire (1 mm) outside the surface, resting on the
+  frame wire like a coil turn on the turn below, and is bent onto frame wire
+  that passes within 3.5 mm. Touching points are fused (`fused_turns`); there
+  are no struts. The structural check counts fused points as connections.
+- **The pen tip may touch existing wire.** The planner leaves the tip out of
+  wire collision. The tapered nose right behind it keeps 0.3 mm
+  (`environment.tool_clearance_m: {tapered_nose: 0.0003}`); the barrel, arm
+  and everything else keep `clearance_m` (1 mm).
+- **Pose.** The pen body leans toward the robot, 0-60 degrees. The turntable
+  turns in 90 degree steps, so one stroke stays on the face that looks at the
+  robot. The planner holds one tilt per stroke; each tour carries its own
+  tilt candidates (`pen_tilt_candidates_deg`), and such strokes skip the
+  upright motion library.
+- **Start on a built node.** Each tour starts exactly on a frame wire, at a
+  node it shares with the frame; the planner only starts strokes there.
+- **Print time is mostly strokes** (about 6 s each; drawing about 20 mm/s; a
+  turntable step about 8 s), so detail must be long tours, not many lines.
 
 ## Steps
 
-1. **Frame source.** Use a frame that already planned and verified, as
-   generated. For the cut Liberty statue that is
-   `runs/geomfirst_libertystatue_c1_source` (coiled raised arm; verified as
-   `geomfirst_gf75_liberty_statue_w24`). The no-coil frame
-   `geomfirst_libertynocoil_art12_source` does not plan: a 7 mm zigzag at the
-   arm/head fork has no path (`NO_CONNECTED_IK_PATH`).
-2. **Generate the detail** (about 2 minutes):
+All commands from the repo root. Long runs in tmux (session restarts kill
+background jobs); 24 workers.
+
+1. **Frame.** Use a frame that already planned to `FULL_BUILD_VERIFIED`:
+
+   | Object | Frame source | Profile | Frame run |
+   |---|---|---|---|
+   | Liberty (cut statue) | `runs/geomfirst_libertystatue_c1_source` | `runs/geomfirst_profiles/liberty_statue.yaml` | `runs/geomfirst_gf75_liberty_statue_w24` |
+   | Ghost | `runs/geomfirst_ghost_b10_source` | `runs/geomfirst_profiles/ghost_b10.yaml` | `runs/geomfirst_gf71_ghost_w24` |
+   | Pumpkin | `runs/geomfirst_pumpkin_b10_source` | `runs/geomfirst_profiles/pumpkin_b10.yaml` | `runs/geomfirst_gf71_pumpkin_w24` |
+
+   For a new mesh:
 
    ```bash
-   PYTHONPATH=src .venv/bin/python scripts/detail_tours.py \
-     runs/geomfirst_libertystatue_c1_source runs/geomfirst_libertytours_c1_source \
-     --liberty --fine-region -11 2 -15 15 95 111
+   PYTHONPATH=src .venv/bin/python scripts/frame_source.py NAME objs/NAME/NAME.glb --up y
+   TAG=gfNN ./runs/geomfirst_one.sh NAME runs/geomfirst_NAME_source runs/geomfirst_profiles/NAME.yaml
    ```
 
-   It prints line, stroke and contact counts, the estimated added print time,
-   the tilt mix and the structural screen. It writes the target as a source
-   run (`stroke_graph.json`, `construction_plan.json`,
-   `structural_screen.json`) plus `detail_tours.json` (per tour: length,
-   turntable index, contacts, tilt per 1 mm sample, source lines).
-   Knobs: `--wire` (line budget; about 0.55x survives), `--max-strokes`,
-   `--crease-threshold` (mm; lower finds subtler creases), `--min-line`,
-   `--bridge` (longest connecting run), `--fine-region` (mm box for a finer
-   pass; Liberty face shown above), `--liberty` (crown rays, crown band, torch
-   flame and balcony, book outline).
-3. **Check it before planning.**
-   - Estimated added time under 15 minutes; structure `pass True`.
-   - Look at it: add the target to `runs/viewer_runs.json`, then in the viewer
-     (tmux `pen-art-viewer`, port 8765) untick "Show statue" in panel 2.
-     Screenshots from this machine need `env -u DISPLAY` (SSH X forwarding
-     breaks headless WebGL).
-4. **Plan.** Use a profile that allows tilts, for Liberty
-   `runs/geomfirst_profiles/liberty_detail.yaml` (`liberty_statue.yaml` with
-   `drawing_pen_tilt_candidates_deg: [0, 60, 45, 30, 15]`). In tmux:
+   The frame must reach `FULL_BUILD_VERIFIED` (see `runs/geomfirst_gfNN_progress.txt`).
+   If it stops, change `--layer`, `--feature` or `--coil-width` before adding
+   detail; detail never fixes a frame.
+
+2. **Generate the tours** (2-7 minutes):
 
    ```bash
-   TAG=gfNN ./runs/geomfirst_one.sh liberty_tours \
-     runs/geomfirst_libertytours_c1_source runs/geomfirst_profiles/liberty_detail.yaml
+   PYTHONPATH=src .venv/bin/python scripts/detail_tours.py FRAME_SOURCE runs/geomfirst_NAME_detail_source \
+     --profile PROFILE --margin 0.0008 --detail 7 --minutes 20
    ```
 
-   Output: `runs/geomfirst_gfNN_liberty_tours_w24`. Progress line in
-   `runs/geomfirst_gfNN_progress.txt`. If it stops with
-   `PARALLEL_FORWARD_INCOMPLETE`, find the blocked stroke from
-   `parallel_build.json` (`blocked`) and its failure counts; check whether it
-   is a frame stroke (order position below the frame's stroke count) or a
-   detail tour.
+   Generate more than the budget (7 m, 20 estimated minutes): the planner
+   drops some tours. Read the "length by stage" line: it shows where line
+   length is lost (faces the pen cannot reach, no clear tilt, not touching
+   the frame). For Liberty add `--liberty --fine-region -11 2 -15 15 95 111`
+   (crown rays, crown band, torch, book; finer creases on the face). For
+   another object a `--fine-region` box (mm) around a small detailed part
+   (a face) helps.
 
-## How the generator works
+3. **Plan, drop, trim** (30-90 minutes):
 
-1. Candidate lines: slice creases (slice along x, y, z every 0.75 mm; a crease
-   is where the outline bulges out of or dents into the chord to neighbours
-   1.5 mm away; chained slice to slice), a finer pass in the face box, and
-   designed Liberty features. Chosen by importance (length x crease depth),
-   skipping lines that mostly duplicate chosen ones.
-2. Each line is pushed 1 mm outside the surface and cut where it turns to
-   another face, or where no tilt (0-60) clears the frame and the bed.
-3. Pieces on one face are joined end to end through connecting runs (up to
-   22 mm, laid on the surface) when every point of the run has a clear tilt.
-4. Tours are ordered by peeling from the end: the last tour must clear every
-   other with some tilt at every point. When none can, the conflicting points
-   of the tour that conflicts least are cut out.
-5. Each tour starts on a shared frame node, overhangs at most 8 mm past its
-   last contact, and is fused to the frame wherever it touches (every 4 mm at
-   most). A tilt profile per tour changes as little as possible.
+   ```bash
+   PYTHONPATH=src .venv/bin/python -u scripts/plan_detail.py runs/geomfirst_NAME_detail_source PROFILE \
+     runs/geomfirst_gfNN_NAME_detail --frame-run FRAME_RUN --detail 5 --minutes 15
+   ```
+
+   It derives `runs/geomfirst_gfNN_NAME_detail_profile.yaml` (tilts and nose
+   clearance) and plans round after round. A round drops the tours that
+   planning blocked on, or that the full-robot replay rejected (planning
+   checks the pen; replay checks the whole arm, e.g. self-collision at a
+   tilted pose). Once everything plans, it trims the tours with the least
+   detail per planned second until the detail is at most 5 m and the added
+   time at most 15 minutes. A blocked frame stroke stops the loop.
+
+4. **Check.** `runs/geomfirst_gfNN_NAME_detail_detail.json`: final run,
+   `detail_m`, `added_minutes`, every dropped tour with its round and reason.
+   The final run's status must be `FULL_BUILD_VERIFIED`. Add the final run to
+   `runs/viewer_runs.json`; in the viewer (tmux `pen-art-viewer`, port 8765)
+   untick "Show statue" to see wire only. Screenshots on this machine need
+   `env -u DISPLAY` (SSH X forwarding breaks headless WebGL).
+
+5. **Report** per object: detail metres and added minutes from the plan,
+   tours kept and dropped (and why), the frame's own time, and a screenshot.
+
+## How the generator works (`scripts/detail_tours.py`)
+
+1. Candidate lines: slice creases along x, y and z at several depths (a
+   crease is where a slice outline bulges out of or dents into the chord to
+   its neighbours 1.5 mm away, chained slice to slice), a finer pass inside
+   `--fine-region`, and designed Liberty features with `--liberty`.
+2. In order of importance (length x crease depth), skipping near-duplicates:
+   lay the line 1 mm outside the surface, bend it onto nearby frame wire, cut
+   it where it turns to another face, and keep the stretches where some tilt
+   clears the frame and the bed. Stop once 1.6x `--detail` is reachable.
+3. Join stretches on one face end to end through connecting runs of up to
+   22 mm on the surface.
+4. Order the tours by peeling from the end: the last tour's nose must clear
+   every other tour and its own wire more than 4 mm away. When nothing can go
+   last, cut the conflicting points out of the tour that conflicts least.
+5. Start each tour on a contact, overhang at most 8 mm, drop tours that never
+   touch the frame; keep the longest tours within `--detail` and `--minutes`.
+6. Write the source run: frame members split at contacts, tour members,
+   fused contacts, per-tour tilt candidates, `detail_tours.json`.
 
 ## Known gaps
 
-- The planner stops at the first stroke it cannot plan; it cannot yet drop a
-  detail tour and continue. The user wants it to plan most of the detail and
-  drop the rest.
-- Tilt that varies within a stroke is not supported by the planner.
-- Connecting runs cross the surface between unrelated lines and read as
-  scribbles. Routing them along frame wire (overlay) would hide them.
-- The pose check models the nose only, not the barrel, arm or turntable.
+- The drop loop replans everything each round (about 40-60 s); many failing
+  tours make it slow.
+- Planning checks only the pen; the whole arm is checked at the end, so arm
+  self-collision at tilted poses costs a full round per tour.
+- Connecting runs cross the surface and can read as scribbles; routing them
+  along frame wire would hide them.
+- Tilt that changes along a stroke is not supported by the planner.
+- Undersides (surfaces facing down) are out of reach from above.
 - Physical assumptions are unmeasured: nose shape, fusing by overlay, 20 mm/s,
-  unsupported overhangs up to 8 mm.
+  overhangs up to 8 mm, 0.3 mm nose clearance.

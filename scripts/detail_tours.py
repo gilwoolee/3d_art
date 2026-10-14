@@ -264,12 +264,40 @@ def liberty_features(mesh):
     return out
 
 
+def dip(p, frame, tree, reach, spacing=0.006, width=0.002):
+    """Bend a laid line onto nearby frame wire so it rests there.
+
+    Where the line passes within ``reach`` of frame wire (a local minimum of the
+    distance, at most every ``spacing``), move it toward the wire until the two
+    wires touch, blending the move over about ``width`` either side.
+    """
+    d, idx = tree.query(p)
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(p, axis=0), axis=1))]
+    shift, taken = np.zeros_like(p), []
+    for i in np.argsort(d):
+        if d[i] > reach:
+            break
+        touching = d[i] <= 2 * WIRE_R + 0.0002
+        if touching or d[i] != d[max(0, i - 3) : i + 4].min():
+            continue
+        if any(abs(s[i] - t) < spacing for t in taken):
+            continue
+        move = (frame[idx[i]] - p[i]) * (1 - 2 * WIRE_R / d[i])
+        shift += np.exp(-(((s - s[i]) / width) ** 2))[:, None] * move
+        taken.append(s[i])
+    q = p + shift
+    q[:, 2] = np.maximum(q[:, 2], 0.0)
+    return q
+
+
 def candidate_lines(mesh, args):
     """(name, points m, importance, lay on surface) for every candidate detail line."""
     out = []
     if args.liberty:
         out += [(name, p / 1000, np.inf, push) for name, p, push in liberty_features(mesh)]
-    for axis, t in slice_creases(mesh, args.crease_threshold):
+    # Shallower creases come later in importance; they fill in smooth objects.
+    found = [line for th in args.crease_threshold for line in slice_creases(mesh, th)]
+    for axis, t in found:
         out.append(
             (
                 f"crease-{'xyz'[axis]}",
@@ -306,15 +334,13 @@ def main():
         default=Path("runs/geomfirst_profiles/liberty_statue.yaml"),
         help="cell profile: build placement, robot base and turntable",
     )
-    parser.add_argument(
-        "--wire",
-        type=float,
-        default=7.0,
-        help="line budget (m) before cutting; about 0.55x is kept",
-    )
     parser.add_argument("--max-strokes", type=int, default=80)
     parser.add_argument(
-        "--crease-threshold", type=float, default=0.12, help="mm a crease bulges or dents"
+        "--crease-threshold",
+        type=float,
+        nargs="+",
+        default=[0.12, 0.08, 0.05],
+        help="mm a crease bulges or dents; several values add shallower creases",
     )
     parser.add_argument(
         "--min-line", type=float, default=0.008, help="m; shorter crease lines are ignored"
@@ -325,6 +351,14 @@ def main():
     parser.add_argument("--bridge", type=float, default=0.022, help="m; longest connecting run")
     parser.add_argument(
         "--margin", type=float, default=0.001, help="m nose clearance (planner clearance_m)"
+    )
+    parser.add_argument("--detail", type=float, default=5.0, help="m of detail to aim for")
+    parser.add_argument("--minutes", type=float, default=15.0, help="added print-time limit")
+    parser.add_argument(
+        "--collect", type=float, default=1.6, help="collect this x --detail of reachable line"
+    )
+    parser.add_argument(
+        "--dip", type=float, default=0.0035, help="m; bend lines onto frame wire this near"
     )
     parser.add_argument(
         "--fine-region",
@@ -382,25 +416,25 @@ def main():
             out.append(ok)
         return out
 
-    # 1. choose lines by importance, skipping near-duplicates
-    chosen, taken, used = [], [], 0.0
+    # 1-2. take lines by importance, skipping near-duplicates; lay each on the
+    #      surface and cut it where it turns to another face or where no tilt
+    #      clears the frame; stop once enough reachable line is collected
+    pieces, stages = [], {"laid": 0.0, "one face": 0.0}
+    chosen, taken, used, reachable = [], [], 0.0, 0.0
     for name, p, importance, push in sorted(candidate_lines(mesh, args), key=lambda c: -c[2]):
+        if reachable >= args.collect * args.detail:
+            break
         if importance != np.inf and length(p) < args.min_line:
             continue
         q = resample(p, 0.0005)
         if taken and (cKDTree(np.vstack(taken)).query(q)[0] < 0.0015).mean() > 0.5:
             continue
-        if used + length(q) > args.wire * 0.85:
-            continue
         chosen.append((name, q, push))
         taken.append(q)
         used += length(q)
-
-    # 2. lay each line on the surface, cut it where it turns to another face or
-    #    where no tilt clears the frame
-    pieces = []
-    for name, q, push in chosen:
         p, az = surface.lay(q, push)
+        stages["laid"] += length(p)
+        p = dip(p, frame, frame_tree, args.dip)
         sec = sector_of(az)
         for i in range(1, len(sec) - 1):
             if sec[i - 1] == sec[i + 1] != sec[i]:
@@ -410,11 +444,14 @@ def main():
             if b - a < 6:
                 continue
             part, s = p[a:b], int(sec[a])
+            stages["one face"] += length(part)
             sets = clear_sets(part, s)
             ok = np.array([bool(x) for x in sets], int)
             for run in np.split(np.arange(len(part)), np.flatnonzero(np.diff(ok)) + 1):
                 if ok[run[0]] and len(run) >= 8:
                     pieces.append((part[run], s, [sets[i] for i in run], [name]))
+                    reachable += length(part[run])
+    stages["tilt clears frame"] = sum(length(r[0]) for r in pieces)
 
     # 3. join pieces of one face end to end into tours
     def bridge(a, b):
@@ -458,9 +495,11 @@ def main():
                 names += pieces[i][3]
                 left.remove(i)
             tours.append((np.vstack(path), sec, tilts, names))
+    stages["joined (with connecting runs)"] = sum(length(t[0]) for t in tours)
     tours = sorted((t for t in tours if length(t[0]) >= 0.008), key=lambda t: -length(t[0]))[
         : args.max_strokes
     ]
+    stages["8 mm or longer, stroke cap"] = sum(length(t[0]) for t in tours)
 
     # 4. order tours so no nose meets detail drawn earlier. Peel from the end:
     #    the last tour must clear all others. When none can, cut the conflicting
@@ -483,10 +522,16 @@ def main():
     next_id, remaining, order, allowed_at, cut_out = len(tours), set(items), [], {}, 0
 
     def allowed(k):
+        """Clear tilts per sample: the nose misses every other remaining tour and
+        this tour's own wire more than 4 mm along it (either drawing direction)."""
         others = remaining - {k}
         return [
-            {t for t, h in hs.items() if not any(owner[j] in others for j in h)}
-            for hs in items[k][2]
+            {
+                t
+                for t, h in hs.items()
+                if not any(owner[j] in others or (owner[j] == k and abs(j - g) > 4) for j in h)
+            }
+            for g, hs in zip(items[k][0], items[k][2], strict=True)
         ]
 
     while remaining:
@@ -525,6 +570,7 @@ def main():
                 owner[g[run]] = -1
                 cut_out += len(run)
     order.reverse()
+    stages["ordered"] = sum(length(allp[items[k][0]]) for k in order)
 
     def tilt_profile(sets):
         """A clear tilt per sample that changes as little as possible (Viterbi)."""
@@ -565,20 +611,49 @@ def main():
         return nid
 
     fused, art_edges, rows, rank, dropped = [], [], [], -1, 0
+    # Trim each tour to start on a contact and overhang at most 8 mm; leave out
+    # tours that never touch the frame. Then keep the longest tours (most detail
+    # per stroke) within the detail length and the added print time.
+    ready = {}
     for k in order:
-        p, sec, tilt = allp[items[k][0]], items[k][1], tilt_profile(allowed_at[k])
+        p, tilt = allp[items[k][0]], tilt_profile(allowed_at[k])
         d, _ = ftree.query(p)
         on = np.flatnonzero(d <= touch)
         if not len(on):
             dropped += 1
-            continue  # never touches the frame
-        if on[0] > len(p) - 1 - on[-1]:  # start on a contact
-            p, tilt, on = p[::-1], tilt[::-1], len(p) - 1 - on[::-1]
-        a, b = on[0], min(len(p), on[-1] + 9)  # overhang at most 8 mm
-        p, tilt = p[a:b], tilt[a:b]
-        if length(p) < 0.006:
-            dropped += 1
             continue
+        if on[0] > len(p) - 1 - on[-1]:
+            p, tilt, on = p[::-1], tilt[::-1], len(p) - 1 - on[::-1]
+        p, tilt = p[on[0] : min(len(p), on[-1] + 9)], tilt[on[0] : min(len(p), on[-1] + 9)]
+        if length(p) >= 0.006:
+            ready[k] = (p, tilt)
+        else:
+            dropped += 1
+    keep, total = set(), 0.0
+    for k in sorted(ready, key=lambda k: -length(ready[k][0])):
+        L = length(ready[k][0])
+        strokes = len(keep) + 1
+        minutes = (
+            (total + L) / DRAW_SPEED
+            + SECONDS_PER_STROKE * strokes
+            + SECONDS_PER_TURN * min(strokes, 12)
+        ) / 60
+        if total + L <= args.detail and minutes <= args.minutes:
+            keep.add(k)
+            total += L
+    stages["within detail and time"] = total
+    for k in [k for k in order if k in keep]:
+        (p, tilt), sec = ready[k], items[k][1]
+        # The planner holds one tilt per stroke: offer the tilts clear along the
+        # whole tour first (steepest first), then the tour's most common ones.
+        whole = sorted(set.intersection(*allowed_at[k]), reverse=True)
+        common = [
+            t
+            for t, _ in sorted(
+                zip(*np.unique(tilt, return_counts=True), strict=True), key=lambda r: -r[1]
+            )
+        ]
+        hints = [float(t) for t in dict.fromkeys([*whole, *common])]
         rank += 1
         # The planner starts a stroke on a built node, so the tour begins on
         # the frame wire itself, at a node it shares with the frame.
@@ -643,6 +718,7 @@ def main():
                     "stage": "artistic",
                     "order_hint": 20000 + rank,
                     "turntable_index": int(sec),
+                    "pen_tilt_candidates_deg": hints,
                 }
             )
         rows.append(
@@ -685,7 +761,7 @@ def main():
     shutil.copytree(source, target)
     for stale in ("style_selection.json", "style_attachments.json"):
         (target / stale).unlink(missing_ok=True)
-    construction = section_actions(graph, group_sources=True)
+    construction = tilt_hints(section_actions(graph, group_sources=True), graph)
     write_json(target / "stroke_graph.json", graph)
     write_json(target / "construction_plan.json", construction)
     write_section_artifacts(target, graph, construction)
@@ -718,12 +794,27 @@ def main():
     counts = dict(zip(*[x.tolist() for x in np.unique(tilts, return_counts=True)], strict=True))
     steady = sum(1 for r in rows if len(set(r["tilt_deg"])) == 1)
     sag = 1e3 * screen.get("maximum_displacement_m", np.nan)
+    stages["touches frame, trimmed"] = detail
+    print("length by stage (m): " + ", ".join(f"{k} {v:.2f}" for k, v in stages.items()))
     print(f"lines {len(chosen)} ({used:.2f} m) -> {len(pieces)} pieces -> {len(tours)} tours")
     print(f"ordering cut {cut_out / 1000:.2f} m; {dropped} tours never touch the frame")
     print(f"detail {detail:.2f} m in {len(rows)} strokes (median {median:.0f} mm)")
     print(f"{len(fused)} fused contacts, {turns} turntable changes, about {minutes:.1f} min more")
     print(f"tilt samples {counts}; {steady}/{len(rows)} strokes keep one tilt")
     print(f"structure pass {screen['modeled_pass']} sag {sag:.3f} mm {screen.get('failure', '')}")
+
+
+def tilt_hints(construction, graph):
+    """Copy each tour's tilt candidates onto its construction action."""
+    hints = {
+        e["parent_curve"]: e["pen_tilt_candidates_deg"]
+        for e in graph["edges"]
+        if "pen_tilt_candidates_deg" in e
+    }
+    for action in construction["actions"]:
+        if action.get("parent_curve") in hints:
+            action["pen_tilt_candidates_deg"] = hints[action["parent_curve"]]
+    return construction
 
 
 def names_of(tours, start, sample):
