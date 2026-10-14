@@ -6,8 +6,10 @@ from collections import defaultdict
 import numpy as np
 import pytest
 import trimesh
+import yaml
 
 from pen_art.abstraction.wireprint import mesh_framework
+from pen_art.structure import analyze_structure
 
 
 def cube():
@@ -105,6 +107,23 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
         (spots[edge["end"]] - spots[edge["start"]])[2] / edge["length_m"] for edge in coil
     ]
     assert 0 < min(rise) and np.median(rise) < 0.1 and len(wound["fused_turns"]) > 300
+    # A strand resting on the coil, touching it only where it is fused, is held up.
+    top = spots[coil[-1]["end"]]
+    rest = {
+        **wound,
+        "nodes": wound["nodes"] + [
+            {"id": "rest-a", "position": (top + [0, 0, 0.001]).tolist(), "ground": False},
+            {"id": "rest-b", "position": (top + [0.004, 0, 0.001]).tolist(), "ground": False},
+        ],
+        "edges": wound["edges"] + [{
+            "id": "rest", "start": "rest-a", "end": "rest-b", "diameter_m": 0.001,
+            "segments": [np.linspace(top + [0, 0, 0.001], top + [0.004, 0, 0.001], 4).tolist()],
+        }],
+    }
+    material = yaml.safe_load(open("configs/fabrication.yaml"))["structure"]
+    assert analyze_structure(rest, material).get("failure") == "UNSUPPORTED_COMPONENT"
+    rest["fused_turns"] = wound["fused_turns"] + [["rest-a", coil[-1]["end"]]]
+    assert analyze_structure(rest, material).get("failure") != "UNSUPPORTED_COMPONENT"
     assert not mesh_framework(mesh, maximum_descent_angle_deg=27, coil_maximum_width=0.01)[
         "coil_towers"
     ]["count"]

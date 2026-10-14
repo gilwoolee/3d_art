@@ -152,6 +152,10 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
         raise ValueError("Density must be nonnegative and element length positive")
     edges = [e for e in graph["edges"] if edge_ids is None or e["id"] in edge_ids]
     support_graph = topology(graph, edge_ids)
+    # Touching strands are one piece of plastic, so they carry each other.
+    support_graph.add_edges_from(
+        (a, b) for a, b in graph.get("fused_turns", []) if a in support_graph and b in support_graph
+    )
     nodes = {node["id"]: node for node in graph["nodes"]}
     unsupported = [
         sorted(c)
