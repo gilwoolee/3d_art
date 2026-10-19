@@ -186,6 +186,7 @@ class ForwardSchedule:
                 "unresolved": None,
                 # Set once a chained attempt failed; the stroke then lifts as usual.
                 "unchained": False,
+                "lift_reason": None,
             }
             for _ in self.actions
         ]
@@ -312,10 +313,34 @@ class ForwardSchedule:
         slot = self.slots[index]
         if slot["unresolved"] is not None or slot["candidate"] is not None:
             return None
+        chain_from = None
+        if self._may_chain(index):
+            previous = self.slots[index - 1]
+            if previous["candidate"] is None:
+                if previous["unresolved"] is None:
+                    return None  # Its starting joint position is not known yet.
+            elif previous["candidate"].get("end_node") in self._starts(index):
+                chain_from = {
+                    "action": self.actions[index - 1],
+                    "node": previous["candidate"]["end_node"],
+                    "q": previous["candidate"]["q_draw_end"],
+                    "rotation": previous["candidate"]["tcp_rotation"],
+                    "pen_tilt_deg": previous["candidate"].get("pen_tilt_deg"),
+                    "roll_rad": previous["candidate"].get("roll_rad"),
+                    "table_index": previous["candidate"]["table_index"],
+                    "previous": previous["candidate"]["key"],
+                }
         chain = self.chain(index)
         if chain is None:
             return None  # A proposal screens against the preceding material.
         mode = {"mode": "cold", "ordinal": slot["cold"], "chain": chain}
+        if chain_from is not None:
+            mode["chain_from"] = chain_from
+        elif self.rows is not None and index + 1 < len(self.rows):
+            # A loop may start anywhere; start it where the next stroke begins.
+            row, following = self.rows[index], self.rows[index + 1]
+            if row["closed"] and not following["closed"] and following["start"] in row["nodes"]:
+                mode["prefer_start"] = following["start"]
         return {
             "kind": "propose",
             "index": index,
@@ -343,6 +368,27 @@ class ForwardSchedule:
         return all(self._checked(index) for index in range(len(self.actions))) and all(
             self._connected(index) for index in range(len(self.actions) + 1)
         )
+
+    def lift_offs(self):
+        """Every selected stroke that starts with an approach, and why it lifts."""
+        result = []
+        for index, slot in enumerate(self.slots):
+            candidate = slot["candidate"]
+            if candidate is None or candidate.get("chain_previous"):
+                continue
+            if index == 0:
+                reason = "first stroke"
+            elif self.rows is None or not self._continues(index):
+                reason = "not continuous"
+            else:
+                reason = slot["lift_reason"] or "chain not attempted"
+            result.append({"before": self.actions[index], "reason": reason})
+        return result
+
+    def _continues(self, index):
+        previous = self.rows[index - 1]
+        ends = set(previous["nodes"]) if previous["closed"] else {previous["end"]}
+        return bool(ends & self._starts(index))
 
     def blocked(self):
         """Actions with no remaining alternative; never a proof of infeasibility."""
@@ -375,6 +421,10 @@ class ForwardSchedule:
             if candidate.get("chain_previous"):
                 # One failed chained attempt is enough; this stroke lifts as usual.
                 slot["unchained"] = True
+                failure = summary.get("failure") or {}
+                slot["lift_reason"] = "chain blocked: " + str(
+                    failure.get("status") or summary.get("status", "REJECTED")
+                )
             # Strokes chained after this one started from its joint position.
             for later in self.slots[index + 1 :]:
                 if later["candidate"] is None or not later["candidate"].get("chain_previous"):
@@ -412,6 +462,7 @@ class ForwardSchedule:
             if spec.get("chain_from") is not None:
                 # No drawing from the predecessor's joint position: lift instead.
                 slot["unchained"] = True
+                slot["lift_reason"] = f"chain blocked: {summary['status']}"
                 return True
             slot["attempts"] += 1
             slot["cold"] += 1
@@ -570,14 +621,23 @@ def _propose(context, spec, seconds):
     # turntable position it was made for (detail drawn after the frame). It is
     # drawn there or not at all: another position costs two quarter turns for
     # one short stroke.
-    if "turntable_index" in row and spec["ordinal"] > 0:
+    chain_from = spec.get("chain_from")
+    if chain_from is not None:
+        # Carry on from the predecessor's end: same node, joint position, pen
+        # orientation and table position, with the pen still down.
+        table_index, available = chain_from["table_index"], {chain_from["node"]}
+    elif "turntable_index" in row and spec["ordinal"] > 0:
         return {"status": "NO_CANDIDATE", "failure": {"reason": "named turntable position"}}
-    first = row.get("turntable_index", model.table.home_index)
-    table_index = (first + spec["ordinal"]) % 4
+    else:
+        first = row.get("turntable_index", model.table.home_index)
+        table_index = (first + spec["ordinal"]) % 4
 
     scene = _prefix(context).scene_for(spec["chain"], final_index=table_index)
     started = perf_counter()
-    for drawing in model.drawings(row, available, build.initial, table_index, scene):
+    for drawing in model.drawings(
+        row, available, build.initial, table_index, scene,
+        chain=chain_from, prefer_start=spec.get("prefer_start"),
+    ):
         seconds["proposal"] += perf_counter() - started
         started = perf_counter()
         if not model.structure_admissible(row, drawing, completed):
@@ -614,6 +674,8 @@ def _propose(context, spec, seconds):
             "end_node": drawing.get("end_anchor"),
             "q_draw_end": np.asarray(drawing["positions"][-1], float).tolist(),
             "tcp_rotation": np.asarray(drawing["tcp_rotation"], float).tolist(),
+            "pen_tilt_deg": drawing.get("pen_tilt_deg"),
+            "roll_rad": drawing.get("roll_rad"),
             "chain_previous": (
                 None if spec.get("chain_from") is None else spec["chain_from"]["previous"]
             ),
@@ -1473,6 +1535,7 @@ def run_parallel_forward(
             gc.collect()
             coordinator.submit = submit
             started = perf_counter()
+            build.lift_offs = schedule.lift_offs()
             exported = export_sections(
                 build,
                 witnesses,
@@ -1492,6 +1555,7 @@ def run_parallel_forward(
     summary["export_status"] = None if exported is None else exported["status"]
     summary["blocked"] = schedule.blocked()
     summary["timing_rejections"] = timing_rejections
+    summary["lift_offs"] = schedule.lift_offs()
     write_json(build.run / "parallel_build.json", summary)
     compact = {
         key: summary[key]
@@ -1500,6 +1564,7 @@ def run_parallel_forward(
     if status == "COMPLETE":
         report = read_json(build.run / "section_build.json")
         report["parallel"] = compact
+        report["lift_offs"] = summary["lift_offs"]
         write_json(build.run / "section_build.json", report)
     if status != "COMPLETE":
         build.report(
@@ -1510,5 +1575,6 @@ def run_parallel_forward(
                 "WORKERS_LOST": "PARALLEL_FORWARD_WORKERS_LOST",
             }[status],
             parallel=compact,
+            lift_offs=summary["lift_offs"],
         )
     return summary

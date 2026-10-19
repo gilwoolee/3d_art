@@ -130,7 +130,21 @@ class IndexedMotions:
         paths.append(at_index(travel, end_index))
         return combine_clocks(*paths)
 
-    def drawings(self, row, available, q, index, scene):
+    def drawings(self, row, available, q, index, scene, *, chain=None, prefer_start=None):
+        """Sampled drawings of ``row`` at table position ``index``.
+
+        ``chain`` is the predecessor's end: ``node``, joint position ``q`` and
+        ``rotation``. Only drawings that start there, keep that pen
+        orientation and begin at exactly that joint position are offered, so
+        the pair is drawn without lifting. ``prefer_start`` tries that start
+        node first (a loop that ends where the next stroke begins).
+        """
+        if chain is not None:
+            yield from self._chained(row, chain, index)
+            return
+        if prefer_start is not None and prefer_start in available and len(available) > 1:
+            yield from self.drawings(row, {prefer_start}, q, index, scene)
+            available = set(available) - {prefer_start}
         build, planner = self.build, self.build.planner
         transform = self.table.build_transform(index)
         # Radial orientation changes continuously around a whole contour or
@@ -250,3 +264,44 @@ class IndexedMotions:
                     free_tool_orientation=True,
                 )
                 yield drawing
+
+    def _chained(self, row, chain, index):
+        build, planner = self.build, self.build.planner
+        transform = self.table.build_transform(index)
+        start = np.asarray(chain["q"], float)
+        rotation = {
+            "orientation_policy": "fixed",
+            "fixed_orientation": True,
+            "pen_tilt_deg": chain.get("pen_tilt_deg") or 0.0,
+            "roll_rad": chain.get("roll_rad") or 0.0,
+            "rotations": np.asarray(chain["rotation"], float),
+        }
+        for drawing in drawing_alternatives(
+            planner.collision_arm(build.arm.identity),
+            row,
+            {chain["node"]},
+            transform,
+            planner.obstacles,
+            deadline=min(planner.deadline, monotonic() + 60),
+            seeds=[start],
+            settings={"maximum_subdivision_depth": 20},
+            clearance_m=planner.margin,
+            rotations=[rotation],
+            orientation_policy="fixed",
+        ):
+            if drawing["status"] != "SAMPLED_DRAWING_PATH":
+                continue
+            # The same pose solved from the same seed: anything but the
+            # predecessor's joint position would move the pen while feeding.
+            if not np.allclose(drawing["positions"][0], start, atol=1e-6, rtol=0):
+                continue
+            drawing["positions"][0] = start.tolist()
+            drawing.update(
+                release_cooling_s=build.cooling,
+                table_index=index,
+                collision_scope=planner.collision_scope,
+                requires_full_robot_validation=planner.collision_scope == "pen_candidate",
+            )
+            if planner.collision_scope == "pen_candidate":
+                drawing["static_collision_status"] = "CHECKED_PEN_STATIC_ONLY"
+            yield drawing
