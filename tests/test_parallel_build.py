@@ -7,6 +7,7 @@ from time import monotonic
 import numpy as np
 from cell_fixture import setup
 
+from pen_art.detail import choose_detail
 from pen_art.planning.clock_path import ClockEdge, ClockPath
 from pen_art.planning.parallel_build import Coordinator, ForwardSchedule
 
@@ -111,6 +112,20 @@ def test_coordinator_chains_continuing_strokes_and_drops_stale_results(tmp_path)
     refused.apply(jobs(refused)["propose", 1], offered("n1"))
     assert refused.lift_offs()[1] == {"before": "b", "reason": "chain blocked: NO_CANDIDATE"}
 
+    # Detail the arm cannot draw is replaced, one for one, by the longest spare
+    # that still fits the detail step's budget: 2 m and 15 estimated minutes.
+    # Chosen strokes stay chosen, and the number of strokes (lift-offs) never grows.
+    lines = [("long", 1.2), ("mid", 0.7), ("short", 0.3), ("tiny", 0.1), ("bit", 0.05)]
+    assert choose_detail(lines, 2.0, 15.0) == ["long", "mid", "tiny"]
+    kept = ["long", "mid", "tiny"]
+    assert choose_detail(lines, 2.0, 15.0, keep=kept, dropped={"long"}, most=1) == [
+        "mid", "tiny", "short"
+    ]
+    assert choose_detail(lines, 2.0, 15.0, keep=kept, dropped={"mid", "tiny"}, most=2) == [
+        "long", "short", "bit"
+    ]
+    # 1.2 m takes 120 s at 10 mm/s, plus 20 s for its stroke: over 2 minutes.
+    assert choose_detail(lines, 2.0, 2.0) == ["mid", "tiny"]
     # A stroke with no alternatives left is reported with where it last failed.
     stuck = ForwardSchedule(["a"], "binding", maximum_attempts=1)
     stuck.apply(jobs(stuck)["propose", 0], candidate("a"))

@@ -128,20 +128,29 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
     if not (frame / "stroke_graph.json").exists():
         raise StageOrderError(f"no frame in {frame}: run `pen-art frame` first")
     _check_build_volume(frame, cell)
-    has_detail = (folder / "detail" / "stroke_graph.json").exists()
-    source = folder / "detail" if has_detail and not frame_only else frame
-    if source.name == "detail":
-        from .detail import detail_profile
+    detail = folder / "detail"
+    with_detail = (detail / "stroke_graph.json").exists() and not frame_only
+    if with_detail:
+        from .detail import choose_detail, detail_profile
 
         # Beside the cell profile: its robot paths are relative to it.
         profile = detail_profile(profile, profile.parent / f"{folder.name}_detail.yaml")
+        info = read_json(detail / "detail_tours.json")
+        budget = info["settings"]["detail"], info["settings"]["minutes"]
+        lines = [(t["id"], t["length_m"]) for t in info["tours"] + info.get("spares", [])]
     # Written first, so an interrupted run never leaves a state naming a
     # round that is gone.
     state = _save(folder, {"frame": str(frame), "cell": str(cell), "geometry": "RUNNING"})
     for old in folder.glob("round-*"):
         shutil.rmtree(old)
-    state.update(source=str(source), profile=str(profile))
-    dropped = []
+    state.update(profile=str(profile))
+    dropped, spares, chosen, source = [], [], [], frame
+    if with_detail:
+        # The detail within budget; the spares wait until a stroke is dropped.
+        chosen = choose_detail(lines, *budget)
+        source = _detail_source(detail, folder / "round-00-source", lines, chosen)
+        if source is None:
+            return _save(folder, {**state, "geometry": "STRUCTURE_FAILS_WITHOUT_SPARE_DETAIL"})
     for number in range(maximum_rounds):
         run = folder / f"round-{number:02d}"
         report = _section_build(
@@ -168,8 +177,19 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         for tour in tours:
             log(f"  dropping detail the arm cannot draw: {tour} ({why[tour]})")
         dropped += [{"stroke": t, "reason": why[t]} for t in tours]
-        following = folder / f"round-{number + 1:02d}-source"
-        if not drop_strokes(source, following, set(tours)):
+        # One spare, the longest that fits the budget, for each dropped stroke:
+        # never more strokes, so never more lift-offs.
+        before = chosen
+        chosen = choose_detail(
+            lines, *budget, keep=before, dropped={row["stroke"] for row in dropped},
+            most=len(set(before) & set(tours)),
+        )
+        added = [name for name in chosen if name not in before]
+        if added:
+            log(f"  drawing spare detail instead: {', '.join(added)}")
+        spares += added
+        following = _detail_source(detail, folder / f"round-{number + 1:02d}-source", lines, chosen)
+        if following is None:
             status = "STRUCTURE_FAILS_WITHOUT_DROPPED_DETAIL"
             break
         source = following
@@ -179,10 +199,19 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         source=str(source),
         inputs=_inputs(source, profile, cell),
         dropped=dropped,
+        spares=[name for name in spares if name in chosen],
         lift_offs=report.get("lift_offs", []),
         minimum_trails=report.get("minimum_trails"),
     )
     return _save(folder, state)
+
+
+def _detail_source(detail, target, lines, chosen):
+    """``detail`` with only the ``chosen`` detail strokes, or None if it would not stand."""
+    left_out = {name for name, _ in lines} - set(chosen)
+    if not left_out:
+        return detail
+    return target if drop_strokes(detail, target, left_out) else None
 
 
 def _reason(failure):

@@ -55,6 +55,35 @@ SECONDS_PER_STROKE, DRAW_SPEED = 20.0, 0.010
 NO_DETAIL = 3
 
 
+def estimated_minutes(length_m, strokes):
+    """Print minutes that detail adds: drawing at DRAW_SPEED plus each stroke's approach."""
+    return (length_m / DRAW_SPEED + SECONDS_PER_STROKE * strokes) / 60
+
+
+def choose_detail(lines, detail_m, minutes, keep=(), dropped=(), most=None):
+    """The ids of the detail strokes to draw.
+
+    ``lines`` is (id, metres) pairs. The strokes in ``keep`` stay, except those
+    in ``dropped``; then, longest first, up to ``most`` more lines are added
+    while the total stays within ``detail_m`` and the estimated added
+    ``minutes``.
+    """
+    metres = dict(lines)
+    chosen = [name for name in keep if name not in dropped]
+    total, added = sum(metres[name] for name in chosen), 0
+    for name, length in sorted(lines, key=lambda line: -line[1]):
+        if most is not None and added >= most:
+            break
+        if name in dropped or name in chosen:
+            continue
+        if total + length <= detail_m + 1e-9 and (
+            estimated_minutes(total + length, len(chosen) + 1) <= minutes + 1e-9
+        ):
+            chosen.append(name)
+            total, added = total + length, added + 1
+    return chosen
+
+
 def no_detail(why):
     print(f"detail 0.00 m in 0 strokes: {why}")
     raise SystemExit(NO_DETAIL)
@@ -872,16 +901,17 @@ def main():
         print(f"planner check: {checks} lines checked, {len(ready)} drawable")
 
     lap("planner check")
-    keep, total = [], 0.0
-    for entry in sorted(ready, key=lambda e: -length(e["p"])):
-        L = length(entry["p"])
-        strokes = len(keep) + 1
-        minutes = ((total + L) / DRAW_SPEED + SECONDS_PER_STROKE * strokes) / 60
-        if total + L <= args.detail and minutes <= args.minutes:
-            keep.append(entry)
-            total += L
-    stages["within detail and time"] = total
-    for entry in sorted(keep, key=lambda e: e["position"]):
+    # The longest lines within budget are drawn; the rest stay as spares that
+    # plan-geometry draws instead of any the arm cannot draw after all.
+    picked = set(
+        choose_detail(
+            [(i, length(e["p"])) for i, e in enumerate(ready)], args.detail, args.minutes
+        )
+    )
+    for i, entry in enumerate(ready):
+        entry["spare"] = i not in picked
+    stages["within detail and time"] = sum(length(e["p"]) for e in ready if not e["spare"])
+    for entry in sorted(ready, key=lambda e: e["position"]):
         p, tilt, hints, k = entry["p"], entry["tilt"], entry["hints"], entry["k"]
         sec = items[k][1]
         rank += 1
@@ -960,6 +990,7 @@ def main():
                 "contacts": len(contacts),
                 "tilt_deg": tilt.tolist(),
                 "lines": names_of(tours, start, items[k][0][0]),
+                "spare": entry["spare"],
             }
         )
 
@@ -988,6 +1019,8 @@ def main():
     )
 
     lap("build graph")
+    spares = [r for r in rows if r.pop("spare")]
+    rows = [r for r in rows if r not in spares]
     if not rows:
         no_detail("the arm can draw none of the detail lines")
     if target.exists():
@@ -1002,11 +1035,13 @@ def main():
     screen = analyze_structure(graph, read_json(source / "fabrication_config.json")["structure"])
     write_json(target / "structural_screen.json", screen)
     detail = sum(r["length_m"] for r in rows)
-    minutes = (detail / DRAW_SPEED + SECONDS_PER_STROKE * len(rows)) / 60
+    minutes = estimated_minutes(detail, len(rows))
     write_json(
         target / "detail_tours.json",
         {
             "tours": rows,
+            # In the stroke graph too; plan-geometry leaves them out until needed.
+            "spares": spares,
             "face_azimuth_deg": sectors,
             "estimated_added_minutes": minutes,
             "settings": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},

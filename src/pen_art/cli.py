@@ -145,10 +145,12 @@ def detail(args):
         print(f"{why.replace('detail', f'detail {args.name}', 1)}; plan the frame alone")
         return
     fresh.rename(folder / "detail")
-    tours = read_json(folder / "detail" / "detail_tours.json")["tours"]
+    found = read_json(folder / "detail" / "detail_tours.json")
+    tours, spares = found["tours"], found.get("spares", [])
     print(
-        f"detail {args.name}: {sum(t['length_m'] for t in tours):.2f} m in {len(tours)} strokes "
-        "(plan-geometry drops what the arm cannot draw)"
+        f"detail {args.name}: {sum(t['length_m'] for t in tours):.2f} m in {len(tours)} strokes, "
+        f"{sum(t['length_m'] for t in spares):.2f} m in {len(spares)} spares "
+        "(plan-geometry draws a spare for each stroke the arm cannot draw)"
     )
 
 
@@ -164,10 +166,11 @@ def plan_geometry(args):
 
     folder = _folder(args.name)
     state = stage(folder, _cell(), args.workers, frame_only=args.frame_only)
-    dropped = len(state.get("dropped", []))
+    dropped, spares = len(state.get("dropped", [])), len(state.get("spares", []))
     print(
         f"plan-geometry {args.name}: {state['geometry']}, {_lift_offs(state)}"
         + (f", dropped {dropped} detail strokes the arm cannot draw" if dropped else "")
+        + (f", drew {spares} spares instead" if spares else "")
     )
     if state.get("blocked"):
         print(f"  frame strokes the arm cannot draw: {', '.join(state['blocked'])}")

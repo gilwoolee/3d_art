@@ -95,12 +95,13 @@ it draws on, and the arm reaches around the object for the far side.
 
 ```
 $ .venv/bin/pen-art detail ghost
-detail ghost: 2.00 m in 14 strokes (plan-geometry drops what the arm cannot draw)
+detail ghost: 2.00 m in 14 strokes, 0.84 m in 31 spares (plan-geometry draws a spare for each stroke the arm cannot draw)
 ```
 
 This takes about three minutes. This step decides how much detail there is:
 the longest drawable lines, up to `--detail` metres (2 m) and `--minutes` of
-added print time (15, estimated from the drawing speed). `--crease-threshold`
+added print time (15, estimated from the drawing speed). The other lines that
+passed its check are kept as *spares*. `--crease-threshold`
 (in mm; smaller values add shallower creases) changes what it finds. When it finds nothing drawable it says so and the frame is
 planned alone. Detail follows only the *shape*, so it misses
 what is only painted in the texture, like the ghost's eyes and mouth. This
@@ -114,17 +115,21 @@ collision-free arm path with the pen at one fixed orientation, checked
 against the cell and every wire laid before it. There is no timing yet. When
 a stroke starts where the last one ended, it first tries to carry on with the
 pen down (*chaining*), and lifts off only when that fails. A detail stroke the
-arm cannot draw is dropped; a frame stroke that cannot be drawn stops the
-plan.
+arm cannot draw is dropped, and the longest spare that still fits the detail
+budget takes its place, one for one, so the number of strokes never grows. A
+frame stroke that cannot be drawn stops the plan.
 
 ```
 $ .venv/bin/pen-art plan-geometry ghost --frame-only
 plan-geometry ghost: GEOMETRY_PLANNED, 1 lift-offs (fewest possible for the frame: 1)
 $ .venv/bin/pen-art plan-geometry ghost
-  dropping detail the arm cannot draw: tour-006 (no clear approach, drawing or withdrawal, last PEN_WIRE_COLLISION)
-  dropping detail the arm cannot draw: tour-008 (no clear approach, drawing or withdrawal, last PEN_WIRE_COLLISION)
-  dropping detail the arm cannot draw: tour-011 (no clear approach, drawing or withdrawal, last POSTURE_CHANGE)
-plan-geometry ghost: GEOMETRY_PLANNED, 12 lift-offs (fewest possible for the frame: 1), dropped 3 detail strokes the arm cannot draw
+  dropping detail the arm cannot draw: tour-020 (no clear approach, drawing or withdrawal, last PEN_WIRE_COLLISION)
+  drawing spare detail instead: tour-009
+  dropping detail the arm cannot draw: tour-027 (no clear approach, drawing or withdrawal, last PEN_WIRE_COLLISION)
+  drawing spare detail instead: tour-006
+  dropping detail the arm cannot draw: tour-033 (no clear approach, drawing or withdrawal, last POSTURE_CHANGE)
+  drawing spare detail instead: tour-031
+plan-geometry ghost: GEOMETRY_PLANNED, 15 lift-offs (fewest possible for the frame: 1), dropped 3 detail strokes the arm cannot draw, drew 3 spares instead
 ```
 
 The frame alone takes about 16 s and is drawn in one stroke: the only
@@ -141,7 +146,7 @@ never adds or removes strokes; when the measured detail comes out over 2 m or
 
 ```
 $ .venv/bin/pen-art plan-timing ghost
-plan-timing ghost: FULL_BUILD_PLANNED, 12.3 min of printing, 12 lift-offs (fewest possible for the frame: 1), detail 1.24 m adding 2.7 min
+plan-timing ghost: FULL_BUILD_PLANNED, 12.7 min of printing, 15 lift-offs (fewest possible for the frame: 1), detail 1.39 m adding 3.1 min
 ```
 
 The frame alone prints in 9.7 min.
@@ -154,7 +159,7 @@ built so far. Only a plan that passes counts.
 
 ```
 $ .venv/bin/pen-art verify-full-robot ghost
-verify-full-robot ghost: FULL_BUILD_VERIFIED (simulation only), 12.3 min of printing, 12 lift-offs (fewest possible for the frame: 1)
+verify-full-robot ghost: FULL_BUILD_VERIFIED (simulation only), 12.7 min of printing, 15 lift-offs (fewest possible for the frame: 1)
 ```
 
 ### 6. Look at it: `pen-art view`
@@ -222,9 +227,9 @@ layers and less wire. With `build_volume_m: 0.08` in `configs/cell.yaml`
 | Fewest frame strokes with connector wire (without) | 1 (10) | 1 (6) |
 | Frame print time | 9.7 min | 3.2 min |
 | Frame lift-offs | 1 | 1 |
-| Detail kept | 1.24 m (+2.7 min) | 1.27 m (+4.2 min) |
-| Frame and detail print time | 12.3 min | 7.3 min |
-| Lift-offs with detail | 12 | 28 |
+| Detail kept | 1.39 m (+3.1 min) | 1.27 m (+4.2 min) |
+| Frame and detail print time | 12.7 min | 7.3 min |
+| Lift-offs with detail | 15 | 28 |
 | Verdict | `FULL_BUILD_VERIFIED` | `FULL_BUILD_VERIFIED` |
 
 The rest of `configs/frame.yaml` is there to experiment with too. Its
