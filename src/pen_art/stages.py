@@ -9,9 +9,8 @@ and refuses to run when it is missing or its inputs changed.
 * ``plan_geometry`` finds a collision-free path for every stroke, untimed. A
   detail stroke the arm cannot draw is dropped and planning goes on without
   it; a frame stroke that cannot be drawn stops planning.
-* ``plan_timing`` times the paths once. When the detail is longer than its
-  budget or adds too many minutes, the strokes giving the least detail per
-  minute are dropped and the rest planned again.
+* ``plan_timing`` times the paths once and reports the print time; it never
+  adds or removes strokes. The detail step chose how much detail to draw.
 * ``verify_full_robot`` replays the whole robot against everything built so
   far. A plan that passes is ``FULL_BUILD_VERIFIED``.
 """
@@ -183,9 +182,6 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         lift_offs=report.get("lift_offs", []),
         minimum_trails=report.get("minimum_trails"),
     )
-    # plan-timing trims from this plan each time it runs, so a bigger budget
-    # brings trimmed detail back.
-    state["planned"] = {key: state[key] for key in ("round", "source", "inputs", "lift_offs")}
     return _save(folder, state)
 
 
@@ -201,8 +197,8 @@ def _reason(failure):
     return f"{where}, last {failure['status']}"
 
 
-def _require(folder, stage, status, state=None):
-    state = _state(folder) if state is None else state
+def _require(folder, stage, status):
+    state = _state(folder)
     command = "plan-geometry" if stage == "geometry" else "plan-timing"
     if state.get(stage) is None:
         raise StageOrderError(f"{folder}: run `pen-art {command}` first")
@@ -240,74 +236,26 @@ def detail_budget(run, source):
     return detail, (plan["modeled_duration_s"] - frame_end) / 60, strokes
 
 
-def plan_timing(folder, workers=24, detail_m=2.0, minutes=15.0, maximum_rounds=20, log=print):
-    """Time the planned paths; trim detail to its budget, planning again if needed."""
+def plan_timing(folder, workers=24, detail_m=2.0, minutes=15.0):
+    """Time the planned paths once. Nothing is added or removed here."""
     folder = Path(folder)
-    state = _state(folder)
-    state.update(state.get("planned", {}))
-    state = _require(folder, "geometry", "GEOMETRY_PLANNED", state)
+    state = _require(folder, "geometry", "GEOMETRY_PLANNED")
     profile, source = Path(state["profile"]), Path(state["source"])
-    for old in folder.glob("round-*"):
-        if old.name.split("-")[1] > state["round"].split("-")[1]:
-            shutil.rmtree(old)
-    trimmed = []
-    for _ in range(maximum_rounds):
-        run = folder / state["round"]
-        report = _section_build(run, source, profile, workers, "timing", folder / "planning.log")
-        status = report["status"]
-        if status != "FULL_BUILD_PLANNED" or source.name == "frame_source":
-            break
-        detail, added, strokes = detail_budget(run, source)
-        drop = []
-        for name in sorted(strokes, key=lambda n: strokes[n][0] / max(strokes[n][1], 1e-9)):
-            if detail <= detail_m + 1e-6 and added <= minutes:
-                break
-            drop.append(name)
-            detail -= strokes[name][0]
-            added -= strokes[name][1] / 60
-        if not drop:
-            break
-        log(f"  trimming {len(drop)} detail strokes to fit {detail_m:g} m and {minutes:g} min")
-        trimmed += [{"stroke": t, "reason": "over the detail or time budget"} for t in drop]
-        number = int(state["round"].split("-")[1]) + 1
-        following = folder / f"round-{number:02d}-source"
-        drop_strokes(source, following, set(drop))
-        source = following
-        state = plan_geometry_round(folder, state, source, number, workers)
-        if state["geometry"] != "GEOMETRY_PLANNED":
-            status = state["geometry"]
-            break
     run = folder / state["round"]
+    report = _section_build(run, source, profile, workers, "timing", folder / "planning.log")
     plan = read_json(run / "plan.json") if (run / "plan.json").exists() else {}
     detail = detail_budget(run, source)[:2] if plan and source.name != "frame_source" else None
     state.update(
-        timing=status,
-        source=str(source),
-        inputs=_inputs(source, profile, state["cell"]),
-        trimmed=trimmed,
+        timing=report["status"],
         print_minutes=plan.get("modeled_duration_s", 0) / 60 or None,
         lift_offs=plan.get("lift_offs", state.get("lift_offs")),
         detail_m=None if detail is None else detail[0],
         detail_minutes=None if detail is None else detail[1],
+        # The detail step chose the strokes from estimates; this is measured.
+        over_budget=detail is not None and (detail[0] > detail_m + 1e-6 or detail[1] > minutes),
     )
     state.pop("verification", None)
     return _save(folder, state)
-
-
-def plan_geometry_round(folder, state, source, number, workers):
-    """One more geometry round on a trimmed source (no dropping: it planned before)."""
-    run = folder / f"round-{number:02d}"
-    report = _section_build(
-        run, source, state["profile"], workers, "geometry", folder / "planning.log"
-    )
-    return {
-        **state,
-        "geometry": report["status"],
-        "round": run.name,
-        "source": str(source),
-        "inputs": _inputs(source, state["profile"], state["cell"]),
-        "lift_offs": report.get("lift_offs", []),
-    }
 
 
 def verify_full_robot(folder, workers=24):

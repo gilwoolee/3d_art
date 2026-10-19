@@ -498,8 +498,10 @@ def main():
         action="store_true",
         help="keep only tours the planner's sampler can draw, with the tilts it can use",
     )
-    parser.add_argument("--detail", type=float, default=5.0, help="m of detail to aim for")
-    parser.add_argument("--minutes", type=float, default=15.0, help="added print-time limit")
+    parser.add_argument("--detail", type=float, default=2.0, help="m of detail at most")
+    parser.add_argument(
+        "--minutes", type=float, default=15.0, help="added print minutes at most (estimated)"
+    )
     parser.add_argument(
         "--collect", type=float, default=1.6, help="collect this x --detail of reachable line"
     )

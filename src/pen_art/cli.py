@@ -125,6 +125,7 @@ def detail(args):
     command = [
         sys.executable, "-m", "pen_art.detail", str(folder / "frame_source"), str(fresh),
         "--profile", str(_cell()), "--check-with-planner", "--detail", str(args.detail),
+        "--minutes", str(args.minutes),
     ]
     if args.crease_threshold:
         command += ["--crease-threshold", *map(str, args.crease_threshold)]
@@ -147,7 +148,7 @@ def detail(args):
     tours = read_json(folder / "detail" / "detail_tours.json")["tours"]
     print(
         f"detail {args.name}: {sum(t['length_m'] for t in tours):.2f} m in {len(tours)} strokes "
-        "(plan-geometry drops what the arm cannot draw; plan-timing trims to the budget)"
+        "(plan-geometry drops what the arm cannot draw)"
     )
 
 
@@ -176,15 +177,18 @@ def plan_geometry(args):
 def plan_timing(args):
     from .stages import plan_timing as stage
 
-    state = stage(_folder(args.name), args.workers, args.detail, args.minutes)
+    state = stage(_folder(args.name), args.workers)
     line = f"plan-timing {args.name}: {state['timing']}"
     if state.get("print_minutes"):
         line += f", {state['print_minutes']:.1f} min of printing, {_lift_offs(state)}"
     if state.get("detail_m") is not None:
         line += f", detail {state['detail_m']:.2f} m adding {state['detail_minutes']:.1f} min"
-    if state.get("trimmed"):
-        line += f", trimmed {len(state['trimmed'])} detail strokes to fit"
     print(line)
+    if state.get("over_budget"):
+        print(
+            "  more detail than 2 m or 15 min: run `pen-art detail` with a smaller "
+            "--detail or --minutes, then plan again"
+        )
     _finish(state["timing"], "FULL_BUILD_PLANNED", RUNS / args.name)
 
 
@@ -234,7 +238,10 @@ def main(argv=None):
 
     step = steps.add_parser("detail", help="add detail strokes over the frame")
     step.add_argument("name")
-    step.add_argument("--detail", type=float, default=5.0, help="m of detail lines to collect")
+    step.add_argument("--detail", type=float, default=2.0, help="m of detail at most")
+    step.add_argument(
+        "--minutes", type=float, default=15.0, help="added print minutes at most (estimated)"
+    )
     step.add_argument(
         "--crease-threshold", type=float, nargs="+",
         help="mm a crease bulges or dents; smaller values add shallower creases",
@@ -252,9 +259,6 @@ def main(argv=None):
         step.set_defaults(run=function)
         if name == "plan-geometry":
             step.add_argument("--frame-only", action="store_true", help="leave the detail out")
-        if name == "plan-timing":
-            step.add_argument("--detail", type=float, default=2.0, help="m of detail at most")
-            step.add_argument("--minutes", type=float, default=15.0, help="added minutes at most")
 
     step = steps.add_parser("view", help="open the browser viewer")
     step.add_argument("--port", type=int, default=8765)
