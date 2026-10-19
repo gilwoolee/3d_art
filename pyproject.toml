@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "pen-art"
 version = "0.1.0"
 description = "Mesh abstraction and one- or two-arm spatial extrusion research workbench"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=2,<3", "scipy>=1.14,<2", "trimesh[easy]>=4.6,<5",

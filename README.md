@@ -483,3 +483,10 @@ Detailed commands and earlier experiments are retained in the
 The [archived plan](docs/archive/2026_1010_mesh_to_robot_pen_plan.md) and
 [Caelan integration review](docs/archive/2026_1011_caelan_build_order_plan.md)
 are references, not active task lists.
+
+## License
+
+[MIT](LICENSE), including the meshes and pictures in `objs/`. The third-party
+projects that the setup scripts clone into `external/` (Flexiv description,
+WIR3D and its dependencies) are not part of this repository and keep their own
+licenses; check them before commercial use.
