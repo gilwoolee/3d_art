@@ -19,8 +19,9 @@ setup fetches.
 The README is a tutorial in this order. Each step has: what it does and why,
 one command, the expected output for the ghost, and what to try changing.
 
-0. **Describe the cell** (`configs/cell.yaml`): build volume, pen shape,
-   robot placement, build plate. One command writes the robot cell from it.
+0. **Describe the cell** (`configs/cell.yaml`): a printer build plate lying
+   on the table, the build volume, the pen, and where the plate is relative
+   to the robot. One command writes the robot cell from it.
 1. **Mesh to frame** (`configs/frame.yaml`): the generator slices the mesh
    into horizontal loops joined by zigzags (a vertical riser, then a slant
    back down of at most 27 degrees), within the 10 m wire budget, with a
@@ -91,6 +92,8 @@ planning, timing and verification in plain words.
   and lean direction) per stroke.
 - No turntable (decided by the user): the build plate is fixed and the arm
   reaches around the object.
+- The plate is an ordinary 3D-printer build plate on the table, like a Bambu
+  Lab plate (decided by the user). The object is built directly on it.
 - Frame settings (layer height, zigzag spacing, base grid spacing) are
   physical sizes set by the wire and the pen. They do **not** scale with the
   build volume: a smaller volume gives a smaller object with fewer layers
@@ -144,8 +147,8 @@ library when one is present and otherwise falls back to its own sampler
 
 ## Decisions
 
-- **Configs:** merge the 7 into `configs/cell.yaml` (build volume, pen
-  geometry, robot placement, build plate) and `configs/frame.yaml` (frame
+- **Configs:** merge the 7 into `configs/cell.yaml` (plate size and
+  position, build volume, pen geometry, robot placement) and `configs/frame.yaml` (frame
   generator, plus process settings such as speeds, cooling and strand
   diameter under `process`). The pen stays upright with the 27 degree slant
   limit; these are not tutorial settings.
@@ -157,6 +160,13 @@ library when one is present and otherwise falls back to its own sampler
 
 ## The builder's calls (mine, open to the user's correction)
 
+- **The plate:** default 256 × 256 mm, the Bambu Lab X1/P1/A1 size (as far
+  as I know; the A1 mini's is 180 × 180 mm), lying flat on the table at a
+  position the learner measures from the robot base. Today's 19 cm
+  platform 20 cm high and the 2 cm riser under the object go. Moving the
+  object from 22 cm up down to table height changes what the arm must reach,
+  so order-of-work step 2 checks the ghost there and picks the default plate
+  position from what plans.
 - **Command form:** one entry point, `pen-art <step>`, with the steps
   `cell`, `frame`, `plan-geometry`, `plan-timing`, `verify-full-robot`
   (these three names decided by the user), `detail`, `view`.
@@ -191,7 +201,8 @@ library when one is present and otherwise falls back to its own sampler
    library, other planning modes and unused code; keep the 5 tests green;
    check the ghost still plans to `FULL_BUILD_VERIFIED` (about 14.2 min with
    today's turntable).
-2. Remove the turntable. Frame strokes stay upright; detail strokes lean the
+2. Remove the turntable, the platform and the riser; the object stands on a
+   plate on the table. Frame strokes stay upright; detail strokes lean the
    pen toward the side of the object they draw on, and the arm reaches
    around. Check the ghost frame and detail plan to `FULL_BUILD_VERIFIED`
    (see "Turntable experiment").
