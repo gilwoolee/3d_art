@@ -20,12 +20,8 @@ VALIDATOR_VERSION = "motion-clearance-lipschitz-v1"
 
 
 def _plain(value):
-    if hasattr(value, "tolist"):
+    if hasattr(value, "tolist"):  # NumPy arrays and scalars
         return value.tolist()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
     if isinstance(value, Path):
         return str(value)
     raise TypeError(f"Cannot serialize {type(value).__name__}")

@@ -75,7 +75,7 @@ def _parallel_journal(root, key):
             if path.exists()
             else pickle.loads(path.with_suffix(".pkl").read_bytes())
         )
-        from .parallel_build import deposit_key
+        from .material_journal import deposit_key
 
         if deposit_key(value) != key:
             raise ValueError("Changed replay deposit journal")
@@ -88,7 +88,7 @@ def _parallel_journal(root, key):
 
 def _parallel_deposit(index):
     """Journal one interval's turns and deposits, without any collision check."""
-    from .parallel_build import deposit_key
+    from .material_journal import deposit_key
 
     planner = _PARALLEL["planner"]
     a, b, new = _PARALLEL["intervals"][index]
@@ -101,7 +101,7 @@ def _parallel_deposit(index):
     planner.validate_interval(
         replace(state, payload=scene), new, b, deposit_only=True, journal=operations
     )
-    from .parallel_build import _merged
+    from .material_journal import _merged
 
     operations = _merged(planner, operations)
     key = deposit_key(operations)
@@ -127,7 +127,7 @@ def _parallel_check(index, chain):
     after, failure = planner.validate_interval(
         replace(state, payload=scene), new, b, journal=operations
     )
-    from .parallel_build import _merged, deposit_key
+    from .material_journal import _merged, deposit_key
 
     return {
         "failure": failure,
@@ -904,7 +904,7 @@ def _replay_cell_body(
         # Each interval is checked by one worker against material rebuilt from
         # deposit journals. The hash chain below proves every rebuilt prefix is
         # exactly the material its predecessor's full check produced.
-        from .parallel_build import MaterialPrefix
+        from .material_journal import MaterialPrefix
 
         journal_root = run / "verification_journals"
         rmtree(journal_root, ignore_errors=True)

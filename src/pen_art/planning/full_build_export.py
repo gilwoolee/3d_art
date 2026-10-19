@@ -1,33 +1,9 @@
 """Export playable schedules without running independent final verification."""
 
-from shutil import copyfile
-
 import numpy as np
 
 from ..io import artifact, sha256, stage_update, write_json
 from .process_clock import action_ready_times, feed_events
-
-
-def seal_repair_evidence(run, key, path):
-    """Keep a matching diagnostic, or explicitly mark an old one unavailable."""
-    metadata = path.metadata
-    name = metadata.get("axis_repair_artifact")
-    digest = metadata.get("axis_repair_sha256")
-    if name is None:
-        return
-    source = run / name
-    if not source.is_file() or sha256(source) != digest:
-        metadata.pop("axis_repair_artifact", None)
-        metadata.pop("axis_repair_sha256", None)
-        metadata["axis_repair_diagnostic"] = "SUPERSEDED_WORKING_REPORT"
-        # Source coverage and independent replay still check the actual clock;
-        # an overwritten proposal report is not evidence for that clock.
-        return
-    if source.parent.name != "accepted":
-        accepted = run / "axis_repairs" / "accepted" / f"{key}-{digest}.json"
-        accepted.parent.mkdir(parents=True, exist_ok=True)
-        copyfile(source, accepted)
-        metadata["axis_repair_artifact"] = str(accepted.relative_to(run))
 
 
 def schedule_destination(run):
@@ -77,7 +53,6 @@ def export_sections(build, witnesses, returned, *, release_witnesses=False):
             clock = max(clock, framework_ready)
         if not np.isfinite(clock):
             raise ValueError("Cannot schedule a section on absent material")
-        seal_repair_evidence(run, key, path)
         actions.append(
             {
                 **{

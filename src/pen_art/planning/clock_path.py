@@ -413,22 +413,13 @@ def timed_path(
     *,
     drawing_clock="quintic_stop_at_geometric_knots",
     acceleration_constraint="interpolated",
-    drawing_capture=None,
-    drawing_reuse=None,
     grid_samples=101,
     grid_midpoints=True,
     solver="toppra",
     grid_ramps=False,
 ):
-    """Analytically time checked edges without changing their geometric sweep.
-
-    ``drawing_capture`` collects each retimed DRAW part in order. Supplying the
-    same list as ``drawing_reuse`` assembles a longer clock around those exact
-    polynomials instead of retiming them, so deposits predicted from a local
-    drawing clock remain those of the complete action.
-    """
+    """Analytically time checked edges without changing their geometric sweep."""
     edges, elapsed, diagnostics = [], 0.0, []
-    reused = 0
     if drawing_clock not in {"quintic_stop_at_geometric_knots", "cubic_toppra"}:
         raise ValueError(f"Unsupported drawing clock: {drawing_clock}")
     if acceleration_constraint not in {"interpolated", "cubic_bernstein"}:
@@ -442,52 +433,42 @@ def timed_path(
         q = np.asarray(op["positions"], float)
         if op["kind"] == "DRAW" and drawing_clock == "cubic_toppra":
             points = [arm.robot.forward(joints, arm.flange_to_tcp)[:3, 3] for joints in q]
-            if drawing_reuse is not None:
-                if reused >= len(drawing_reuse) or not np.array_equal(
-                    drawing_reuse[reused]["positions"], q
-                ):
-                    raise ValueError("Retained drawing clock belongs to a different joint path")
-                timed = drawing_reuse[reused]
-                reused += 1
-            else:
-                path = op.get("path")
-                if path is None:
-                    path = make_path(q, points, interpolation="pchip", subdivisions=2)
-                result = retime_operation(
-                    {"positions": q, "tcp_path_m": points},
-                    arm.robot,
-                    arm.flange_to_tcp,
-                    velocity,
-                    acceleration,
-                    drawing_speed,
-                    0.2,
-                    sample_output=False,
-                    path=path,
-                    continuous_acceleration=acceleration_constraint == "cubic_bernstein",
-                    grid_samples=grid_samples,
-                    grid_midpoints=grid_midpoints,
-                    solver=solver,
-                    grid_ramps=grid_ramps,
-                )
-                timed = {
-                    "positions": q,
-                    "duration_s": result["duration_s"],
-                    "pieces": clock_polynomials(
-                        path,
-                        np.array(result["path_clock"]["s"]),
-                        np.array(result["path_clock"]["speeds"]),
-                    ),
-                    "diagnostic": {
-                        "stroke_id": op.get("stroke_id"),
-                        "time_scale_correction": result["time_scale_correction"],
-                        "retiming_method": result["retiming_method"],
-                        "retiming_fallback_reason": result["retiming_fallback_reason"],
-                        "bounds": result["bounds"],
-                        "acceleration_constraint": acceleration_constraint,
-                    },
-                }
-            if drawing_capture is not None:
-                drawing_capture.append(timed)
+            path = op.get("path")
+            if path is None:
+                path = make_path(q, points, interpolation="pchip", subdivisions=2)
+            result = retime_operation(
+                {"positions": q, "tcp_path_m": points},
+                arm.robot,
+                arm.flange_to_tcp,
+                velocity,
+                acceleration,
+                drawing_speed,
+                0.2,
+                sample_output=False,
+                path=path,
+                continuous_acceleration=acceleration_constraint == "cubic_bernstein",
+                grid_samples=grid_samples,
+                grid_midpoints=grid_midpoints,
+                solver=solver,
+                grid_ramps=grid_ramps,
+            )
+            timed = {
+                "positions": q,
+                "duration_s": result["duration_s"],
+                "pieces": clock_polynomials(
+                    path,
+                    np.array(result["path_clock"]["s"]),
+                    np.array(result["path_clock"]["speeds"]),
+                ),
+                "diagnostic": {
+                    "stroke_id": op.get("stroke_id"),
+                    "time_scale_correction": result["time_scale_correction"],
+                    "retiming_method": result["retiming_method"],
+                    "retiming_fallback_reason": result["retiming_fallback_reason"],
+                    "bounds": result["bounds"],
+                    "acceleration_constraint": acceleration_constraint,
+                },
+            }
             pieces, result = timed["pieces"], timed
             diagnostics.append(timed["diagnostic"])
             for start, duration, polynomials in pieces:
@@ -552,8 +533,6 @@ def timed_path(
                 )
             )
             elapsed += duration
-    if drawing_reuse is not None and reused != len(drawing_reuse):
-        raise ValueError("Retained drawing clock has unused parts")
     result = ClockPath(edges)
     if diagnostics:
         result.metadata["drawing_timing"] = diagnostics

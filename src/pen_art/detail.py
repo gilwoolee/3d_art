@@ -374,8 +374,11 @@ class PlannerCheck:
         from time import monotonic
 
         from pen_art.curves import flatten_curve, transform_points
-        from pen_art.planning.axis_corridor import pen_clear
-        from pen_art.planning.cell_motion import drawing_alternatives, fixed_rotation_families
+        from pen_art.planning.cell_motion import (
+            drawing_alternatives,
+            fixed_rotation_families,
+            pen_clear,
+        )
 
         planner, arm = self.planner, self.arm
         world = self.table.build_transform()

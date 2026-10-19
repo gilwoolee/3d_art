@@ -1,8 +1,7 @@
-"""Bounded event search for one or two arms sharing a growing sculpture.
+"""The records a build is scheduled with: strokes, their motions and the state.
 
-The motion backend supplies arm-specific alternatives and validates every elapsed
-interval (including idle arms, partial deposition and simultaneous starts).
-This module never treats scheduling or endpoint IK as collision validation.
+The planner validates every elapsed interval, including partial deposition.
+Nothing here is collision validation.
 """
 
 from dataclasses import dataclass, field
@@ -14,15 +13,11 @@ class StrokeTask:
     anchors: frozenset[str]
     deposits: frozenset[str]
     cooling_s: float = 0.0
-    parent_curve: str | None = None
-    source_interval: tuple[float, float] | None = None
-    stage: str | None = None
-    members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class MotionProposal:
-    """A complete travel/approach/draw/withdraw alternative for one arm.
+    """A complete travel/approach/draw/withdraw alternative.
 
     ``payload`` belongs to the backend (e.g. exact timed joint polynomials).
     ``start_anchor`` must already be cool when dispatched. End configurations
@@ -67,10 +62,6 @@ class ScheduleState:
     def ready_nodes(self):
         return frozenset(node for node, ready in self.support_ready if ready <= self.time_s)
 
-    def idle_arms(self):
-        busy = {motion.proposal.arm for motion in self.active}
-        return tuple(arm for arm, _ in self.configurations if arm not in busy)
-
 
 def tasks_from_construction(construction, graph, cooling_s=0.0):
     """Extract alternative anchors, without importing the serial chosen order.
@@ -81,22 +72,10 @@ def tasks_from_construction(construction, graph, cooling_s=0.0):
     tasks = []
     for action in construction["actions"]:
         deposits = frozenset(v["node"] for v in action["junction_visits"])
-        # The previous regression plan's alternatives depend on its chosen
-        # prefix. Reopen every closed-curve junction and both open endpoints.
+        # A closed curve may start at any junction, an open one at either end.
         anchors = deposits if action["closed"] else frozenset([action["start"], action["end"]])
         if not anchors or not anchors <= deposits:
             raise ValueError("Every alternative anchor must lie on its stroke")
-        tasks.append(
-            StrokeTask(
-                action["id"],
-                anchors,
-                deposits,
-                cooling_s,
-                action.get("parent_curve"),
-                tuple(action["source_interval"]) if "source_interval" in action else None,
-                action.get("stage"),
-                tuple(action["members"]),
-            )
-        )
+        tasks.append(StrokeTask(action["id"], anchors, deposits, cooling_s))
     ground = frozenset(node["id"] for node in graph["nodes"] if node["ground"])
     return tuple(tasks), ground

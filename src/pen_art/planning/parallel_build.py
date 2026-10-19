@@ -11,7 +11,6 @@ Nothing here certifies a build. Workers use the planner's pen-candidate
 collision scope; acceptance remains the independent ordered full-robot replay.
 """
 
-import hashlib
 import os
 import pickle
 import traceback
@@ -26,6 +25,23 @@ import numpy as np
 
 from ..curves import flatten_curve, transform_points
 from ..io import read_json, write_json
+from .cell_motion import (
+    DEFAULT_PEN_TILTS_DEG,
+    DEFAULT_SETTINGS,
+    drawing_alternatives,
+    fixed_rotation_families,
+    pen_clear,
+)
+from .clock_path import ClockPath
+from .material_journal import (
+    MaterialPrefix,
+    _merged,
+    deposit_difference,
+    deposit_key,
+    load_journal,
+    write_journal,
+)
+from .plate import FixedPlate
 from .replay_checkpoint import IMPLEMENTATION, digest
 from .scene import MaterialScene
 from .schedule import MotionProposal, ScheduledMotion
@@ -36,85 +52,6 @@ HOME = "home"
 UNRESOLVED = {"UNRESOLVED", "ERROR", "WORKER_LOST"}
 # Seconds between live progress reports while jobs are finishing.
 PROGRESS_INTERVAL_S = 5.0
-
-
-def deposit_key(operations):
-    """Bind deposited geometry and turn order, independently of segment names."""
-    state = hashlib.sha256(b"material-operations-v1")
-    for operation in operations:
-        if operation[0] == "turn":
-            state.update(b"turn" + bytes([operation[1], operation[2]]))
-        else:
-            rows = operation[1]
-            state.update(b"add" + len(rows).to_bytes(8, "little"))
-            state.update(
-                np.asarray(
-                    [[*row["start"], *row["end"], row["radius_m"]] for row in rows], dtype="<f8"
-                ).tobytes()
-            )
-    return state.hexdigest()
-
-
-def deposit_difference(first, second):
-    """Largest endpoint/radius difference between two deposit journals, or None."""
-    first = [row for operation in first if operation[0] == "add" for row in operation[1]]
-    second = [row for operation in second if operation[0] == "add" for row in operation[1]]
-    if len(first) != len(second):
-        return None
-    if not first:
-        return 0.0
-    values = [
-        np.asarray([[*row["start"], *row["end"], row["radius_m"]] for row in rows])
-        for rows in (first, second)
-    ]
-    return float(np.max(np.abs(values[0] - values[1])))
-
-
-class MaterialPrefix:
-    """Rebuild the material preceding an action from journaled deposits.
-
-    One append-only scene is kept per process. A longer chain extends it; a
-    shorter or diverging one shares its leading capsules. Insertions repeat
-    the validator's own sequence, so the result is the scene sequential
-    checking would hold.
-    """
-
-    def __init__(self, load):
-        self.load = load
-        self.rebuilds = 0
-        self.reset()
-
-    def reset(self):
-        self.scene = MaterialScene()
-        self.chain, self.counts = [], []
-
-    def _apply(self, element):
-        for operation in self.load(element[0]):
-            for row in operation[1]:
-                self.scene.add(row["start"], row["end"], row["radius_m"], row["name"])
-        self.chain.append(element)
-        self.counts.append(len(self.scene.objects))
-
-    def scene_for(self, chain):
-        chain = [tuple(element) for element in chain]
-        common = 0
-        while (
-            common < min(len(chain), len(self.chain)) and chain[common] == self.chain[common]
-        ):
-            common += 1
-        if common == len(self.chain):
-            for element in chain[common:]:
-                self._apply(element)
-            return self.scene
-        base = self.scene.prefix(self.counts[common - 1]) if common else MaterialScene()
-        if common == len(chain):
-            return base  # Serve a pure prefix; keep the longer scene held.
-        self.rebuilds += 1
-        self.scene = base
-        del self.chain[common:], self.counts[common:]
-        for element in chain[common:]:
-            self._apply(element)
-        return self.scene
 
 
 def _failure(row):
@@ -132,10 +69,10 @@ class ForwardSchedule:
     discards any result whose assumptions have since been replaced.
     """
 
-    def __init__(self, actions, binding, *, maximum_attempts=6, cold_modes=4, rows=None):
+    def __init__(self, actions, binding, rows, *, maximum_attempts=6, cold_modes=4):
         """``rows`` gives each action's start node, end node, junction nodes and
-        whether it is a closed loop. With them, a stroke that can start where
-        its predecessor ended is proposed from that predecessor's final joint
+        whether it is a closed loop. A stroke that can start where its
+        predecessor ended is proposed from that predecessor's final joint
         position, and the pair is drawn without lifting the pen.
         """
         self.actions, self.binding = list(actions), binding
@@ -263,14 +200,12 @@ class ForwardSchedule:
 
     def _may_chain(self, index):
         """Whether action ``index`` could start where its predecessor ends."""
-        if self.rows is None or index <= 0 or index >= len(self.actions):
+        if index <= 0 or index >= len(self.actions):
             return False
         slot = self.slots[index]
         if slot["unchained"] or slot["unresolved"] is not None:
             return False
-        previous = self.rows[index - 1]
-        ends = set(previous["nodes"]) if previous["closed"] else {previous["end"]}
-        return bool(ends & self._starts(index))
+        return self._continues(index)
 
     def _propose_spec(self, index):
         return self._remembered("propose", index, self._derive_propose_spec)
@@ -302,7 +237,7 @@ class ForwardSchedule:
         mode = {"mode": "cold", "ordinal": slot["cold"], "chain": chain}
         if chain_from is not None:
             mode["chain_from"] = chain_from
-        elif self.rows is not None and index + 1 < len(self.rows):
+        elif index + 1 < len(self.rows):
             # A loop may start anywhere; start it where the next stroke begins.
             row, following = self.rows[index], self.rows[index + 1]
             if row["closed"] and not following["closed"] and following["start"] in row["nodes"]:
@@ -344,7 +279,7 @@ class ForwardSchedule:
                 continue
             if index == 0:
                 reason = "first stroke"
-            elif self.rows is None or not self._continues(index):
+            elif not self._continues(index):
                 reason = "not continuous"
             else:
                 reason = slot["lift_reason"] or "chain not attempted"
@@ -352,6 +287,7 @@ class ForwardSchedule:
         return result
 
     def _continues(self, index):
+        """Whether one of action ``index``'s starts is where its predecessor ends."""
         previous = self.rows[index - 1]
         ends = set(previous["nodes"]) if previous["closed"] else {previous["end"]}
         return bool(ends & self._starts(index))
@@ -479,6 +415,202 @@ class ForwardSchedule:
         ]
 
 
+def greedy_forward_order(actions, ground, stable, *, deadline=float("inf")):
+    """Keep suggested priorities when support and cooled stiffness permit.
+
+    This chooses one complete geometric order before motion sampling. It does
+    not backtrack earlier order choices or prove impossibility on failure.
+    """
+    remaining = sorted(actions, key=lambda row: (row["priority"], row["id"]))
+    available, built, order = set(ground), set(), []
+    while remaining and monotonic() < deadline:
+        framework_pending = any(row["stage"] == "framework" for row in remaining)
+        for row in remaining:
+            if monotonic() >= deadline:
+                return None
+            if framework_pending and row["stage"] != "framework":
+                continue
+            anchors = (
+                {visit["node"] for visit in row["junction_visits"]}
+                if row.get("closed")
+                else {row["start"], row["end"]}
+            )
+            if available.intersection(anchors) and stable(built | {row["id"]}):
+                break
+        else:
+            return None
+        remaining.remove(row)
+        order.append(row)
+        built.add(row["id"])
+        available.update((row["start"], row["end"]))
+        available.update(visit["node"] for visit in row.get("junction_visits", []))
+    return None if remaining else order
+
+
+def at_index(path, index):
+    if path is None or path is False:
+        return path
+    result = ClockPath([replace(edge, table_index=index) for edge in path.edges])
+    result.metadata.update(path.metadata)
+    if hasattr(path, "timing_operations"):
+        result.timing_operations = path.timing_operations
+    return result
+
+
+class IndexedMotions:
+    """The planner's drawing and travel samplers, as the workers call them."""
+
+    def __init__(self, build):
+        self.build = build
+        self.table = FixedPlate.from_profile(build.planner.profile)
+
+    def structure_admissible(self, row, predecessor):
+        """Screen the structure once per completed action."""
+        if self.build.stable(set(predecessor) | {row["id"]}):
+            return True
+        report = {"status": "ACTION_STRUCTURE_REJECTED", "modeled_pass": False}
+        self.build.planner.failure(
+            row["id"],
+            self.build.arm.identity,
+            "PROGRESSIVE_STRUCTURE",
+            report["status"],
+            validation=report,
+        )
+        return False
+
+    def transition(self, scene, start, start_index, end, end_index):
+        """A pen-off travel between two drawings; the plate never turns."""
+        if start_index != end_index:
+            raise ValueError("A fixed build plate has one position")
+        return at_index(self.build.travel_clock(scene, start, end), start_index)
+
+    def drawings(
+        self, row, available, q, index, scene, *, chain=None, prefer_start=None, retry=0
+    ):
+        """Sampled drawings of ``row`` at table position ``index``.
+
+        ``chain`` is the predecessor's end: ``node``, joint position ``q`` and
+        ``rotation``. Only drawings that start there, keep that pen
+        orientation and begin at exactly that joint position are offered, so
+        the pair is drawn without lifting. ``prefer_start`` tries that start
+        node first (a loop that ends where the next stroke begins). Each
+        ``retry`` samples a path twice as fine and starts with the other pen
+        roll, for a stroke whose path missed the accuracy check. A stroke may
+        name ``pen_lean_azimuth_deg``: its pen body then leans toward that
+        world azimuth (detail drawn on the far side of the object).
+        """
+        if chain is not None:
+            yield from self._chained(row, chain, index)
+            return
+        if prefer_start is not None and prefer_start in available and len(available) > 1:
+            yield from self.drawings(row, {prefer_start}, q, index, scene, retry=retry)
+            available = set(available) - {prefer_start}
+        build, planner = self.build, self.build.planner
+        transform = self.table.build_transform(index)
+        # Keep the pen orientations whose pen clears the wire at the stroke's
+        # start, middle and end; IK then runs along the stroke for those.
+        points, _ = flatten_curve(row, 0.00005, 0.003)
+        points = transform_points(points, transform)
+        tilts = row.get("pen_tilt_candidates_deg") or planner.profile.get(
+            "drawing_pen_tilt_candidates_deg", DEFAULT_PEN_TILTS_DEG
+        )
+        rotations = list(
+            fixed_rotation_families(
+                build.arm,
+                transform,
+                tilts,
+                (np.pi, 0.0) if retry % 2 else (0.0, np.pi),
+                lean_azimuth_deg=row.get("pen_lean_azimuth_deg"),
+            )
+        )
+        original_deadline = planner.deadline
+        choices = []
+        try:
+            planner.deadline = min(original_deadline, monotonic() + 60)
+            for descriptor in rotations:
+                if monotonic() >= planner.deadline:
+                    break
+                if all(
+                    pen_clear(
+                        planner,
+                        build.arm,
+                        points[sample],
+                        descriptor["rotations"],
+                        scene,
+                        planner.margin + 0.000002,
+                    )
+                    for sample in (0, len(points) // 2, len(points) - 1)
+                ):
+                    choices.append(descriptor)
+                    if len(choices) >= min(len(rotations), 96):
+                        break
+        finally:
+            planner.deadline = original_deadline
+        for drawing in drawing_alternatives(
+            planner.collision_arm(build.arm.identity),
+            row,
+            available,
+            transform,
+            planner.obstacles,
+            deadline=min(planner.deadline, monotonic() + 120),
+            seeds=[q, build.initial],
+            settings={
+                "maximum_subdivision_depth": 20,
+                "maximum_chord_m": DEFAULT_SETTINGS["maximum_chord_m"] / 2**retry,
+            },
+            clearance_m=planner.margin,
+            rotations=choices[:96],
+            orientation_policy=planner.profile.get("drawing_orientation_policy", "fixed"),
+        ):
+            if drawing["status"] == "SAMPLED_DRAWING_PATH":
+                yield self._candidate(drawing, index)
+
+    def _chained(self, row, chain, index):
+        build, planner = self.build, self.build.planner
+        transform = self.table.build_transform(index)
+        start = np.asarray(chain["q"], float)
+        rotation = {
+            "orientation_policy": "fixed",
+            "fixed_orientation": True,
+            "pen_tilt_deg": chain.get("pen_tilt_deg") or 0.0,
+            "roll_rad": chain.get("roll_rad") or 0.0,
+            "rotations": np.asarray(chain["rotation"], float),
+        }
+        for drawing in drawing_alternatives(
+            planner.collision_arm(build.arm.identity),
+            row,
+            {chain["node"]},
+            transform,
+            planner.obstacles,
+            deadline=min(planner.deadline, monotonic() + 60),
+            seeds=[start],
+            settings={"maximum_subdivision_depth": 20},
+            clearance_m=planner.margin,
+            rotations=[rotation],
+            orientation_policy="fixed",
+        ):
+            if drawing["status"] != "SAMPLED_DRAWING_PATH":
+                continue
+            # The same pose solved from the same seed: anything but the
+            # predecessor's joint position would move the pen while feeding.
+            if not np.allclose(drawing["positions"][0], start, atol=1e-6, rtol=0):
+                continue
+            drawing["positions"][0] = start.tolist()
+            yield self._candidate(drawing, index)
+
+    def _candidate(self, drawing, index):
+        planner = self.build.planner
+        drawing.update(
+            release_cooling_s=self.build.cooling,
+            table_index=index,
+            collision_scope=planner.collision_scope,
+            requires_full_robot_validation=planner.collision_scope == "pen_candidate",
+        )
+        if planner.collision_scope == "pen_candidate":
+            drawing["static_collision_status"] = "CHECKED_PEN_STATIC_ONLY"
+        return drawing
+
+
 # --------------------------------------------------------------------------
 # Worker side. A forked worker inherits the parent's prepared planner and its
 # frozen motion library; everything it mutates afterwards is process-local.
@@ -516,8 +648,6 @@ def _load(root, key):
 def _deposits(root, key):
     from collections import OrderedDict
 
-    from .material_journal import load_journal
-
     cache = _WORKER.setdefault("deposits", OrderedDict())
     if key not in cache:
         path = root / "deposits" / f"{key}.json"
@@ -549,8 +679,6 @@ def _points(context, row, index):
 
 def _journal(context, index, clock, table_index):
     """Deposits implied by a clock, from the validator's own deposition path."""
-    from .indexed_build import at_index
-
     build = context["build"]
     scene = MaterialScene()
     scene.table_index = table_index
@@ -601,7 +729,7 @@ def _propose(context, spec, seconds):
     ):
         seconds["proposal"] += perf_counter() - started
         started = perf_counter()
-        if not model.structure_admissible(row, drawing, completed):
+        if not model.structure_admissible(row, completed):
             continue
         local = planner.prepare_local_drawing(build.arm.identity, drawing)
         seconds["local_drawing"] += perf_counter() - started
@@ -614,15 +742,13 @@ def _propose(context, spec, seconds):
         operations = _merged(planner, operations)
         seconds["predicted_deposit"] += perf_counter() - started
         key = deposit_key(operations)
-        from .material_journal import write_journal
-
         path = context["root"] / "deposits" / f"{key}.json"
         if not path.exists():
             write_journal(path, operations)
         seconds["serialization"] += _store(
             context["root"],
             spec["key"],
-            {"drawing": drawing, "local": local, "move": None, "table_index": table_index},
+            {"drawing": drawing, "local": local, "table_index": table_index},
         )
         return {
             "status": "OK",
@@ -650,11 +776,10 @@ def _propose(context, spec, seconds):
 
 def _check(context, spec, seconds):
     from .clock_path import posture_change
-    from .indexed_build import at_index
 
     build, planner = context["build"], context["build"].planner
     index = spec["index"]
-    row, completed = context["order"][index], _completed(context, index)
+    completed = _completed(context, index)
     started = perf_counter()
     candidate = _load(context["root"], spec["candidate"])
     seconds["serialization"] += perf_counter() - started
@@ -663,25 +788,21 @@ def _check(context, spec, seconds):
     scene = _prefix(context).scene_for(spec["chain"])
     seconds["material_reconstruction"] += perf_counter() - started
     state = build.state(completed, build.initial, scene)
-    move = candidate["move"]
+    started = perf_counter()
+    move = planner.complete_local_drawing(
+        state,
+        build.arm.identity,
+        drawing,
+        candidate["local"],
+        chained_in=spec.get("chained_in", False),
+        chained_out=spec.get("chained_out", False),
+    )
+    seconds["approach_withdraw"] += perf_counter() - started
     if move is None:
-        started = perf_counter()
-        move = planner.complete_local_drawing(
-            state,
-            build.arm.identity,
-            drawing,
-            candidate["local"],
-            None,
-            defer_drawing_check=True,
-            chained_in=spec.get("chained_in", False),
-            chained_out=spec.get("chained_out", False),
-        )
-        seconds["approach_withdraw"] += perf_counter() - started
-        if move is None:
-            return {
-                "status": "UNRESOLVED" if monotonic() >= planner.deadline else "REJECTED",
-                "failure": planner.attempts[-1] if planner.attempts else None,
-            }
+        return {
+            "status": "UNRESOLVED" if monotonic() >= planner.deadline else "REJECTED",
+            "failure": planner.attempts[-1] if planner.attempts else None,
+        }
     local = at_index(move.payload, table_index)
     local.metadata["drawing_table_index"] = table_index
     swing = posture_change(local, build.arm)
@@ -699,12 +820,6 @@ def _check(context, spec, seconds):
             "status": "UNRESOLVED" if failure.get("status") == "TIME_BUDGET" else "REJECTED",
             "failure": failure,
         }
-    if not _untimed(local):
-        started = perf_counter()
-        failure = _timing_failure(build, row, local)
-        seconds["timing_audit"] += perf_counter() - started
-        if failure:
-            return failure
     difference = deposit_difference(
         _merged(planner, operations), _deposits(context["root"], spec["deposit_key"])
     )
@@ -728,20 +843,6 @@ def _check(context, spec, seconds):
     }
 
 
-def _merged(planner, operations):
-    """Deposits as later actions will see them; an action's own wire stays fine."""
-    budget = planner.settings.get("merge_deposits_m", 0.0)
-    if not budget:
-        return operations
-    from .material_journal import merge_deposits
-
-    return merge_deposits(operations, budget)
-
-
-def _untimed(path):
-    return path.metadata.get("parameterization") == "geometric"
-
-
 def _timing_failure(build, row, clock):
     try:
         build.check_forward_timing(row, clock)
@@ -753,7 +854,6 @@ def _timing_failure(build, row, clock):
 
 
 def _connect(context, spec, seconds):
-    from .plate import audit_plate_clock
     from .section_build import combine_clocks
     from .source_coverage import audit_source_curve
 
@@ -812,18 +912,8 @@ def _connect(context, spec, seconds):
     seconds["serialization"] += perf_counter() - started
     path = combine_clocks(incoming, checked["clock"])
     path.metadata["drawing_table_index"] = end_index
-    untimed = _untimed(checked["clock"])
-    if not untimed:
-        try:
-            audit_plate_clock(path)
-        except ValueError as error:
-            return {
-                "status": "REJECTED",
-                "failure": {"status": "INDEXED_CLOCK", "detail": str(error)},
-            }
     started = perf_counter()
-    store = (None if planner.verification_raw else
-             getattr(planner, "path_certificates", None))
+    store = None if planner.verification_raw else planner.path_certificates
     coverage_context = {
         "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
         "source_points_m": _points(context, row, end_index),
@@ -843,23 +933,18 @@ def _connect(context, spec, seconds):
             "clock": path,
             "drawing": checked["drawing"],
             "source_audit": audit,
-            # The final timing pass rebuilds this action around its own clock.
-            **({"incoming": incoming, "local": checked["clock"]} if untimed else {}),
+            # The timing pass rebuilds this action around its own clock.
+            "incoming": incoming,
+            "local": checked["clock"],
         },
     )
-    return {
-        "status": "OK",
-        "duration_s": path.duration_s,
-        "edges": len(path.edges),
-        "untimed": untimed,
-    }
+    return {"status": "OK", "duration_s": path.duration_s, "edges": len(path.edges)}
 
 
 def _time(context, spec, seconds):
     """Time one accepted untimed action; its checked sweep must be unchanged."""
     from ..timing import TimingParameterizationError
     from .geometric_path import same_sweep
-    from .indexed_build import at_index
     from .plate import audit_plate_clock
     from .section_build import combine_clocks
 
@@ -893,7 +978,7 @@ def _time(context, spec, seconds):
         return {"status": "REJECTED", "failure": {"status": "SWEEP", "detail": guard}}
     # The timed clock visits exactly the configurations of the untimed path, so
     # that path's proof of covering the source curve holds for it too.
-    store = None if planner.verification_raw else getattr(planner, "path_certificates", None)
+    store = None if planner.verification_raw else planner.path_certificates
     if store is not None:
         coverage_context = {
             "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
@@ -949,8 +1034,8 @@ def run_job(spec):
     # Worker-side workload, reported as this job's own change.
     sources = {
         "collision": QUERY_STATS,
-        "verification_counts": getattr(planner, "verification_stats", {}),
-        "verification_seconds": getattr(planner, "verification_seconds", {}),
+        "verification_counts": planner.verification_stats,
+        "verification_seconds": planner.verification_seconds,
     }
     before = {name: Counter(values) for name, values in sources.items()}
     planner.deadline = min(context["deadline"], monotonic() + context["budget"])
@@ -1006,9 +1091,7 @@ class Coordinator:
         progress=None,
         stall_seconds=float("inf"),
         kill=None,
-        intercept=None,
     ):
-        self.intercept = intercept
         self.schedule, self.submit, self.workers = schedule, submit, workers
         self.root, self.deadline = Path(root), deadline
         self.restart, self.progress = restart, progress
@@ -1032,8 +1115,6 @@ class Coordinator:
 
     def _finish(self, spec, summary):
         key = spec["key"]
-        if self.intercept is not None:
-            summary = self.intercept(spec, summary)
         # Timeouts and lost workers are not reusable facts about a candidate.
         if summary["status"] not in UNRESOLVED:
             self.memo[key] = summary
@@ -1201,8 +1282,6 @@ def _prescreen(build, workers):
     search will request if every step passes; the search itself is unchanged
     and computes any other subset it turns out to need.
     """
-    from .regression import greedy_forward_order
-
     global _SCREENED
     expected = greedy_forward_order(
         build.actions.values(), build.planner.ground, lambda ids: True
@@ -1227,9 +1306,6 @@ def _prescreen(build, workers):
 
 def prepare_context(build, action_budget=240.0, workers=1):
     """Fix the order, freeze the library and publish the state workers inherit."""
-    from .indexed_build import IndexedMotions
-    from .regression import greedy_forward_order
-
     global _CONTEXT
     if workers > 1:
         _prescreen(build, workers)
@@ -1264,7 +1340,6 @@ def prepare_context(build, action_budget=240.0, workers=1):
             }
     write_json(build.run / "structural_screens.json", {"screens": screens})
     model = IndexedMotions(build)
-    model.round = max(model.round, 3)
     root = build.run / "parallel"
     _CONTEXT = {
         "build": build,
@@ -1278,17 +1353,12 @@ def prepare_context(build, action_budget=240.0, workers=1):
     return _CONTEXT
 
 
-def run_parallel_forward(
-    build, workers, *, action_budget=240.0, inject_rejections=(), stage="all"
-):
+def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
     """Plan one supported order with parallel workers, then export playback.
 
     ``stage`` "geometry" stops after the untimed paths and saves them in
-    ``geometry_plan.json``; "timing" times those saved paths and exports.
-
-    ``inject_rejections`` is a test facility: the first accepted check of each
-    listed action index is treated as rejected, forcing a real replacement
-    candidate and the invalidation of everything computed from the old one.
+    ``geometry_plan.json``; "timing" times those saved paths and exports;
+    "all" does both.
     """
     from .full_build_export import export_sections
 
@@ -1309,7 +1379,7 @@ def run_parallel_forward(
     schedule = ForwardSchedule(
         [row["id"] for row in order],
         context["binding"],
-        rows=[
+        [
             {
                 "start": row["start"],
                 "end": row["end"],
@@ -1320,25 +1390,8 @@ def run_parallel_forward(
                 ),
             }
             for row in order
-        ]
-        if context["build"].planner.settings.get("chain_strokes")
-        else None,
+        ],
     )
-    pending_injections = set(inject_rejections)
-
-    def intercept(spec, summary):
-        if (
-            spec["kind"] == "check"
-            and spec["index"] in pending_injections
-            and summary["status"] == "OK"
-        ):
-            pending_injections.discard(spec["index"])
-            return {
-                **summary,
-                "status": "REJECTED",
-                "failure": {"status": "INJECTED_TEST_REJECTION"},
-            }
-        return summary
 
     phases["setup"] = perf_counter() - started
     build.search_metadata = {
@@ -1409,7 +1462,6 @@ def run_parallel_forward(
         progress=progress,
         stall_seconds=3 * action_budget + 120,
         kill=kill_pool,
-        intercept=intercept if inject_rejections else None,
     )
     exported, timing_rejections = None, []
     try:
@@ -1434,7 +1486,6 @@ def run_parallel_forward(
                 planned = [
                     {
                         "connect_key": schedule._connected(index)["key"],
-                        "untimed": bool(schedule._connected(index).get("untimed")),
                         # The wire this action's pen was checked against, and its own.
                         "chain": schedule.chain(index),
                         "deposit": [
@@ -1461,13 +1512,11 @@ def run_parallel_forward(
                 if status == "COMPLETE":
                     status = "GEOMETRY_PLANNED"
         if status == "COMPLETE":
-            # The whole object now has a checked chain. Time its untimed
-            # actions; each is independent of the others.
+            # The whole object now has a checked chain. Time its actions;
+            # each is independent of the others.
             started = perf_counter()
             futures = {}
             for index, action in enumerate(planned):
-                if not action["untimed"]:
-                    continue
                 spec = {
                     "kind": "time",
                     "index": index,
@@ -1508,7 +1557,7 @@ def run_parallel_forward(
             started = perf_counter()
             witnesses = []
             for index, row in enumerate(order):
-                payload = _load(root, timed_keys.get(index, planned[index]["connect_key"]))
+                payload = _load(root, timed_keys[index])
                 clock, drawing = payload["clock"], payload["drawing"]
                 witnesses.append(
                     (
@@ -1551,7 +1600,6 @@ def run_parallel_forward(
                 pool.shutdown(wait=False, cancel_futures=True)
     phases["total"] = sum(phases.values())
     summary = _summarize(coordinator, schedule, workers, phases)
-    summary["injected_test_rejections"] = sorted(inject_rejections)
     summary["planning_status"] = status
     summary["replay_status"] = "NOT_RUN"
     summary["export_status"] = None if exported is None else exported["status"]

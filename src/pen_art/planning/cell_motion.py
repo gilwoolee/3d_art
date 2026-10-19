@@ -1,19 +1,19 @@
-"""World-frame drawing alternatives for independently placed serial arms.
+"""Drawing paths for one arm: IK along a stroke at a fixed pen orientation.
 
-These are drawing-path candidates, not coordinated schedules: transits, material
-and inter-arm validation belong to selected-motion realization and shared replay.
+These are drawing-path candidates, not schedules: transits and checks against
+the growing material belong to the planner and the final replay.
 """
 
 from time import monotonic
 
+import fcl
 import numpy as np
-from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation
 
 from ..curves import flatten_curve, transform_points
-from ..kinematics import geometric_jacobian, inverse_candidates, pose_error
+from ..kinematics import inverse_candidates, pose_error
 from ..strokes import orient_stroke
-from .curve_motion import search_layers, tracking_edge
+from .collision import placed
 
 DEFAULT_SETTINGS = {
     "maximum_chord_m": 0.003,
@@ -65,7 +65,6 @@ def pen_rotation(arm, world_from_build, roll=0.0, tilt_deg=0.0, lean_azimuth_deg
     return np.column_stack([x, np.cross(z, x), z]) @ Rotation.from_rotvec([0, 0, -roll]).as_matrix()
 
 
-ORIENTATION_POLICY_VERSION = "fixed-tcp-per-draw-v5"
 DEFAULT_PEN_TILTS_DEG = (70.0, 80.0)
 
 
@@ -87,124 +86,6 @@ def fixed_rotation_families(
                 "roll_rad": float(roll),
                 "rotations": pen_rotation(arm, world_from_build, roll, tilt, lean_azimuth_deg),
             }
-
-
-def radial_pen_rotations(arm, points, world_from_build, tilt_deg=70.0, roll=0.0):
-    """Aim TCP +Z inward/down; the axial pen body extends outward/up along -Z.
-
-    Tilt is measured from vertical. It is a search preference, not a geometric
-    clearance certificate. At a point on the central axis, use the robot side
-    as the deterministic radial fallback. Near-horizontal poses use world up
-    to fix roll without the rapid twist caused by projecting world X near a
-    horizontal nozzle axis. Near-vertical poses retain a world-X reference.
-    """
-    if not np.isfinite(tilt_deg) or not 0 <= tilt_deg < 90:
-        raise ValueError("Drawing pen tilt must be finite and in [0, 90) degrees")
-    points = np.asarray(points, float)
-    if points.ndim != 2 or points.shape[1] != 3 or not np.isfinite(points).all():
-        raise ValueError("Radial orientation needs finite Cartesian points")
-    center = np.asarray(world_from_build)[:3, 3]
-    radial = points[:, :2] - center[:2]
-    lengths = np.linalg.norm(radial, axis=1)
-    fallback = arm.robot.world_from_base[:2, 3] - center[:2]
-    if np.linalg.norm(fallback) < 1e-9:
-        fallback = np.array([1.0, 0.0])
-    fallback /= np.linalg.norm(fallback)
-    radial = np.divide(
-        radial, lengths[:, None], out=np.zeros_like(radial), where=lengths[:, None] > 1e-9
-    )
-    radial[lengths <= 1e-9] = fallback
-    angle = np.deg2rad(tilt_deg)
-    z = np.column_stack([-np.sin(angle) * radial, np.full(len(points), -np.cos(angle))])
-    reference = np.array([0.0, 0.0, 1.0] if tilt_deg >= 45 else [1.0, 0.0, 0.0])
-    x = reference - z * (z @ reference)[:, None]
-    x /= np.linalg.norm(x, axis=1)[:, None]
-    frames = np.stack([x, np.cross(z, x), z], axis=2)
-    return frames @ Rotation.from_rotvec([0, 0, -roll]).as_matrix()
-
-
-def outward_rotation_families(
-    arm, points, world_from_build, tilt_degrees=DEFAULT_PEN_TILTS_DEG, roll_angles=(0.0, np.pi)
-):
-    """Whole-path preferred families, preserving the caller's tilt ordering."""
-    for tilt in dict.fromkeys(float(value) for value in tilt_degrees):
-        for roll in roll_angles:
-            yield {
-                "orientation_policy": "outward_radial",
-                "pen_tilt_deg": tilt,
-                "roll_rad": float(roll),
-                "rotations": radial_pen_rotations(arm, points, world_from_build, tilt, roll),
-            }
-
-
-def _preferred_position_edge(robot, offset, q0, q1, p0, p1, tolerance_m, maximum_step):
-    """Radial targets are preferences; retain sampled position/branch checks.
-
-    Later CellPlanner checks continuous source tracking and the full tool body
-    against static and progressively deposited material, with orientation free.
-    """
-    if np.max(np.abs(q1 - q0)) > maximum_step:
-        return None
-    worst = 0.0
-    for alpha in (0.25, 0.5, 0.75):
-        target = p0.copy()
-        target[:3, 3] = (1 - alpha) * p0[:3, 3] + alpha * p1[:3, 3]
-        distance = np.linalg.norm(
-            pose_error(robot.forward((1 - alpha) * q0 + alpha * q1, offset), target)[:3]
-        )
-        if distance > tolerance_m:
-            return None
-        worst = max(worst, float(distance))
-    return worst
-
-
-def inverse_axis_candidates(arm, target, seeds, position_tolerance=0.00005, axis_tolerance=0.001):
-    """Preserve the nozzle direction while leaving rotation about it free.
-
-    Axial pen geometry does not require a fixed roll. Fixing all three rotation
-    coordinates can unnecessarily exhaust wrist travel around a closed wall.
-    Returned states still require full robot/tool collision and path checks.
-    """
-    robot, offset = arm.robot, arm.flange_to_tcp
-    accepted = []
-    weights = np.array([1 / position_tolerance] * 3 + [1 / axis_tolerance] * 3)
-    for seed in seeds:
-        seed = np.clip(np.asarray(seed), robot.lower + 1e-9, robot.upper - 1e-9)
-
-        def residual(q, reference=seed):
-            tcp = robot.forward(q, offset)
-            error = np.r_[tcp[:3, 3] - target[:3, 3], tcp[:3, 2] - target[:3, 2]]
-            return np.r_[error * weights, 1e-4 * (q - reference)]
-
-        def jacobian(q):
-            geometric = geometric_jacobian(robot, q, offset)
-            axis = robot.forward(q, offset)[:3, 2]
-            axis_jacobian = np.cross(geometric[3:].T, axis).T
-            return np.vstack(
-                [
-                    np.vstack([geometric[:3], axis_jacobian]) * weights[:, None],
-                    1e-4 * np.eye(len(q)),
-                ]
-            )
-
-        result = least_squares(
-            residual,
-            seed,
-            jac=jacobian,
-            bounds=(robot.lower, robot.upper),
-            max_nfev=60,
-            xtol=1e-9,
-            ftol=1e-9,
-            gtol=1e-8,
-        )
-        tcp = robot.forward(result.x, offset)
-        if (
-            np.linalg.norm(tcp[:3, 3] - target[:3, 3]) <= position_tolerance
-            and np.linalg.norm(tcp[:3, 2] - target[:3, 2]) <= axis_tolerance
-            and not any(np.linalg.norm(result.x - q) < 1e-3 for q in accepted)
-        ):
-            accepted.append(result.x)
-    return accepted
 
 
 def anchored_strokes(stroke, available):
@@ -230,23 +111,19 @@ def drawing_alternatives(
     obstacles,
     *,
     deadline,
+    rotations,
     seeds=None,
     settings=None,
-    roll_angles=(0.0, np.pi),
     clearance_m=0.001,
-    pen_tilt_deg=70.0,
-    pen_tilt_candidates_deg=None,
     orientation_policy="fixed",
-    ik_backend=None,
-    rotations=None,
 ):
     """Yield actual IK paths, including every retained endpoint backtrace.
 
+    ``rotations`` are pen orientations as ``fixed_rotation_families`` yields
+    them; each keeps one TCP frame (tilt, azimuth and roll) for the whole path.
     Collision checks here cover self and static environment only. Every path is
-    rechecked against the state-dependent material and other arm when scheduled.
-    Default fixed orientation selects a 70/80-degree frame before the action and
-    keeps its tilt, azimuth and roll unchanged throughout the whole path.
-    Feasibility checks never split the source into separate pen actions.
+    rechecked against the growing material when scheduled. Feasibility checks
+    never split the source into separate pen actions.
     """
     settings = {**DEFAULT_SETTINGS, **(settings or {})}
     seeds = [arm.initial_positions] if seeds is None else seeds
@@ -255,59 +132,11 @@ def drawing_alternatives(
             oriented, settings["flatten_tolerance_m"], settings["maximum_chord_m"]
         )
         points = transform_points(points, world_from_build)
-        # A stroke may name its own tilts, best first (detail drawn after the
-        # frame knows which tilts clear it); otherwise the profile's apply.
-        tilts = (
-            stroke["pen_tilt_candidates_deg"]
-            if stroke.get("pen_tilt_candidates_deg")
-            else pen_tilt_candidates_deg
-            if pen_tilt_candidates_deg is not None
-            else tuple(dict.fromkeys([pen_tilt_deg, *DEFAULT_PEN_TILTS_DEG]))
-        )
-        if rotations is None and orientation_policy in {"fixed", "fixed_axis"}:
-            orientations = list(fixed_rotation_families(arm, world_from_build, tilts, roll_angles))
-        elif rotations is None and orientation_policy == "outward_radial":
-            orientations = list(
-                outward_rotation_families(arm, points, world_from_build, tilts, roll_angles)
-            )
-        elif rotations is None:
-            orientations = [
-                {
-                    "rotations": pen_rotation(arm, world_from_build, roll, pen_tilt_deg),
-                    "roll_rad": roll,
-                    "pen_tilt_deg": pen_tilt_deg,
-                    "orientation_policy": "fixed_axis",
-                }
-                for roll in roll_angles
-            ]
-        else:
-            orientations = []
-            for descriptor in rotations:
-                if isinstance(descriptor, dict):
-                    descriptor = dict(descriptor)
-                    if descriptor.get("orientation_policy") == "outward_radial":
-                        descriptor["rotations"] = radial_pen_rotations(
-                            arm,
-                            points,
-                            world_from_build,
-                            descriptor["pen_tilt_deg"],
-                            descriptor.get("roll_rad", 0.0),
-                        )
-                    orientations.append(descriptor)
-                else:
-                    orientations.append(
-                        {
-                            "rotations": np.asarray(descriptor),
-                            "roll_rad": 0.0,
-                            "pen_tilt_deg": pen_tilt_deg,
-                            "orientation_policy": "fixed_axis",
-                        }
-                    )
-        for roll_index, descriptor in enumerate(orientations):
+        for roll_index, descriptor in enumerate(rotations):
             if monotonic() >= deadline:
                 return
             rotation = np.asarray(descriptor["rotations"])
-            if orientation_policy in {"fixed", "fixed_axis"} and rotation.ndim != 2:
+            if orientation_policy not in {"fixed", "fixed_axis"} or rotation.ndim != 2:
                 raise ValueError("Fixed drawing orientation requires one constant TCP rotation")
             diagnostics = {
                 "ik_calls": 0,
@@ -316,54 +145,25 @@ def drawing_alternatives(
                 "tracking_rejections": 0,
                 "clearance_rejections": 0,
             }
-            varying = rotation.ndim == 3
             targets = np.repeat(np.eye(4)[None], len(points), axis=0)
             targets[:, :3, :3], targets[:, :3, 3] = rotation, points
-            gpu_solutions = (
-                ik_backend.solve(targets, reference=seeds[0]) if ik_backend is not None else None
-            )
-            gpu_by_target = (
-                {
-                    target.tobytes(): rows
-                    for target, rows in zip(targets, gpu_solutions, strict=True)
-                }
-                if gpu_solutions is not None
-                else None
-            )
 
-            def solve(
-                target,
-                previous,
-                gpu_cache=gpu_by_target,
-                diagnostics=diagnostics,
-                varying_orientation=varying,
-            ):
+            def solve(target, previous, diagnostics=diagnostics):
                 if monotonic() >= deadline:
                     return []
                 diagnostics["ik_calls"] += 1
-                if gpu_cache is not None:
-                    positions = gpu_cache[target.tobytes()]
-                elif settings.get("free_roll", False) and varying_orientation:
-                    positions = inverse_axis_candidates(
-                        arm,
+                positions = [
+                    s["positions"]
+                    for s in inverse_candidates(
+                        arm.robot,
                         target,
+                        arm.flange_to_tcp,
                         previous,
-                        settings["ik_position_tolerance_m"],
-                        settings["ik_orientation_tolerance_rad"],
+                        position_tolerance=settings["ik_position_tolerance_m"],
+                        orientation_tolerance=settings["ik_orientation_tolerance_rad"],
+                        maximum_evaluations=60,
                     )
-                else:
-                    positions = [
-                        s["positions"]
-                        for s in inverse_candidates(
-                            arm.robot,
-                            target,
-                            arm.flange_to_tcp,
-                            previous,
-                            position_tolerance=settings["ik_position_tolerance_m"],
-                            orientation_tolerance=settings["ik_orientation_tolerance_rad"],
-                            maximum_evaluations=60,
-                        )
-                    ]
+                ]
                 diagnostics["ik_solutions"] += len(positions)
                 diagnostics["last_target_ik_solutions"] = len(positions)
                 accepted = []
@@ -377,9 +177,8 @@ def drawing_alternatives(
                 diagnostics["last_target_collision_free_solutions"] = len(accepted)
                 return accepted
 
-            def edge_check(q0, q1, p0, p1, varying_orientation=varying, diagnostics=diagnostics):
-                edge_tracker = _preferred_position_edge if varying_orientation else tracking_edge
-                error = edge_tracker(
+            def edge_check(q0, q1, p0, p1, diagnostics=diagnostics):
+                error = tracking_edge(
                     arm.robot,
                     arm.flange_to_tcp,
                     q0,
@@ -387,7 +186,7 @@ def drawing_alternatives(
                     p0,
                     p1,
                     settings["interpolation_tolerance_m"],
-                    *([] if varying_orientation else [settings["interpolation_tolerance_rad"]]),
+                    settings["interpolation_tolerance_rad"],
                     settings["maximum_joint_step_rad"],
                 )
                 if error is None:
@@ -422,17 +221,6 @@ def drawing_alternatives(
                 settings["beam_width"],
                 deadline,
             )
-            if gpu_by_target is not None and result["status"] != "SAMPLED_DRAWING_PATH":
-                # Local seeded IK restores continuity when independent batched
-                # solutions choose different redundancy branches.
-                result = search_layers(
-                    targets,
-                    lambda target, previous: solve(target, previous, None),
-                    edge_check,
-                    seeds,
-                    settings["beam_width"],
-                    deadline,
-                )
             base = {
                 "arm": arm.identity,
                 "stroke_id": stroke["id"],
@@ -441,18 +229,12 @@ def drawing_alternatives(
                 "reverse": oriented["reverse"],
                 "start_visit": oriented["start_visit"],
                 "roll_rad": float(descriptor.get("roll_rad", 0.0)),
-                "pen_tilt_deg": float(descriptor.get("pen_tilt_deg", pen_tilt_deg)),
+                "pen_tilt_deg": float(descriptor["pen_tilt_deg"]),
                 "orientation_policy": descriptor.get("orientation_policy", "fixed_axis"),
-                "fixed_orientation": not varying,
-                "tcp_rotation": (rotation[0] if varying else rotation).tolist(),
-                **(
-                    {"tcp_rotations": rotation.tolist(), "free_tool_orientation": True}
-                    if varying
-                    else {"free_tool_orientation": False}
-                ),
+                "fixed_orientation": True,
+                "tcp_rotation": rotation.tolist(),
                 "tcp_targets_m": points.tolist(),
                 "sampling_diagnostics": diagnostics,
-                "free_roll": bool(settings.get("free_roll", False) and varying),
             }
             if result["status"] != "SAMPLED_DRAWING_PATH":
                 yield {**base, **result}
@@ -469,3 +251,124 @@ def drawing_alternatives(
                     "static_collision_status": "CERTIFIED_MODELED_PATH",
                     "tracking_status": "SAMPLED_ONLY",
                 }
+
+
+def search_layers(targets, solve, edge_check, initial_seeds, beam_width=3, deadline=np.inf):
+    """Retain alternate configurations, then backtrace the lowest-cost full path.
+
+    Each target is solved using every retained previous configuration. Endpoint
+    reachability alone is insufficient: edge_check must accept each connection.
+    """
+    if beam_width < 1:
+        raise ValueError("beam_width must be positive")
+    layers = []
+    seeds = [np.asarray(seed) for seed in initial_seeds]
+    for index, target in enumerate(targets):
+        if monotonic() >= deadline:
+            return {"status": "TIME_BUDGET", "failed_sample": index}
+        candidates = solve(target, seeds)
+        nodes = []
+        for q in candidates:
+            q = np.asarray(q)
+            if index == 0:
+                cost = min(float(np.linalg.norm(q - seed)) for seed in seeds)
+                nodes.append({"q": q, "cost": cost, "parent": None, "edge_error": 0.0})
+                continue
+            parents = []
+            for parent_index, previous in enumerate(layers[-1]):
+                error = edge_check(previous["q"], q, targets[index - 1], target)
+                if error is not None:
+                    cost = previous["cost"] + float(np.linalg.norm(q - previous["q"]))
+                    parents.append((cost, parent_index, error))
+            if parents:
+                cost, parent, error = min(parents)
+                nodes.append({"q": q, "cost": cost, "parent": parent, "edge_error": error})
+        nodes.sort(key=lambda node: node["cost"])
+        distinct = []
+        for node in nodes:
+            if not any(np.linalg.norm(node["q"] - other["q"]) < 1e-3 for other in distinct):
+                distinct.append(node)
+        if not distinct:
+            return {"status": "NO_CONNECTED_IK_PATH", "failed_sample": index}
+        layers.append(distinct[:beam_width])
+        seeds = [node["q"] for node in layers[-1]]
+    if not layers:
+        raise ValueError("At least one target pose is required")
+    def backtrace(index):
+        selected = []
+        for layer in reversed(layers):
+            node = layer[index]
+            selected.append(node)
+            index = node["parent"]
+        selected.reverse()
+        return {
+            "positions": [node["q"].tolist() for node in selected],
+            "maximum_sampled_interpolation_error_m": max(node["edge_error"] for node in selected),
+        }
+
+    alternatives = [backtrace(index) for index in range(len(layers[-1]))]
+    return {
+        "status": "SAMPLED_DRAWING_PATH",
+        **alternatives[0],
+        "path_alternatives": alternatives,
+        "endpoint_alternatives": [node["q"].tolist() for node in layers[-1]],
+        "retained_states": sum(len(layer) for layer in layers),
+    }
+
+
+def tracking_edge(robot, offset, q0, q1, p0, p1, tolerance_m, tolerance_rad, maximum_step):
+    """Sample joint interpolation; reject branch jumps and excessive TCP drift."""
+    if np.max(np.abs(q1 - q0)) > maximum_step:
+        return None
+    worst = 0.0
+    for alpha in (0.25, 0.5, 0.75):
+        target = p0.copy()
+        target[:3, 3] = (1 - alpha) * p0[:3, 3] + alpha * p1[:3, 3]
+        actual = robot.forward((1 - alpha) * q0 + alpha * q1, offset)
+        error = pose_error(actual, target)
+        distance = float(np.linalg.norm(error[:3]))
+        if distance > tolerance_m or np.linalg.norm(error[3:]) > tolerance_rad:
+            return None
+        worst = max(worst, distance)
+    return worst
+
+
+def optimization_distance(first, second):
+    """Use contact depth where FCL's unsigned distance is a flat -1 sentinel."""
+    distance = fcl.distance(first, second, fcl.DistanceRequest(), fcl.DistanceResult())
+    if distance >= 0:
+        return distance
+    contact = fcl.CollisionResult()
+    fcl.collide(first, second, fcl.CollisionRequest(enable_contact=True), contact)
+    return -max((c.penetration_depth for c in contact.contacts), default=1e-9)
+
+
+def pen_clear(planner, arm, point, rotation, scene, clearance):
+    """Whether the pen bodies at this tip pose clear the obstacles and the wire."""
+    if monotonic() >= planner.deadline:
+        return False
+    target = np.eye(4)
+    target[:3, :3], target[:3, 3] = rotation, point
+    flange = target @ np.linalg.inv(arm.flange_to_tcp)
+    for body in arm.tool.bodies:
+        transform = flange @ body.origin
+        obj = placed(body.geometry, transform)
+        if any(
+            optimization_distance(obj, other) < clearance for other in planner.obstacles.values()
+        ):
+            return False
+        # A body may keep its own clearance from wire (see pen_wire_failure).
+        own = planner.tool_margins.get(body.name)
+        wire_clearance = clearance if own is None else clearance - planner.margin + own
+        if scene.possibly_near_body(obj, wire_clearance):
+            try:
+                nearest = scene.nearest(
+                    obj,
+                    deadline=planner.deadline,
+                    bounding_sphere=(transform[:3, 3], body.radius),
+                )
+            except TimeoutError:
+                return False  # A sample timeout is not an infeasibility certificate.
+            if nearest and nearest["distance_m"] < wire_clearance:
+                return False
+    return True

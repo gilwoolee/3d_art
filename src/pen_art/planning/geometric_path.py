@@ -10,22 +10,20 @@ over to it. Neither function establishes speed, acceleration or cooling.
 import numpy as np
 from numpy.polynomial import Polynomial
 
-from ..timing import make_path
 from .clock_path import ClockEdge, ClockPath, coalesce_travel, split_drawing_operations
 
 # Largest joint difference, in radians, between a timed edge and its geometry.
 SWEEP_TOLERANCE_RAD = 1e-9
 
 
-def geometric_path(operations, arm, *, drawing_clock="quintic_stop_at_geometric_knots"):
+def geometric_path(operations, arm):
     """Return the untimed sweep of ``operations``; edge ``k`` spans ``[k, k+1]``.
 
     Expansion, travel coalescing and the dropping of zero-length holds mirror
-    ``timed_path``. A continuous drawing contributes one edge per cubic spline
-    piece instead of one per retiming grid interval.
+    ``timed_path``. A drawing (its ``path`` is the checked cubic spline)
+    contributes one edge per spline piece instead of one per retiming grid
+    interval, as the ``cubic_toppra`` clock times it.
     """
-    if drawing_clock not in {"quintic_stop_at_geometric_knots", "cubic_toppra"}:
-        raise ValueError(f"Unsupported drawing clock: {drawing_clock}")
     expanded = []
     for operation in operations:
         expanded.extend(
@@ -53,12 +51,8 @@ def geometric_path(operations, arm, *, drawing_clock="quintic_stop_at_geometric_
 
     for op in expanded:
         q = np.asarray(op["positions"], float)
-        if op["kind"] == "DRAW" and drawing_clock == "cubic_toppra":
-            path = op.get("path")
-            if path is None:
-                points = [arm.robot.forward(joints, arm.flange_to_tcp)[:3, 3] for joints in q]
-                path = make_path(q, points, interpolation="pchip", subdivisions=2)
-            knots, cubic = path.cspl.x, path.cspl.c
+        if op["kind"] == "DRAW":
+            knots, cubic = op["path"].cspl.x, op["path"].cspl.c
             for piece, width in enumerate(np.diff(knots)):
                 # Ascending powers of the normalized piece parameter.
                 coefficients = [

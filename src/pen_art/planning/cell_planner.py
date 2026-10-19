@@ -1,10 +1,9 @@
-"""Couple shared-clock arm motions, grounded strokes and growing material.
+"""Plan one arm's strokes against grounded, growing wire, and check them.
 
 All output is simulation-only. Missing pen geometry/flow calibration and material
 strength remain explicit; geometric acceptance is not fabrication acceptance.
 """
 
-import hashlib
 import json
 from collections import Counter
 from copy import copy
@@ -17,24 +16,10 @@ import numpy as np
 from ..cell import load_cell
 from ..cell_config import load_frame_config
 from ..curves import transform_points
-from ..io import read_json, sha256, write_json
+from ..io import read_json, sha256
 from ..kinematics import inverse_candidates
 from ..strokes import orient_stroke
-from ..timing import (
-    TimingParameterizationError,
-    make_path,
-    refine_samples,
-    tcp_acceleration_bound,
-)
-from .axis_repair import (
-    AXIS_REPAIR_REVISION,
-    clear_intermediate_poses,
-    outward_pen_value,
-    refine_axis_path,
-    repair_collision_witness,
-    repair_drawing_axes,
-)
-from .cell_motion import radial_pen_rotations
+from ..timing import make_path, refine_samples
 from .clock_path import timed_path
 from .collision import QUERY_STATS, Body, RobotCollisionModel, placed
 from .geometric_path import geometric_path
@@ -52,14 +37,12 @@ from .schedule import (
 )
 from .smooth_audit import CubicPiece, bounded_segments, check_tracking
 from .tool import sampled_pen_tilt
-from .tracking import tracking_bounds
 from .transit import contact_validator, find_departure, local_contact_surfaces
 
 
-def tracked_drawing_path(arm, drawing, continuous, deadline, *, require_fixed_orientation=False):
+def tracked_drawing_path(arm, drawing, deadline, *, require_fixed_orientation=False):
     """Refine only the interpolant when a fixed drawing path misses tracking bounds."""
     original_q = np.asarray(drawing["positions"])
-    free_axis = drawing.get("free_tool_orientation", False)
     require_fixed_orientation = (
         require_fixed_orientation
         or drawing.get("fixed_orientation", False)
@@ -67,47 +50,38 @@ def tracked_drawing_path(arm, drawing, continuous, deadline, *, require_fixed_or
     )
     if require_fixed_orientation:
         rotations = np.asarray(drawing.get("tcp_rotations", drawing["tcp_rotation"]))
-        if free_axis or not np.allclose(rotations, drawing["tcp_rotation"], atol=1e-10, rtol=0):
+        if not np.allclose(rotations, drawing["tcp_rotation"], atol=1e-10, rtol=0):
             return {
                 "status": "FIXED_ORIENTATION_REQUIRED",
                 "reason": "Variable-axis drawing or rotation targets",
             }
-    if free_axis and not continuous:
-        raise ValueError("Free-axis drawings require continuous position tracking")
     original_targets = np.repeat(np.eye(4)[None], len(original_q), axis=0)
     original_targets[:, :3, :3] = drawing["tcp_rotation"]
     original_targets[:, :3, 3] = drawing["tcp_targets_m"]
-    if continuous:
-        keep = np.r_[True, np.linalg.norm(np.diff(original_q, axis=0), axis=1) > 1e-10]
-        original_q, original_targets = original_q[keep], original_targets[keep]
-        points = np.array([arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] for q in original_q])
-    for subdivisions in (2, 4, 8) if continuous else (1,):
-        spline, pieces = None, []
-        q, targets = original_q, original_targets
-        if continuous:
-            spline = make_path(q, points, interpolation="pchip", subdivisions=subdivisions)
-            q, targets = refine_samples(q, subdivisions), refine_samples(targets, subdivisions)
-            pieces = [
-                CubicPiece(spline.cspl.c[:, i, :], width)
-                for i, width in enumerate(np.diff(spline.cspl.x))
-            ]
+    keep = np.r_[True, np.linalg.norm(np.diff(original_q, axis=0), axis=1) > 1e-10]
+    original_q, original_targets = original_q[keep], original_targets[keep]
+    points = np.array([arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] for q in original_q])
+    for subdivisions in (2, 4, 8):
+        spline = make_path(original_q, points, interpolation="pchip", subdivisions=subdivisions)
+        q = refine_samples(original_q, subdivisions)
+        targets = refine_samples(original_targets, subdivisions)
+        pieces = [
+            CubicPiece(spline.cspl.c[:, i, :], width)
+            for i, width in enumerate(np.diff(spline.cspl.x))
+        ]
         worst, worst_angle, failed = 0.0, 0.0, None
-        for i, (a, b) in enumerate(zip(q[:-1], q[1:], strict=True)):
+        for i in range(len(q) - 1):
             if monotonic() >= deadline:
                 return {"status": "TIME_BUDGET"}
-            check = (
-                check_tracking(
-                    pieces[i],
-                    arm.robot,
-                    arm.flange_to_tcp,
-                    targets[i, :3, 3],
-                    targets[i + 1, :3, 3],
-                    None if free_axis else targets[i, :3, :3],
-                    0.0003,
-                    0.003,
-                )
-                if continuous
-                else tracking_bounds(arm.robot, arm.flange_to_tcp, a, b, targets[i], targets[i + 1])
+            check = check_tracking(
+                pieces[i],
+                arm.robot,
+                arm.flange_to_tcp,
+                targets[i, :3, 3],
+                targets[i + 1, :3, 3],
+                targets[i, :3, :3],
+                0.0003,
+                0.003,
             )
             worst = max(worst, check["position_error_bound_m"])
             worst_angle = max(worst_angle, check["orientation_error_bound_rad"])
@@ -124,12 +98,8 @@ def tracked_drawing_path(arm, drawing, continuous, deadline, *, require_fixed_or
                 "subdivisions": subdivisions,
                 "position_error_bound_m": worst,
                 "orientation_error_bound_rad": worst_angle,
-                "orientation_constraint": "free" if free_axis else "fixed",
-                **(
-                    {"fixed_tcp_rotation": np.asarray(drawing["tcp_rotation"]).tolist()}
-                    if not free_axis
-                    else {}
-                ),
+                "orientation_constraint": "fixed",
+                "fixed_tcp_rotation": np.asarray(drawing["tcp_rotation"]).tolist(),
             }
     return {**failed, "status": "BOUND_EXCEEDS_TOLERANCE"}
 
@@ -144,7 +114,7 @@ def member_drawing_path(arm, drawing, members, schedule, deadline):
     Returns None when the drawing does not fit this construction.
     """
     q, targets = np.asarray(drawing["positions"], float), np.asarray(drawing["tcp_targets_m"])
-    if drawing.get("free_tool_orientation", False) or len(q) != len(targets):
+    if len(q) != len(targets):
         return None
     moving = np.r_[True, np.linalg.norm(np.diff(q, axis=0), axis=1) > 1e-10]
     q, targets = q[moving], targets[moving]
@@ -257,93 +227,6 @@ def fixed_clock_orientation_failure(arm, edge, reference, start=None, end=None):
     return None
 
 
-def check_growing_drawing_prefix(
-    arm,
-    tracked,
-    scene,
-    obstacles,
-    radius,
-    margin,
-    maximum_depth,
-    deadline,
-    *,
-    name_prefix="prospective",
-    continuous=True,
-    progress=None,
-):
-    """Check a drawing against its own deposited prefix and supplied initial material.
-
-    Each current interval is conservatively enclosed before checking, matching
-    runtime's existing semantics. The physical tip is omitted by arm.collision;
-    the actual nozzle, housing, robot, and their self collisions remain checked.
-    This geometric proof does not cover approach, departure, or process timing.
-    """
-    after = scene.copy()
-    q = tracked["positions"]
-    for i, (a, b) in enumerate(zip(q[:-1], q[1:], strict=True)):
-        if progress is not None and (i % 100 == 0 or i == len(q) - 2):
-            progress(i, len(q) - 1)
-        if monotonic() >= deadline:
-            return None, {"status": "TIME_BUDGET", "segment_index": i}
-        name = f"{name_prefix}/{i}"
-        if continuous:
-            piece = tracked["pieces"][i]
-            add_piece_material(after, arm, piece, radius, name)
-            check = arm.collision.check_bounded_path(
-                piece.position,
-                piece.deviation,
-                obstacles,
-                margin,
-                maximum_depth,
-                after,
-                deadline,
-            )
-        else:
-            ends = [arm.robot.forward(p, arm.flange_to_tcp)[:3, 3] for p in (a, b)]
-            inflation = (
-                tcp_acceleration_bound(arm.robot, arm.flange_to_tcp, abs(b - a), np.zeros(len(a)))
-                / 8
-            )
-            after.add(*ends, radius + inflation + 1e-9, name)
-            check = arm.collision.check_edge(
-                a,
-                b,
-                obstacles,
-                margin,
-                maximum_depth,
-                after,
-                deadline=deadline,
-            )
-        if check["status"] != "CERTIFIED_MODELED_EDGE":
-            return None, {**check, "segment_index": i}
-    return after, None
-
-
-def enclose_drawing_prefix(arm, tracked, scene, radius, deadline, *, name_prefix, continuous):
-    """Construct material for withdrawal planning, granting no collision proof.
-
-    Indexed forward planning may defer its early geometric collision pruning
-    because it checks the entire actual timed clock before admitting a motion.
-    Withdrawal still sees the complete conservative drawing enclosures.
-    """
-    after = scene.copy()
-    positions = tracked["positions"]
-    for index, (a, b) in enumerate(zip(positions[:-1], positions[1:], strict=True)):
-        if monotonic() >= deadline:
-            return None, {"status": "TIME_BUDGET", "segment_index": index}
-        name = f"{name_prefix}/{index}"
-        if continuous:
-            add_piece_material(after, arm, tracked["pieces"][index], radius, name)
-        else:
-            ends = [arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] for q in (a, b)]
-            inflation = (
-                tcp_acceleration_bound(arm.robot, arm.flange_to_tcp, abs(b - a), np.zeros(len(a)))
-                / 8
-            )
-            after.add(*ends, radius + inflation + 1e-9, name)
-    return after, None
-
-
 class CellPlanner:
     def __init__(
         self, run, profile, settings, deadline, *, timing_override=None, verification_raw=False,
@@ -359,8 +242,7 @@ class CellPlanner:
         for name, digest in self.cell["inputs"].items():
             if sha256(self.run / name) != digest:
                 raise ValueError(f"Stale cell input: {name}")
-        self.candidates = read_json(self.run / "cell_drawing_variants.json")
-        for name, digest in self.candidates["inputs"].items():
+        for name, digest in read_json(self.run / "cell_drawing_variants.json")["inputs"].items():
             if sha256(self.run / name) != digest:
                 raise ValueError(f"Stale drawing candidate input: {name}")
         construction = read_json(self.run / "construction_plan.json")
@@ -386,13 +268,8 @@ class CellPlanner:
         self.tip_models = {}
         self.pen_models, self.pen_tip_models = {}, {}
         self._pen_spheres = {}
-        self.drawings = {}
-        self.cache = {}
         self.attempts = []
         self.checked_intervals = 0
-        self.enabled_arms = settings.get("enabled_arms", list(self.arms))
-        if not self.enabled_arms or not set(self.enabled_arms) <= self.arms.keys():
-            raise ValueError("Enabled arms must name at least one arm in the shared cell")
         for identity, arm in self.arms.items():
             # Verify live inputs used by load_cell against the stored snapshot.
             for suffix, path in (("robot.urdf", arm.urdf), ("robot.json", arm.manifest_path)):
@@ -416,8 +293,8 @@ class CellPlanner:
         # A tool body may keep its own clearance from wire (the nose right
         # behind a tip that runs along existing wire): every collision model.
         own = self.profile["environment"].get("tool_clearance_m", {})
+        self.tool_margins = {f"tool/{name}": value for name, value in own.items()}
         if own:
-            margins = {f"tool/{name}": value for name, value in own.items()}
             for identity, arm in self.arms.items():
                 for model in (
                     arm.collision,
@@ -425,9 +302,7 @@ class CellPlanner:
                     self.pen_models[identity],
                     self.pen_tip_models[identity],
                 ):
-                    model.material_margins = margins
-        for row in self.candidates["variants"]:
-            self.drawings.setdefault((row["arm"], row["stroke_id"]), []).append(row)
+                    model.material_margins = self.tool_margins
         self.initial_pose_repairs = self.choose_initial_poses(source)
         from .path_certificates import PathCertificateStore
 
@@ -440,16 +315,13 @@ class CellPlanner:
         )
         self.verification_stats, self.verification_seconds = Counter(), Counter()
         self._path_model_contexts, self._obstacle_context_refs = {}, {}
-        # Check continuous drawings as untimed paths; ``time_local_drawing``
-        # times them once the whole object has a collision-free chain.
-        self.geometry_first = False
 
     @property
     def collision_scope(self):
         return (
             "full_robot"
-            if getattr(self, "verification_raw", False)
-            else getattr(self, "settings", {}).get("collision_scope", "full_robot")
+            if self.verification_raw
+            else self.settings.get("collision_scope", "full_robot")
         )
 
     def collision_arm(self, identity):
@@ -467,9 +339,6 @@ class CellPlanner:
             if self.collision_scope == "pen_candidate"
             else self.tip_models[identity]
         )
-
-    def collision_obstacles(self):
-        return self.obstacles
 
     def path_certificate_context(self, identity, *, kinematic=False, pen=False):
         """Bind invariant checks without including the changing material scene.
@@ -597,15 +466,14 @@ class CellPlanner:
             if source_motion.exists()
             else None
         )
-        choices = {}
         for identity, arm in self.arms.items():
             seeds = [arm.initial_positions]
             if parking is not None:
                 seeds.insert(0, np.asarray(parking))
-            choices[identity] = []
             direction = arm.robot.world_from_base[:2, 3] - center[:2]
             direction /= np.linalg.norm(direction)
-            # Keep an idle wrist away from the shared drawing volume. Near-tip
+            # The first clear pose above the plate, nearest distance first.
+            clear = None
             for distance in (0.30, 0.40, 0.16, 0.10):
                 target = np.eye(4)
                 target[:3, :3] = arm.robot.world_from_base[:3, :3] @ np.diag([-1.0, 1.0, -1.0])
@@ -613,20 +481,17 @@ class CellPlanner:
                 for solution in inverse_candidates(arm.robot, target, arm.flange_to_tcp, seeds):
                     q = np.asarray(solution["positions"])
                     if not self.tip_models[identity].check(q, self.obstacles, self.margin):
-                        choices[identity].append(q)
-            if not choices[identity]:
+                        clear = q
+                        break
+                if clear is not None:
+                    break
+            if clear is None:
                 raise ValueError(f"No clear staged start found for {identity}")
-        from itertools import product
-
-        identities = list(self.arms)
-        for candidate in product(*(choices[identity] for identity in identities)):
-            for identity, q in zip(identities, candidate, strict=True):
-                self.arms[identity].initial_positions = q
-            return {
-                "source_contacts": contacts,
-                "precondition": "Start the job with both robots at these clear staged poses",
-            }
-        raise ValueError("No collision-free paired start poses found")
+            arm.initial_positions = clear
+        return {
+            "source_contacts": contacts,
+            "precondition": "Start the job with the arm at this clear staged pose",
+        }
 
     def failure(self, task, arm, phase, status, **extra):
         print(f"Rejected {arm}/{task}: {phase} / {status}", flush=True)
@@ -634,9 +499,6 @@ class CellPlanner:
             {"stroke_id": task, "arm": arm, "phase": phase, "status": status, **extra}
         )
         del self.attempts[:-100]
-
-    def material_key(self, scene):
-        return hashlib.sha256(json.dumps(scene.segments, sort_keys=True).encode()).hexdigest()
 
     def edge_check(self, identity, scene, first, second):
         return (
@@ -670,21 +532,6 @@ class CellPlanner:
                 "proposal_backend": "home_waypoint",
                 "validation_backend": "mesh_fcl",
             }
-        backend = getattr(self, "ik_backend", None)
-        if backend is not None:
-            for positions in backend.transit_candidates(first, second):
-                if monotonic() >= self.deadline:
-                    break
-                if all(
-                    self.edge_check(identity, scene, a, b)
-                    for a, b in zip(positions[:-1], positions[1:], strict=True)
-                ):
-                    return {
-                        "status": "CONNECTED",
-                        "positions": positions,
-                        "proposal_backend": "curobo",
-                        "validation_backend": "mesh_fcl",
-                    }
         return connect(
             first,
             second,
@@ -750,8 +597,7 @@ class CellPlanner:
         spheres, wires = self._pen_spheres[identity], wire_arrays(scene)
         # A body may keep its own clearance from wire (the nose right behind a
         # tip that runs along existing wire); every other body keeps the margin.
-        own = self.profile["environment"].get("tool_clearance_m", {})
-        margins = {None: self.margin, **{f"tool/{name}": value for name, value in own.items()}}
+        margins = {None: self.margin, **self.tool_margins}
         self.verification_stats["pen_sphere_poses"] += len(fractions)
         for u, count in zip(fractions, marks, strict=True):
             flange = arm.robot.forward(position(u), np.eye(4))
@@ -789,302 +635,30 @@ class CellPlanner:
             }
         return None
 
-    def add_draw(self, scene, identity, q0, q1, radius, name):
-        arm = self.arms[identity]
-        a, b = [arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] for q in (q0, q1)]
-        inflation = (
-            tcp_acceleration_bound(arm.robot, arm.flange_to_tcp, abs(q1 - q0), np.zeros(len(q0)))
-            / 8
-        )
-        scene.add(a, b, radius + inflation + 1e-9, name)
-
-    def add_piece(self, scene, identity, piece, radius, name):
-        add_piece_material(scene, self.arms[identity], piece, radius, name)
-
     def add_clock_edge(self, scene, identity, edge, name, start=None, end=None):
         start = edge.start_s if start is None else start
         end = edge.end_s if end is None else end
-        if edge.coefficients is None:
-            self.add_draw(
-                scene, identity, edge.position(start), edge.position(end), edge.radius_m, name
-            )
-        else:
-            self.add_piece(scene, identity, edge.piece(start, end), edge.radius_m, name)
-
-
-    def prepare_idle(self, state, identity):
-        """Allow a finished arm to vacate the shared volume while its peer draws."""
-        arm = self.arms[identity]
-        q = np.asarray(dict(state.configurations)[identity])
-        if np.allclose(q, arm.initial_positions, atol=1e-8, rtol=0):
-            return []
-        key = (identity, "park", tuple(q), self.material_key(state.payload))
-        if key not in self.cache:
-            result = self.travel(identity, state.payload, q, arm.initial_positions)
-            proposal = None
-            if result["status"] == "CONNECTED":
-                path = timed_path(
-                    [{"kind": "PARK", "positions": result["positions"]}],
-                    arm,
-                    arm.robot.velocity * self.timing["velocity_fraction"],
-                    np.asarray(self.timing["joint_acceleration_rad_s2"]),
-                    self.process["nominal_speed_m_s"],
-                    self.timing["travel_speed_m_s"],
-                )
-                proposal = MotionProposal(
-                    f"park-{identity}",
-                    identity,
-                    "park",
-                    path.duration_s,
-                    "parking",
-                    tuple(arm.initial_positions),
-                    path,
-                    auxiliary=True,
-                )
-            self.cache[key] = proposal
-        return [] if self.cache[key] is None else [self.cache[key]]
-
-    def prepare_drawing(self, state, identity, drawing, q_start, *, defer_drawing_check=False):
-        if defer_drawing_check:
-            if self.profile.get("drawing_orientation_policy") not in {"fixed", "fixed_axis"}:
-                raise ValueError(
-                    "Deferred drawing checks require the fixed-orientation forward gate"
-                )
-            return self._prepare_drawing(
-                state, identity, drawing, q_start, defer_drawing_check=True
-            )
-        arm = self.arms[identity]
-        attempt = self._prepare_drawing(state, identity, drawing, q_start)
-        if self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}:
-            return attempt
-        if attempt is not None or not self.timing.get("repair_drawing_axis", len(self.arms) == 1):
-            return attempt
-        if monotonic() >= self.deadline:
-            return None
-        witness = self.attempts[-1] if self.attempts else {}
-        if witness.get("phase") not in {"APPROACH", "DRAW", "WITHDRAW"}:
-            return None
-        free_axis = drawing.get("free_tool_orientation", False)
-        if free_axis and (witness.get("phase") != "DRAW" or "positions" not in witness):
-            return None
-        binding = {
-            "axis_solver_revision": AXIS_REPAIR_REVISION,
-            "cell_sha256": sha256(self.run / "cell_manifest.json"),
-            "construction_sha256": sha256(self.run / "construction_plan.json"),
-            "source_drawing_sha256": hashlib.sha256(
-                json.dumps(drawing, sort_keys=True).encode()
-            ).hexdigest(),
-            "material_sha256": self.material_key(state.payload),
-        }
-        repair_path = self.run / "axis_repairs" / f"{identity}_{drawing['stroke_id']}.json"
-        prior = read_json(repair_path) if repair_path.exists() else {}
-        restored_repair = prior.get("status") == "SAMPLED_FREE_AXIS_PROPOSAL" and all(
-            prior.get(key) == value for key, value in binding.items()
-        )
-        if restored_repair:
-            repair = prior
-            print(
-                f"Restored pen-orientation proposal for {identity}/{drawing['stroke_id']}",
-                flush=True,
-            )
-        elif free_axis:
-            # The sampled orientation path already passed tracking. Repair its
-            # witnessed interior failure instead of resampling the whole path.
-            repair = {
-                "status": "SAMPLED_FREE_AXIS_PROPOSAL",
-                "positions": drawing["positions"],
-                "tcp_targets_m": drawing["tcp_targets_m"],
-            }
-        else:
-            print(f"Repairing pen orientation for {identity}/{drawing['stroke_id']}", flush=True)
-            repair = repair_drawing_axes(
-                self,
-                drawing,
-                state.payload,
-                progress=lambda done, total, _: print(
-                    f"Axis repair {identity}/{drawing['stroke_id']}: {done}/{total}", flush=True
-                ),
-            )
-        report = {
-            **repair,
-            **binding,
-            "stroke_id": drawing["stroke_id"],
-            "arm": identity,
-            "trigger": witness,
-        }
-        report.pop("continuous_motion_status", None)
-        write_json(repair_path, report)
-        if repair["status"] != "SAMPLED_FREE_AXIS_PROPOSAL":
-            self.failure(
-                drawing["stroke_id"],
-                identity,
-                "AXIS_REPAIR",
-                repair["status"],
-                sample=repair.get("sample"),
-            )
-            return None
-        repaired = {
-            **drawing,
-            "positions": repair["positions"],
-            "tcp_targets_m": repair["tcp_targets_m"],
-            "free_tool_orientation": True,
-        }
-        if free_axis:
-            if restored_repair:
-                # A retained correction is a proposal, even if a previous
-                # preparation accepted it. Recheck it before continuing.
-                attempt = self._prepare_drawing(state, identity, repaired, q_start)
-            return self._repair_drawing_collisions(
-                state, identity, repaired, q_start, attempt, report, repair_path
-            )
-        # Projection can stop at a joint limit before reaching its tip target.
-        # Repair those samples explicitly; subdividing a wrong endpoint cannot
-        # make it follow the intended stroke.
-        if any(
-            np.linalg.norm(arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] - np.asarray(point))
-            > 0.000001
-            for q, point in zip(repaired["positions"], repaired["tcp_targets_m"], strict=True)
-        ):
-            corrected = clear_intermediate_poses(
-                self, drawing, repaired["positions"], repaired["tcp_targets_m"], state.payload
-            )
-            if corrected["status"] != "SAMPLED_FREE_AXIS_PROPOSAL":
-                report["projection_failure"] = corrected
-                write_json(repair_path, report)
-                return None
-            repaired.update(
-                positions=corrected["positions"], tcp_targets_m=corrected["tcp_targets_m"]
-            )
-            report.update(
-                positions=corrected["positions"], tcp_targets_m=corrected["tcp_targets_m"]
-            )
-            write_json(repair_path, report)
-        for refinement in range(5):
-            attempt = self._prepare_drawing(state, identity, repaired, q_start)
-            if attempt or self.attempts[-1]["phase"] != "TRACKING" or refinement == 4:
-                break
-            # Pose repair can move a sample enough to invalidate the original
-            # interpolation density. Refine the same Cartesian polyline and
-            # recheck its growing-material context before retrying the spline.
-            positions, targets = refine_axis_path(
-                self.arms[identity],
-                repaired["positions"],
-                repaired["tcp_targets_m"],
-                joint_step=0.025 / 2**refinement,
-            )
-            print(
-                f"Refining repaired path {identity}/{drawing['stroke_id']}: "
-                f"pass {refinement + 1}, {len(positions)} poses",
-                flush=True,
-            )
-            finer = clear_intermediate_poses(self, drawing, positions, targets, state.payload)
-            if finer["status"] != "SAMPLED_FREE_AXIS_PROPOSAL":
-                report["refinement_failure"] = finer
-                break
-            repaired.update(positions=finer["positions"], tcp_targets_m=finer["tcp_targets_m"])
-            report.update(
-                positions=finer["positions"],
-                tcp_targets_m=finer["tcp_targets_m"],
-                interpolation_refinements=report.get("interpolation_refinements", 0) + 1,
-            )
-            write_json(repair_path, report)
-        return self._repair_drawing_collisions(
-            state, identity, repaired, q_start, attempt, report, repair_path
-        )
-
-    def _repair_drawing_collisions(
-        self, state, identity, repaired, q_start, attempt, report, repair_path
-    ):
-        # Sampled pose clearance does not establish clearance between poses.
-        # Refine at the continuous checker's actual failing interval before
-        # abandoning this robot mode. The source polyline is unchanged and
-        # every proposal still passes the ordinary full-motion validator.
-        for correction in range(4):
-            if attempt is not None or monotonic() >= self.deadline:
-                break
-            failure = self.attempts[-1]
-            if failure.get("phase") != "DRAW" or "positions" not in failure:
-                break
-            corrected = repair_collision_witness(self, repaired, state.payload, failure)
-            report.setdefault("collision_refinements", []).append(
-                {
-                    "correction": len(report.get("collision_refinements", [])) + 1,
-                    "status": corrected["status"],
-                    "trigger": failure,
-                    "collocation": corrected.get("collocation"),
-                }
-            )
-            if corrected["status"] != "SAMPLED_FREE_AXIS_PROPOSAL":
-                break
-            repaired.update(
-                positions=corrected["positions"], tcp_targets_m=corrected["tcp_targets_m"]
-            )
-            report.update(
-                positions=corrected["positions"], tcp_targets_m=corrected["tcp_targets_m"]
-            )
-            write_json(repair_path, report)
-            print(
-                f"Rechecking {identity}/{repaired['stroke_id']}: "
-                f"collision correction {correction + 1}/4",
-                flush=True,
-            )
-            attempt = self._prepare_drawing(state, identity, repaired, q_start)
-        report["continuous_motion_status"] = "ACCEPTED" if attempt else "REJECTED"
-        write_json(repair_path, report)
-        # Backtracking can overwrite this section's working repair file. Keep
-        # the exact accepted report immutable for any retained motion witness.
-        if attempt:
-            digest = sha256(repair_path)
-            accepted = repair_path.parent / "accepted" / f"{repair_path.stem}-{digest}.json"
-            write_json(accepted, report)
-            attempt.payload.metadata["axis_repair_artifact"] = str(accepted.relative_to(self.run))
-            attempt.payload.metadata["axis_repair_sha256"] = digest
-        return attempt
-
-    def outward_failure(self, arm, task, positions):
-        """Apply the outside-in side-wall policy to proposed or replayed poses."""
-        if self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}:
-            return None
-        action = self.actions.get(task, {})
-        if not action.get("parent_curve", "").startswith("zigzag-"):
-            return None
-        for index, q in enumerate(positions):
-            point = arm.robot.forward(q, arm.flange_to_tcp)[:3, 3]
-            value = outward_pen_value(self, arm, q, point)
-            if value < -1e-8:
-                return {
-                    "status": "OUTWARD_POLICY_REJECTED",
-                    "sample": index,
-                    "outward_value": value,
-                }
-        return None
-
-    def _prepare_drawing(self, state, identity, drawing, q_start, *, defer_drawing_check=False):
-        local = self.prepare_local_drawing(identity, drawing)
-        if local is None:
-            return None
-        return self.complete_local_drawing(
-            state, identity, drawing, local, q_start, defer_drawing_check=defer_drawing_check
-        )
+        add_piece_material(scene, self.arms[identity], edge.piece(start, end), edge.radius_m, name)
 
     def prepare_local_drawing(self, identity, drawing):
-        """Fix one drawing's joint interpolant and DRAW clock without any scene.
+        """Fix one drawing's joint interpolant and its untimed DRAW path, without any scene.
 
-        Tracking, source corner holds and retiming depend only on the drawing
-        and the cell. Their result determines the deposited enclosures, so a
-        later action can be checked against them before this action's own
-        approach, withdrawal and collision verdict exist.
+        Tracking and source corner holds depend only on the drawing and the
+        cell. Their result determines the deposited enclosures, so a later
+        action can be checked against them before this action's own approach,
+        withdrawal and collision verdict exist.
         """
         arm = self.collision_arm(identity)
         task = drawing["stroke_id"]
-        continuous = self.timing.get("drawing_clock") == "cubic_toppra"
+        if self.timing.get("drawing_clock") != "cubic_toppra":
+            raise ValueError("Geometry-first planning needs the cubic_toppra drawing clock")
         fixed_required = self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}
         transform = np.asarray(self.profile["world_from_build"])
         vertex_cooling = float(self.process.get("vertex_cooling_s", 1.0))
         if not np.isfinite(vertex_cooling) or vertex_cooling < 0:
             raise ValueError("Vertex cooling must be finite and nonnegative")
         tracked = None
-        if continuous and fixed_required and self.settings.get("path_pieces") == "members":
+        if fixed_required and self.settings.get("path_pieces") == "members":
             oriented = orient_stroke(
                 self.actions[task],
                 reverse=drawing.get("reverse", False),
@@ -1104,7 +678,7 @@ class CellPlanner:
             )
         if tracked is None:
             tracked = tracked_drawing_path(
-                arm, drawing, continuous, self.deadline, require_fixed_orientation=fixed_required
+                arm, drawing, self.deadline, require_fixed_orientation=fixed_required
             )
         if tracked["status"] != "BOUNDED":
             self.failure(
@@ -1116,10 +690,6 @@ class CellPlanner:
             )
             return None
         q, spline = tracked["positions"], tracked["spline"]
-        orientation_failure = self.outward_failure(arm, task, q)
-        if orientation_failure is not None:
-            self.failure(task, identity, "ORIENTATION", **orientation_failure)
-            return None
         radius = self.actions[task]["diameter_m"] / 2
         # Numerical samples are not physical stop locations. Only actual source
         # direction changes split the clock, preserving a single action.
@@ -1139,78 +709,50 @@ class CellPlanner:
             "positions": q,
             "material_radius_m": radius,
             "stroke_id": task,
+            "break_indices": corners,
+            "vertex_holds": holds,
+            "start_lag_s": self.process["start_lag_s"],
+            "stop_lag_s": self.process["stop_lag_s"],
+            "path": spline,
         }
-        draw_operation.update(
-            break_indices=corners,
-            vertex_holds=holds,
-            start_lag_s=self.process["start_lag_s"],
-            stop_lag_s=self.process["stop_lag_s"],
-        )
-        if continuous:
-            draw_operation["path"] = spline
-        timed = []
-        try:
-            if continuous and self.geometry_first:
-                timed = None
-                draw_clock = geometric_path(
-                    [draw_operation], arm, drawing_clock=self.timing["drawing_clock"]
-                )
-            else:
-                draw_clock = self._timed([draw_operation], arm, drawing_capture=timed)
-        except TimingParameterizationError as error:
-            self.failure(
-                task,
-                identity,
-                "TIMING",
-                "TIMING_REJECTED",
-                reason=str(error),
-                drawing_clock=self.timing.get("drawing_clock"),
-                acceleration_constraint=self.timing.get("acceleration_constraint"),
-                path_samples=len(q),
-                minimum_joint_step_rad=float(np.min(np.linalg.norm(np.diff(q, axis=0), axis=1))),
-            )
-            return None
         return {
             "tracked": tracked,
             "draw_operation": draw_operation,
-            "draw_clock": draw_clock,
-            "timed": timed,
+            "draw_clock": geometric_path([draw_operation], arm),
             "radius": radius,
-            "continuous": continuous,
             "vertex_cooling": vertex_cooling,
             "vertical_end": vertical_end,
         }
 
     def complete_local_drawing(
-        self, state, identity, drawing, local, q_start, *, defer_drawing_check=False,
-        chained_in=False, chained_out=False,
+        self, state, identity, drawing, local, *, chained_in=False, chained_out=False
     ):
         """Add the scene-dependent approach and withdrawal around a fixed drawing.
 
-        The DRAW polynomials come unchanged from ``prepare_local_drawing``;
-        they are never retimed here. ``chained_in`` means the previous stroke
-        ended at this one's first joint position with the pen down, so there is
-        no travel, approach, feed start or join. ``chained_out`` means the next
+        The DRAW path comes unchanged from ``prepare_local_drawing``, and the
+        wire it lays is ``local["deposits"]``, predicted from that same path;
+        the incoming travel belongs to the predecessor. ``chained_in`` means
+        the previous stroke ended at this one's first joint position with the
+        pen down, so there is no travel, approach, feed start or join.
+        ``chained_out`` means the next
         stroke takes over the same way, so there is no hold and no withdrawal;
         a free riser top still gets its cooling hold.
         """
         arm, scene = self.collision_arm(identity), state.payload
         task = drawing["stroke_id"]
-        tracked, radius, continuous = local["tracked"], local["radius"], local["continuous"]
+        tracked = local["tracked"]
         vertex_cooling, vertical_end = local["vertex_cooling"], local["vertical_end"]
         q = tracked["positions"]
-        # Full approach and its travel must be feasible together.
         approach_attempts = []
-        # Free-axis drawing can leave the nozzle nearly horizontal. Pulling
-        # along its actual body axis is then distinct from every world-up ray.
-        # The ray still receives the same IK, tracking, and collision checks.
+        # A tilted pen can pull back along its own body axis, distinct from
+        # every world-up ray. The ray receives the same IK, tracking and
+        # collision checks.
         approach_directions = [
             (-arm.robot.forward(q[0], arm.flange_to_tcp)[:3, 2]).tolist(),
             *self.transit["departure_directions"],
         ]
         if chained_in:
             approach = np.asarray([q[0]])
-            travel = {"status": "CONNECTED", "positions": np.asarray([q[0]])}
             approach_directions = []
         for direction in approach_directions:
             if monotonic() >= self.deadline:
@@ -1225,19 +767,8 @@ class CellPlanner:
                 self.deadline,
             )
             approach_attempts.extend(lift["attempts"])
-            detail = lift["attempts"][-1]
-            if lift["status"] != "SAMPLED_DRAWING_PATH":
-                continue
-            approach = np.array(lift["positions"])[::-1]
-            # Regression samples local extrusion first, then connects its end to
-            # an already planned suffix. Incoming travel belongs to its predecessor.
-            travel = (
-                {"status": "CONNECTED", "positions": np.asarray([approach[0]])}
-                if q_start is None
-                else self.travel(identity, scene, q_start, approach[0])
-            )
-            detail["travel"] = {key: value for key, value in travel.items() if key != "positions"}
-            if travel["status"] == "CONNECTED":
+            if lift["status"] == "SAMPLED_DRAWING_PATH":
+                approach = np.array(lift["positions"])[::-1]
                 break
         else:
             if not chained_in:
@@ -1245,51 +776,15 @@ class CellPlanner:
                     task, identity, "APPROACH", "NO_CONNECTED_APPROACH", attempts=approach_attempts
                 )
                 return None
-        if chained_out:
-            after, failure = scene, None
-        elif defer_drawing_check and local.get("deposits") is not None:
-            # The wire this drawing lays was already enclosed when its deposit
-            # was predicted from the same path; withdrawal planning reuses it.
-            after, failure = scene.copy(), None
+        after = scene
+        if not chained_out:
+            # Withdrawal planning sees the wire this drawing lays.
+            after = scene.copy()
             for number, row in enumerate(local["deposits"]):
                 after.add(
                     row["start"], row["end"], row["radius_m"],
                     f"prospective/{identity}/{task}/{number}",
                 )
-        elif defer_drawing_check:
-            after, failure = enclose_drawing_prefix(
-                arm,
-                tracked,
-                scene,
-                radius,
-                self.deadline,
-                name_prefix=f"prospective/{identity}/{task}",
-                continuous=continuous,
-            )
-            if hasattr(self, "verification_stats"):
-                self.verification_stats["prospective_draw_checks_deferred"] += 1
-        else:
-            after, failure = check_growing_drawing_prefix(
-                arm,
-                tracked,
-                scene,
-                self.obstacles,
-                radius,
-                self.margin,
-                self.settings["maximum_subdivision_depth"],
-                self.deadline,
-                name_prefix=f"prospective/{identity}/{task}",
-                continuous=continuous,
-            )
-        if failure is not None:
-            self.failure(
-                task,
-                identity,
-                "DRAW",
-                failure["status"],
-                **{key: value for key, value in failure.items() if key != "status"},
-            )
-            return None
         withdraw = (
             {"status": "SAMPLED_DRAWING_PATH", "positions": [q[-1]]}
             if chained_out
@@ -1317,7 +812,7 @@ class CellPlanner:
             arm.robot.forward(p, arm.flange_to_tcp)[:3, 3] for p in (q[0], q[-1])
         ]
         operations = [
-            {"kind": "TRAVEL", "positions": travel["positions"]},
+            {"kind": "TRAVEL", "positions": np.asarray([approach[0]])},
             {"kind": "APPROACH", "positions": approach, "contact_m": start_contact},
             {
                 "kind": "PEN_START_WAIT",
@@ -1378,44 +873,9 @@ class CellPlanner:
                 )
         for operation in operations:
             operation["stroke_id"] = task
-        geometric = local["timed"] is None
-        try:
-            if geometric:
-                path = geometric_path(
-                    operations, arm, drawing_clock=self.timing["drawing_clock"]
-                )
-                path.timing_operations = operations
-            else:
-                path = self._timed(operations, arm, drawing_reuse=local["timed"])
-        except TimingParameterizationError as error:
-            self.failure(
-                task,
-                identity,
-                "TIMING",
-                "TIMING_REJECTED",
-                reason=str(error),
-                drawing_clock=self.timing.get("drawing_clock"),
-                acceleration_constraint=self.timing.get("acceleration_constraint"),
-                path_samples=len(q),
-                minimum_joint_step_rad=float(np.min(np.linalg.norm(np.diff(q, axis=0), axis=1))),
-            )
-            return None
+        path = geometric_path(operations, arm)
+        path.timing_operations = operations
         if drawing.get("orientation_policy") is not None:
-            rotations = drawing.get("tcp_rotations")
-            if drawing["orientation_policy"] == "outward_radial" and (
-                rotations is None or len(rotations) != len(drawing["tcp_targets_m"])
-            ):
-                # Pose repair may refine source targets. Regenerate only nominal
-                # preference metadata; the accepted joint trajectory is unchanged.
-                transform = np.asarray(self.profile["world_from_build"])
-                rotations = radial_pen_rotations(
-                    arm,
-                    drawing["tcp_targets_m"],
-                    transform,
-                    drawing.get("pen_tilt_deg", self.profile.get("drawing_pen_tilt_deg", 70.0)),
-                    drawing.get("roll_rad", 0.0),
-                ).tolist()
-                drawing["tcp_rotations"] = rotations
             path.metadata["orientation_preference"] = {
                 "policy": drawing["orientation_policy"],
                 "pen_tilt_deg": drawing.get("pen_tilt_deg"),
@@ -1423,7 +883,7 @@ class CellPlanner:
                 "seed_preference": drawing.get("seed_orientation_preference"),
                 "roll_rad": drawing.get("roll_rad", 0.0),
                 "source_points_m": drawing["tcp_targets_m"],
-                "target_rotations": rotations,
+                "target_rotations": drawing.get("tcp_rotations"),
                 "constraint": "preferred_only_with_fresh_full_tool_collision_checks",
             }
             path.metadata["actual_pen_tilt"] = sampled_pen_tilt(arm, q)
@@ -1437,18 +897,12 @@ class CellPlanner:
             source_start_visit=drawing.get("start_visit", 0),
             vertex_feed_policy="stop_with_lag_then_restart",
             vertex_cooling_s=vertex_cooling,
-            prospective_material_check=(
-                "DEFERRED_TO_FULL_CLOCK" if defer_drawing_check else "CHECKED_GEOMETRIC_PREFIX"
-            ),
+            prospective_material_check="DEFERRED_TO_FULL_CLOCK",
         )
-        if not geometric:
-            self._process_events(path, task, drawing.get("table_index", 0))
         path.metadata["tracking_position_bound_m"] = tracked["position_error_bound_m"]
         path.metadata["tracking_orientation_constraint"] = tracked["orientation_constraint"]
-        if tracked["orientation_constraint"] == "fixed":
-            path.metadata["fixed_tcp_rotation"] = tracked["fixed_tcp_rotation"]
-        if tracked["orientation_constraint"] == "fixed":
-            path.metadata["tracking_orientation_bound_rad"] = tracked["orientation_error_bound_rad"]
+        path.metadata["fixed_tcp_rotation"] = tracked["fixed_tcp_rotation"]
+        path.metadata["tracking_orientation_bound_rad"] = tracked["orientation_error_bound_rad"]
         path.metadata["tracking_subdivisions"] = tracked["subdivisions"]
         path.metadata["tracking_status"] = "BOUNDED"
         proposal = MotionProposal(
@@ -1461,13 +915,12 @@ class CellPlanner:
             path,
         )
         print(
-            f"Prepared {identity}/{task}/{drawing['variant']}: "
-            + (f"{len(path.edges)} untimed edges" if geometric else f"{path.duration_s:.1f}s"),
+            f"Prepared {identity}/{task}/{drawing['variant']}: {len(path.edges)} untimed edges",
             flush=True,
         )
         return proposal
 
-    def _timed(self, operations, arm, **reuse):
+    def _timed(self, operations, arm):
         return timed_path(
             operations,
             arm,
@@ -1481,7 +934,6 @@ class CellPlanner:
             grid_midpoints=self.timing.get("retiming_grid_midpoints", True),
             solver=self.timing.get("retiming_solver", "toppra"),
             grid_ramps=self.timing.get("retiming_grid_ramps", False),
-            **reuse,
         )
 
     def _process_events(self, path, task, table_index):
@@ -1519,17 +971,16 @@ class CellPlanner:
                 state, new, end, deposit_only=deposit_only, journal=journal
             )
         finally:
-            if hasattr(self, "verification_seconds"):
-                self.verification_seconds[
-                    "deposit_only" if deposit_only else "interval_validation"
-                ] += perf_counter() - started
-                for name, value in (Counter(QUERY_STATS) - queries).items():
-                    target = (
-                        self.verification_seconds
-                        if name.endswith("_seconds")
-                        else self.verification_stats
-                    )
-                    target[f"query_{name}"] += value
+            self.verification_seconds[
+                "deposit_only" if deposit_only else "interval_validation"
+            ] += perf_counter() - started
+            for name, value in (Counter(QUERY_STATS) - queries).items():
+                target = (
+                    self.verification_seconds
+                    if name.endswith("_seconds")
+                    else self.verification_stats
+                )
+                target[f"query_{name}"] += value
 
     def _validate_interval(self, state, new, end, *, deposit_only=False, journal=None):
         """Check one scheduling interval while its material grows.
@@ -1560,10 +1011,10 @@ class CellPlanner:
             identity: {id(edge): index for index, edge in enumerate(motion.proposal.payload.edges)}
             for identity, motion in motions.items()
         }
-        store = None if deposit_only else getattr(self, "path_certificates", None)
+        store = None if deposit_only else self.path_certificates
         full_scope = self.collision_scope == "full_robot"
         invariant_scope = "invariant_path" if full_scope else "pen_invariant_path"
-        if store is not None and not getattr(self, "verification_raw", False):
+        if store is not None and not self.verification_raw:
             for identity, motion in motions.items():
                 context = self.path_certificate_context(identity)
                 record = motion.proposal.payload.record()
@@ -1577,7 +1028,7 @@ class CellPlanner:
                     self.verification_stats[f"{invariant_scope}_misses"] += 1
         fixed_required = self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}
         orientation_hits = set()
-        if store is not None and not getattr(self, "verification_raw", False):
+        if store is not None and not self.verification_raw:
             for identity, (context, record) in certificate_records.items():
                 if store.get(context, record, "drawing_orientation") is not None:
                     orientation_hits.add(identity)
@@ -1609,7 +1060,7 @@ class CellPlanner:
             for motion in motions.values()
             for edge in motion.proposal.payload.edges
         )
-        enabled = not getattr(self, "verification_raw", False)
+        enabled = not self.verification_raw
         scene = (
             state.payload
             if not changes and state.payload.clearance_query_enabled == enabled
@@ -1655,7 +1106,7 @@ class CellPlanner:
                         return np.zeros(len(q))
 
                 paths[identity] = (edge, position, deviation)
-            # Deposit conservative enclosures of BOTH growing strokes before
+            # Deposit a conservative enclosure of the growing stroke before
             # checking the interval. Future intervals are never installed early.
             pen_steps = {}
             for identity, (edge, _position, _) in paths.items():
@@ -1728,10 +1179,7 @@ class CellPlanner:
                     pen_steps[identity] = (steps, marks)
                     if journal is not None:
                         journal.append(("add", [dict(row) for row in scene.segments[before:]]))
-                    if hasattr(self, "verification_seconds"):
-                        self.verification_seconds["deposition_enclosures"] += (
-                            perf_counter() - started
-                        )
+                    self.verification_seconds["deposition_enclosures"] += perf_counter() - started
             if deposit_only:
                 continue
             for identity, (edge, position, deviation) in paths.items():
@@ -1750,15 +1198,7 @@ class CellPlanner:
                         )
                         if failure is not None:
                             return None, {**failure, "arm": identity, "time_s": a}
-                        if hasattr(self, "verification_seconds"):
-                            self.verification_seconds["fixed_orientation"] += (
-                                perf_counter() - started
-                            )
-                    orientation_failure = self.outward_failure(
-                        arm, edge.stroke, [position(0), position(0.5), position(1)]
-                    )
-                    if orientation_failure is not None:
-                        return None, {**orientation_failure, "arm": identity, "time_s": a}
+                        self.verification_seconds["fixed_orientation"] += perf_counter() - started
                 if edge is not None and edge.contact is not None:
                     # Keep the original stroke endpoint as the contact center,
                     # rather than moving the exemption ball with the nozzle.
@@ -1767,10 +1207,7 @@ class CellPlanner:
                         scene.geometry_prefix(),
                         np.asarray(edge.contact, dtype=np.float64).tobytes(),
                     )
-                    reuse_contact = getattr(
-                        self, "optimize_contact_geometry",
-                        not getattr(self, "verification_raw", False),
-                    )
+                    reuse_contact = self.optimize_contact_geometry
                     prior = contact_validators.get(identity) if reuse_contact else None
                     valid = prior[1] if prior is not None and prior[0] == contact_key else None
                     if valid is None:
@@ -1862,7 +1299,7 @@ class CellPlanner:
                     if check["status"] != "CERTIFIED_MODELED_EDGE":
                         return None, {"arm": identity, "time_s": a, **check}
             self.checked_intervals += 1
-        if store is not None and not getattr(self, "verification_raw", False):
+        if store is not None and not self.verification_raw:
             for identity, motion in motions.items():
                 # A partial scheduling interval cannot certify the full clock.
                 if state.time_s <= motion.start_s and end >= motion.end_s:

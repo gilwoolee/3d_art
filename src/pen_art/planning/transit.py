@@ -10,10 +10,43 @@ from time import monotonic, perf_counter
 
 import numpy as np
 
-from ..kinematics import inverse_candidates
+from ..kinematics import inverse_candidates, pose_error, rigid_transform
+from .cell_motion import search_layers
 from .collision import QUERY_STATS
-from .curve_motion import search_layers
-from .tracking import tracking_bounds
+
+
+def tracking_bounds(robot, offset, q0, q1, target0, target1):
+    """Bound TCP error for every point of one linearly interpolated joint edge.
+
+    A transformed link translation has second-derivative norm bounded by its
+    length times the square of the sum of upstream joint angle changes. Sum
+    those contributions and the final TCP offset. Linear interpolation error
+    is at most max(endpoint error) + max(second derivative)/8 on [0, 1].
+
+    The same matrix-derivative bound applies to fixed target orientation in
+    operator norm. For rotations, ||R-S||_2 = 2 sin(angle(R S^T)/2). This is a
+    geometric bound, not a controller tracking or calibration guarantee.
+    """
+    offset = rigid_transform(offset)
+    target0, target1 = rigid_transform(target0), rigid_transform(target1)
+    if not np.allclose(target0[:3, :3], target1[:3, :3], atol=1e-12, rtol=0):
+        raise ValueError("Tracking bound requires constant target orientation")
+    q0, q1 = np.asarray(q0), np.asarray(q1)
+    actual0, actual1 = robot.forward(q0, offset), robot.forward(q1, offset)
+    endpoint_errors = [pose_error(a, t) for a, t in [(actual0, target0), (actual1, target1)]]
+    omega, acceleration = 0.0, 0.0
+    for joint in robot.joint_data:
+        acceleration += float(np.linalg.norm(joint["origin"][:3, 3])) * omega**2
+        if joint["index"] is not None:
+            omega += abs(float(q1[joint["index"]] - q0[joint["index"]]))
+    acceleration += float(np.linalg.norm(offset[:3, 3])) * omega**2
+    position = max(float(np.linalg.norm(error[:3])) for error in endpoint_errors)
+    orientation = max(float(np.linalg.norm(error[3:])) for error in endpoint_errors)
+    matrix_error = 2 * np.sin(orientation / 2) + omega**2 / 8
+    return {
+        "position_error_bound_m": position + acceleration / 8 + 1e-12,
+        "orientation_error_bound_rad": float(2 * np.arcsin(min(1.0, matrix_error / 2))) + 1e-12,
+    }
 
 
 def cartesian_lift(
@@ -24,7 +57,6 @@ def cartesian_lift(
     settings,
     edge_valid,
     deadline=np.inf,
-    solve_candidates=None,
     direction=(0, 0, 1),
 ):
     """Depart along a Cartesian direction, retaining the contact configuration."""
@@ -45,8 +77,6 @@ def cartesian_lift(
     def solve(target, seeds):
         if np.array_equal(target, initial):
             return [start]
-        if solve_candidates:
-            return solve_candidates(target, seeds)
         return [
             row["positions"]
             for row in inverse_candidates(
@@ -122,24 +152,6 @@ def find_departure(robot, offset, start, settings, edge_valid, deadline=np.inf):
             if not result["tracking_rejections"]:
                 break
     return {"status": "NO_DEPARTURE_FOUND", "attempts": attempts}
-
-
-def sampled_operation(kind, positions, robot, offset, step, **metadata):
-    """Subdivide joint-linear edges for playback without changing their geometry."""
-    positions = np.asarray(positions)
-    expanded = [positions[0]]
-    for a, b in zip(positions[:-1], positions[1:], strict=True):
-        count = max(1, int(np.ceil(np.max(np.abs(b - a)) / step)))
-        expanded.extend(a + (b - a) * t for t in np.linspace(0, 1, count + 1)[1:])
-    points = [robot.forward(q, offset)[:3, 3].tolist() for q in expanded]
-    return {
-        "kind": kind,
-        "positions": [q.tolist() for q in expanded],
-        "tcp_path_m": points,
-        "extrusion_enabled": kind == "DRAW",
-        "tcp_length_m": float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum()),
-        **metadata,
-    }
 
 
 def local_contact_surfaces(contact_z, plate_z, table_z, radius):
@@ -223,28 +235,3 @@ def contact_validator(
 
     valid.failures = failures
     return valid
-
-
-def completed_prefix(operations, stroke_ids, allow_reordered=False):
-    """Resume only through a completed withdrawal; discard an unfinished action."""
-    last = max((i for i, op in enumerate(operations) if op["kind"] == "WITHDRAW"), default=-1)
-    prefix = operations[: last + 1]
-    if len(prefix) % 4 or len(prefix) // 4 > len(stroke_ids):
-        raise ValueError("Malformed saved sequence prefix")
-    visited = set()
-    for i in range(0, len(prefix), 4):
-        group = prefix[i : i + 4]
-        identity = group[0]["stroke_id"]
-        expected = identity if allow_reordered else stroke_ids[i // 4]
-        if (
-            identity not in stroke_ids
-            or identity in visited
-            or [op["kind"] for op in group] != ["TRAVEL", "APPROACH", "DRAW", "WITHDRAW"]
-            or any(op["stroke_id"] != expected for op in group)
-        ):
-            raise ValueError("Saved sequence order does not match the drawing paths")
-        visited.add(identity)
-    for a, b in zip(prefix[:-1], prefix[1:], strict=True):
-        if not np.allclose(a["positions"][-1], b["positions"][0], atol=1e-9, rtol=0):
-            raise ValueError("Saved sequence has a discontinuity")
-    return prefix, len(prefix) // 4

@@ -1,5 +1,7 @@
-"""Shared read-only capsule arrays; each worker constructs its own FCL objects."""
+"""Journals of deposited wire: shared read-only capsule arrays, their keys and
+the material they rebuild. Each worker constructs its own FCL objects."""
 
+import hashlib
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -7,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from ..io import read_json, sha256, write_json
+from .scene import MaterialScene
 
 
 class CapsuleRows(Sequence):
@@ -136,3 +139,90 @@ def merge_deposits(operations, budget_m):
             rows.extend(operation[1])
     flush()
     return merged
+
+
+def _merged(planner, operations):
+    """Deposits as later actions will see them; an action's own wire stays fine."""
+    budget = planner.settings.get("merge_deposits_m", 0.0)
+    if not budget:
+        return operations
+    return merge_deposits(operations, budget)
+
+
+def deposit_key(operations):
+    """Bind deposited geometry and turn order, independently of segment names."""
+    state = hashlib.sha256(b"material-operations-v1")
+    for operation in operations:
+        if operation[0] == "turn":
+            state.update(b"turn" + bytes([operation[1], operation[2]]))
+        else:
+            rows = operation[1]
+            state.update(b"add" + len(rows).to_bytes(8, "little"))
+            state.update(
+                np.asarray(
+                    [[*row["start"], *row["end"], row["radius_m"]] for row in rows], dtype="<f8"
+                ).tobytes()
+            )
+    return state.hexdigest()
+
+
+def deposit_difference(first, second):
+    """Largest endpoint/radius difference between two deposit journals, or None."""
+    first = [row for operation in first if operation[0] == "add" for row in operation[1]]
+    second = [row for operation in second if operation[0] == "add" for row in operation[1]]
+    if len(first) != len(second):
+        return None
+    if not first:
+        return 0.0
+    values = [
+        np.asarray([[*row["start"], *row["end"], row["radius_m"]] for row in rows])
+        for rows in (first, second)
+    ]
+    return float(np.max(np.abs(values[0] - values[1])))
+
+
+class MaterialPrefix:
+    """Rebuild the material preceding an action from journaled deposits.
+
+    One append-only scene is kept per process. A longer chain extends it; a
+    shorter or diverging one shares its leading capsules. Insertions repeat
+    the validator's own sequence, so the result is the scene sequential
+    checking would hold.
+    """
+
+    def __init__(self, load):
+        self.load = load
+        self.rebuilds = 0
+        self.reset()
+
+    def reset(self):
+        self.scene = MaterialScene()
+        self.chain, self.counts = [], []
+
+    def _apply(self, element):
+        for operation in self.load(element[0]):
+            for row in operation[1]:
+                self.scene.add(row["start"], row["end"], row["radius_m"], row["name"])
+        self.chain.append(element)
+        self.counts.append(len(self.scene.objects))
+
+    def scene_for(self, chain):
+        chain = [tuple(element) for element in chain]
+        common = 0
+        while (
+            common < min(len(chain), len(self.chain)) and chain[common] == self.chain[common]
+        ):
+            common += 1
+        if common == len(self.chain):
+            for element in chain[common:]:
+                self._apply(element)
+            return self.scene
+        base = self.scene.prefix(self.counts[common - 1]) if common else MaterialScene()
+        if common == len(chain):
+            return base  # Serve a pure prefix; keep the longer scene held.
+        self.rebuilds += 1
+        self.scene = base
+        del self.chain[common:], self.counts[common:]
+        for element in chain[common:]:
+            self._apply(element)
+        return self.scene
