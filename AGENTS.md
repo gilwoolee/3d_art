@@ -1,7 +1,6 @@
 # Agent instructions
 
-Start with [README.md](README.md): the tutorial, the commands, the concepts
-and a code map.
+Start with [README.md](README.md): setup and the commands.
 
 ## Rules from the user
 
