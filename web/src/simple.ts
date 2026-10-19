@@ -1,16 +1,15 @@
 // One page: the textured model, the wireframe strokes and the robot's saved
 // motion, side by side. It only reads saved files; nothing here plans or checks.
 import './style.css';
-import { Viewer, type BuildRiser, type CellArmView, type Curve, type RobotRig } from './viewer';
-import { coordinatedPose, tableAngleAt, type CoordinatedPlan, type IndexedTable } from './timing';
+import { Viewer, type CellArmView, type Curve, type RobotRig } from './viewer';
+import { coordinatedPose, type CoordinatedPlan } from './timing';
 
 interface RunRow { id: string; name: string; updated_at: string }
 interface RunDetail extends RunRow { artifacts: string[] }
 interface CellManifest {
   arms: (Omit<CellArmView, 'rig' | 'url'> & { robot_manifest: string; robot_visual: string })[];
   world_from_build: number[][];
-  environment: { platform_top_z_m?: number; table_z_m: number; platform_size_m: number[]; build_riser?: BuildRiser };
-  turntable?: IndexedTable;
+  environment: { plate_top_z_m: number; table_z_m: number; plate_size_m: number[] };
 }
 interface Validation { status: string; source_plan_sha256?: string; collision_scope?: string }
 
@@ -28,12 +27,11 @@ app.innerHTML = `<div class="simple">
     <strong>Pen Art</strong>
     <select id="simple-run" aria-label="Saved run"></select>
     <span id="simple-status" class="simple-status"></span>
-    <a class="simple-link" id="simple-workbench">Full workbench ↗</a>
   </header>
   <main class="simple-panels">
     <section><h2>0 · Original picture</h2><div class="simple-photo"><img id="simple-photo" alt="The object's original picture"></div><p id="simple-photo-note"></p></section>
     <section><h2>1 · Original model</h2><div class="simple-view" id="simple-model"></div><p id="simple-model-note"></p></section>
-    <section><h2>2 · Wireframe strokes<label class="simple-toggle"><input type="checkbox" id="simple-ghost" checked> Show statue</label></h2><div class="simple-view" id="simple-strokes"></div><p id="simple-strokes-note"></p></section>
+    <section><h2>2 · Wireframe strokes<label class="simple-toggle"><input type="checkbox" id="simple-ghost" checked> Show model</label></h2><div class="simple-view" id="simple-strokes"></div><p id="simple-strokes-note"></p></section>
     <section><h2>3 · Robot motion</h2><div class="simple-view" id="simple-robot"></div><p id="simple-robot-note"></p></section>
   </main>
   <footer class="simple-controls">
@@ -63,7 +61,6 @@ async function show(runId: string) {
   for (const id of ['#simple-photo-note', '#simple-model-note', '#simple-strokes-note', '#simple-robot-note']) $(id).textContent = '';
   $<HTMLButtonElement>('#simple-play').disabled = $<HTMLInputElement>('#simple-seek').disabled = $<HTMLButtonElement>('#simple-focus').disabled = true;
   $('#simple-clock').textContent = '–';
-  $<HTMLAnchorElement>('#simple-workbench').href = `/?workbench=1&run=${encodeURIComponent(runId)}`;
   history.replaceState(null, '', `/?run=${encodeURIComponent(runId)}`);
   status('Loading…');
   const run = await json<RunDetail>(`/api/runs/${runId}`);
@@ -110,7 +107,7 @@ async function show(runId: string) {
   const robotDone = (async () => {
     views.robot.clearCell();
     views.robot.clearSequence();
-    const planFile = ['plan.json', 'offline_dual_arm_plan.json'].find(has);
+    const planFile = ['plan.json'].find(has);
     if (!has('cell_manifest.json') || !planFile) { $('#simple-robot-note').textContent = 'This run has no saved robot motion.'; return; }
     const cell = await json<CellManifest>(url('cell_manifest.json'));
     const arms: CellArmView[] = await Promise.all(cell.arms.map(async arm => ({
@@ -120,16 +117,15 @@ async function show(runId: string) {
     await views.robot.loadCell(arms, { url: url('geometry.glb'), world_from_build: cell.world_from_build });
     if (current !== request) return;
     const origin = cell.world_from_build.map(row => row[3]);
-    views.robot.setPlatform(origin.slice(0, 2), cell.environment.platform_top_z_m ?? origin[2], cell.environment.table_z_m,
-      ...cell.environment.platform_size_m as [number, number], cell.environment.build_riser);
-    if (cell.turntable) views.robot.setTurntable(cell.turntable, cell.environment.build_riser);
+    views.robot.setPlatform(origin.slice(0, 2), cell.environment.plate_top_z_m, cell.environment.table_z_m,
+      ...cell.environment.plate_size_m as [number, number]);
     views.robot.setCellReferenceVisible(false);
     $('#simple-robot-note').textContent = 'Loading the saved motion…';
     const bytes = await (await fetch(url(planFile))).arrayBuffer();
     if (current !== request) return;
     const plan = JSON.parse(new TextDecoder().decode(bytes)) as CoordinatedPlan;
     // Say whether this exact file is the one the separate verification passed.
-    const validationFile = planFile === 'plan.json' ? 'verification.json' : planFile.replace('_plan.json', '_validation.json');
+    const validationFile = 'verification.json';
     let verified = false;
     if (has(validationFile)) {
       const validation = await json<Validation>(url(validationFile));
@@ -146,15 +142,17 @@ async function show(runId: string) {
       .map(edge => ({ action, edge, start: action.start_s + edge.start_s, end: action.start_s + edge.end_s })))
       .sort((a, b) => a.start - b.start);
     const strokes = new Set(plan.actions.filter(a => !a.auxiliary).map(a => a.stroke_id)).size;
-    $('#simple-robot-note').textContent = `${strokes} of ${plan.requested_strokes} strokes, ${minutes(total)} of drawing. `
+    const lifts = plan.lift_offs?.length;
+    $('#simple-robot-note').textContent = `${strokes} of ${plan.requested_strokes} strokes, ${minutes(total)} of drawing`
+      + (lifts === undefined ? '. ' : `, ${lifts} lift-off${lifts === 1 ? '' : 's'}`
+        + (plan.minimum_trails ? ` (fewest possible for the frame: ${plan.minimum_trails}). ` : '. '))
       + (verified ? 'This plan passed the separate full-robot verification (simulation only).' : 'Not verified: no matching verification report for this plan.');
+    if (current === request) $('#simple-status').dataset.verdict = verified ? 'FULL_BUILD_VERIFIED' : 'NOT VERIFIED';
     const seek = $<HTMLInputElement>('#simple-seek');
     seek.max = String(total);
     const draw = (time: number) => {
       time = Math.max(0, Math.min(total, time));
       seek.value = String(time);
-      const angle = tableAngleAt(plan, time);
-      if (plan.turntable) views.robot.setTurntableAngle(angle);
       for (const arm of arms) {
         const moves = plan.actions.filter(a => a.arm === arm.id);
         const motion = moves.find(a => a.start_s <= time && time < a.end_s);
@@ -162,19 +160,11 @@ async function show(runId: string) {
         views.robot.setCellArmPose(arm.id, motion ? coordinatedPose(motion, time)
           : past ? coordinatedPose(past, past.end_s) : (plan.initial_positions?.[arm.id] ?? arm.initial_positions));
       }
-      // Wire stays on the plate, so earlier wire turns with the table.
-      const placed = (point: number[], index?: number) => {
-        if (!plan.turntable || index === undefined) return point;
-        const axis = plan.turntable.world_from_axis;
-        const x = point[0] - axis[0][3], y = point[1] - axis[1][3];
-        const turn = angle - index * Math.PI / 2, c = Math.cos(turn), s = Math.sin(turn);
-        return [axis[0][3] + c * x - s * y, axis[1][3] + s * x + c * y, point[2]];
-      };
       const paths: number[][][] = [];
       for (const row of rows) {
         if (row.start > time) break;
-        paths.push([placed(row.edge.tcp0_m!, row.edge.table_index), row.end <= time
-          ? placed(row.edge.tcp1_m!, row.edge.table_index)
+        paths.push([row.edge.tcp0_m!, row.end <= time
+          ? row.edge.tcp1_m!
           : views.robot.setCellArmPose(row.action.arm, coordinatedPose(row.action, time))]);
       }
       views.robot.setDepositedPaths(paths);
@@ -205,13 +195,14 @@ async function show(runId: string) {
   })();
   const results = await Promise.allSettled([modelDone, strokesDone, robotDone]);
   const failed = results.find(result => result.status === 'rejected') as PromiseRejectedResult | undefined;
-  status(failed ? `Could not load everything: ${failed.reason instanceof Error ? failed.reason.message : failed.reason}` : escape(run.name ?? runId));
+  status(failed ? `Could not load everything: ${failed.reason instanceof Error ? failed.reason.message : failed.reason}`
+    : `${run.name ?? runId} · ${$('#simple-status').dataset.verdict ?? ''}`);
 }
 
 async function start() {
   const runs = (await json<RunRow[]>('/api/runs')).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const wanted = new URLSearchParams(location.search).get('run');
-  // A run missing from runs/viewer_runs.json still opens by its address.
+  // A run missing from the list still opens by its address.
   if (wanted && !runs.some(run => run.id === wanted)) {
     const extra = await json<RunRow>(`/api/runs/${encodeURIComponent(wanted)}`).catch(() => undefined);
     if (extra) runs.unshift(extra);

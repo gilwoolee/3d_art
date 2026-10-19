@@ -35,12 +35,6 @@ export interface CoordinatedEdge {
   start_s:number;end_s:number;q0:number[];q1:number[];kind:string;stroke_id:string|null;
   tcp0_m?:number[];tcp1_m?:number[];
   coefficients?:number[][];
-  table_index?:number;table_to_index?:number;
-}
-export interface IndexedTable {
-  world_from_axis:number[][];axis_from_build_zero:number[][];
-  plate_radius_m:number;plate_thickness_m:number;
-  housing_radius_m:number;housing_height_m:number;home_index:number;
 }
 export interface CoordinatedAction {
   arm:string;stroke_id:string;variant:string;start_s:number;end_s:number;
@@ -52,8 +46,8 @@ export interface CoordinatedAction {
     tracking_subdivisions?:number};
 }
 export interface CoordinatedPlan {
-  turntable?:IndexedTable;
-  initial_table_index?:number;
+  lift_offs?:{before:string;reason:string}[];
+  minimum_trails?:number|null;
   resource_mode?:'single'|'dual';
   active_arms?:string[];
   status:string;completed_strokes:number;requested_strokes:number;modeled_duration_s:number;
@@ -81,25 +75,6 @@ export interface CoordinatedPlan {
       validated_prefix_s:number;concurrent_drawing_s:number;replay_status:string;
     }>;
   };
-}
-
-export function tableAngleAt(plan:CoordinatedPlan,time:number):number {
-  let angle=(plan.initial_table_index??0)*Math.PI/2;
-  for(const action of plan.actions){
-    for(const edge of action.trajectory.edges){
-      const start=action.start_s+edge.start_s,end=action.start_s+edge.end_s;
-      if(time<start)return angle;
-      if(edge.table_index===undefined)continue;
-      const from=edge.table_index*Math.PI/2;
-      if(edge.table_to_index!==undefined){
-        const u=Math.max(0,Math.min(1,(time-start)/(end-start)));
-        const h=u*u*u*(10+u*(-15+6*u));
-        angle=from+(edge.table_to_index-edge.table_index)*Math.PI/2*h;
-      }else angle=from;
-      if(time<end)return angle;
-    }
-  }
-  return angle;
 }
 
 export interface TimelinePhase {

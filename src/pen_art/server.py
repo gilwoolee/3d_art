@@ -1,30 +1,49 @@
-"""Read-only local visual workbench API. No route can execute robot commands."""
+"""The read-only viewer API: planned objects, their files and pictures.
 
-import argparse
+An object planned with ``pen-art`` (``runs/NAME/state.json``) opens by its
+name and shows its current planning round. No route can move a robot.
+"""
+
 import hashlib
 import json
 import math
 import re
 from pathlib import Path
 
-import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .io import read_json, sha256
+from .io import read_json
 
 
 def create_app(root: Path):
     root = root.resolve()
     runs = root / "runs"
-    app = FastAPI(title="Pen Art Workbench")
+    app = FastAPI(title="Pen Art viewer")
+
+    def current_round(folder):
+        """An object's current planning round, or None."""
+        state = folder / "state.json"
+        if not state.is_file():
+            return None
+        name = read_json(state).get("round")
+        if not isinstance(name, str) or not re.fullmatch(r"round-[0-9]+", name):
+            return None
+        path = (folder / name).resolve()
+        inside = path.is_relative_to(folder.resolve())
+        return path if inside and (path / "run.json").is_file() else None
 
     def run_path(run_id):
         if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
             raise HTTPException(404, "Run not found")
         path = (runs / run_id).resolve()
-        if not path.is_relative_to(runs.resolve()) or not (path / "run.json").is_file():
+        if not path.is_relative_to(runs.resolve()):
+            raise HTTPException(404, "Run not found")
+        planned = current_round(path)
+        if planned is not None:
+            return planned
+        if not (path / "run.json").is_file():
             raise HTTPException(404, "Run not found")
         return path
 
@@ -43,18 +62,24 @@ def create_app(root: Path):
 
     @app.get("/api/runs")
     def list_runs():
-        # ``runs/viewer_runs.json`` names the runs to offer, in order. Without
-        # it every run is listed. Any run still opens by its own address.
-        chosen = runs / "viewer_runs.json"
-        if chosen.is_file():
-            return [
-                run_metadata(runs / name)
-                for name in read_json(chosen)
-                if isinstance(name, str)
-                and re.fullmatch(r"[A-Za-z0-9_-]+", name)
-                and (runs / name / "run.json").is_file()
-            ]
-        return [run_metadata(path.parent) for path in sorted(runs.glob("*/run.json"))]
+        """Every object with a timed plan, named by its folder."""
+        rows = []
+        for state in sorted(runs.glob("*/state.json")):
+            folder = state.parent
+            planned = current_round(folder)
+            if planned is None or not (planned / "plan.json").is_file():
+                continue
+            saved = read_json(state)
+            verdict = saved.get("verification") or saved.get("timing") or saved.get("geometry")
+            minutes = saved.get("print_minutes")
+            row = run_metadata(planned)
+            row.update(
+                id=folder.name,
+                name=f"{folder.name}: {verdict}"
+                + (f", {minutes:.1f} min" if isinstance(minutes, (int, float)) else ""),
+            )
+            rows.append(row)
+        return rows
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str):
@@ -114,46 +139,8 @@ def create_app(root: Path):
                     return FileResponse(picture, headers={"Cache-Control": "no-cache"})
         raise HTTPException(404, "No picture")
 
-    @app.get("/api/runs/{run_id}/checks/{filename}")
-    def check_inputs(run_id: str, filename: str):
-        directory = run_path(run_id)
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.json", filename):
-            raise HTTPException(404, "Artifact not found")
-        path = (directory / filename).resolve()
-        if not path.is_relative_to(directory) or not path.is_file():
-            raise HTTPException(404, "Artifact not found")
-        raw = path.read_bytes()
-        document = json.loads(raw)
-        stale = []
-        for name, expected in document.get("inputs", {}).items():
-            source = (directory / name).resolve()
-            if (
-                not re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", name)
-                or any(part in {".", ".."} for part in Path(name).parts)
-                or not source.is_relative_to(directory)
-                or not source.is_file()
-                or sha256(source) != expected
-            ):
-                stale.append(name)
-        return {
-            "current": not stale,
-            "stale_inputs": stale,
-            "artifact_sha256": hashlib.sha256(raw).hexdigest(),
-        }
 
     dist = root / "web/dist"
     if dist.is_dir():
-        app.mount("/", StaticFiles(directory=dist, html=True), name="workbench")
+        app.mount("/", StaticFiles(directory=dist, html=True), name="viewer")
     return app
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--port", type=int, default=8765)
-    args = parser.parse_args()
-    uvicorn.run(create_app(args.root), host="127.0.0.1", port=args.port)
-
-
-if __name__ == "__main__":
-    main()

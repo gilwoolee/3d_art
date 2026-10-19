@@ -52,6 +52,13 @@ def _section_build(run, source, profile, workers, stage, log):
     ]
     with open(log, "a") as out:
         subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, check=False)
+    record = Path(run) / "run.json"
+    if record.exists():
+        named = read_json(record)
+        named["name"] = Path(run).parent.name + (
+            ": frame and detail" if Path(source).name != "frame_source" else ": frame"
+        )
+        write_json(record, named)
     return read_json(Path(run) / "section_build.json")
 
 
