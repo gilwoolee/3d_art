@@ -31,6 +31,7 @@ mesh along x, y and z.
 import argparse
 import shutil
 from copy import deepcopy
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -60,6 +61,52 @@ NO_DETAIL = 3
 OFFSET, MIN_LINE, COLLECT, DIP, BRIDGE, MAX_STROKES, MARGIN = (
     0.001, 0.008, 1.6, 0.0035, 0.022, 80, 0.001,
 )
+# Lines and frame edges are sampled every STEP; a candidate line is skipped as
+# a near-duplicate when more than half of it lies within DUPLICATE of lines
+# already taken. Laid lines have 1 mm samples: a part on one face needs
+# FACE_SAMPLES of them, and a run some tilt clears (or a piece left by a cut)
+# needs MIN_SAMPLES. Connecting runs are sampled every BRIDGE_STEP; tours
+# shorter than MIN_TOUR are dropped.
+STEP = 0.0005  # m
+DUPLICATE = 0.0015  # m
+FACE_SAMPLES = 6
+MIN_SAMPLES = 8
+BRIDGE_STEP = 0.001  # m
+MIN_TOUR = 0.008  # m
+# Ordering: the nose may touch a tour's own wire within OWN_WIRE samples of the tip.
+OWN_WIRE = 4
+# Tilt per sample: changing tilt costs its degrees; each degree away from
+# LIKED_TILT costs TILT_COST.
+LIKED_TILT, TILT_COST = 45, 0.01
+# A tour touches frame wire within TOUCH; it is trimmed to start on a contact
+# and run at most OVERHANG samples (mm) past its last one; it ends going up
+# when it rose over its last RISE samples; two directions keep the same line
+# when they round to the same SAME_LENGTH; a trimmed tour shorter than
+# MIN_SUPPORTED is dropped.
+TOUCH = WIRE_R * 2 + 0.0004  # m
+OVERHANG, RISE = 8, 5
+SAME_LENGTH, MIN_SUPPORTED = 0.003, 0.006  # m
+# Planner check: a tour is cut at most MAX_CUTS times; END_TRIM samples come
+# off an end that cannot be approached or left; a cut at a failing sample
+# removes CUT_BEFORE samples before it and CUT_AFTER from it on; pieces
+# shorter than MIN_CHECKED are dropped.
+MAX_CUTS, END_TRIM, CUT_BEFORE, CUT_AFTER = 4, 5, 2, 3
+MIN_CHECKED = 0.010  # m
+# Stroke graph: cubic knots every KNOT_SPACING; a contact is a knot within
+# TOUCH that is nearest the frame among CONTACT_WINDOW knots either side, at
+# least CONTACT_SPACING after the last contact and FIRST_CONTACT from the
+# start; a frame cut within CUT_SNAP (edge fraction) of another reuses it;
+# detail tours are ordered after the frame from DETAIL_ORDER.
+KNOT_SPACING = 0.003  # m
+CONTACT_WINDOW = 2
+CONTACT_SPACING, FIRST_CONTACT = 0.004, 0.002  # m
+CUT_SNAP = 1e-3
+DETAIL_ORDER = 20000
+# Nose screen: NOSE_SAMPLES points from NOSE_TIP (where the nose starts behind
+# the tip) to NOSE_LENGTH are kept off the bed; wire is searched in a ball
+# NOSE_BALL past the widest nose radius NOSE_MAX_R, centred NOSE_BALL up the pen.
+NOSE_TIP, NOSE_LENGTH, NOSE_SAMPLES = 0.003, 0.03, 10
+NOSE_BALL, NOSE_MAX_R = 0.1, 0.012  # m
 
 
 def estimated_minutes(length_m, strokes):
@@ -280,7 +327,7 @@ def detail_profile(base, path, nose_clearance=0.0003):
     return Path(path)
 
 
-def cubic_pieces(p, spacing=0.003):
+def cubic_pieces(p, spacing=KNOT_SPACING):
     """C1 cubic pieces through knots every ``spacing`` along a polyline."""
     knots = resample(p, spacing)
     if len(knots) == 2:
@@ -478,7 +525,8 @@ class PlannerCheck:
 
 
 # --- main ---------------------------------------------------------------------------
-def main():
+def parse_args():
+    """The command line: frame source, target, cell profile and the detail budget."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("frame_source", type=Path)
     parser.add_argument("target", type=Path)
@@ -499,119 +547,155 @@ def main():
     parser.add_argument(
         "--minutes", type=float, default=15.0, help="added print minutes at most (estimated)"
     )
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def main():
+    """Find detail lines, make drawable tours of them and write them over the frame."""
+    args = parse_args()
     source, target = args.frame_source, args.target
     mesh = trimesh.load(source / "normalized.glb", force="mesh")
     surface = Surface(mesh, OFFSET)
-    profile = yaml.safe_load(args.profile.read_text())
+    faces = face_azimuths(args.profile)
+    framework = read_json(source / "framework_graph.json")
+    frame = np.vstack([dense(np.asarray(e["segments"][0])[[0, -1]]) for e in framework["edges"]])
+    frame_tree = cKDTree(frame)
+    clear = partial(clear_sets, faces=faces, frame=frame, tree=frame_tree)
+    samples = frame_samples(framework)
+    funnel = {}
+
+    candidates = find_lines(mesh, args.crease_threshold)
+    pieces, taken = lay_and_cut(
+        candidates, surface, frame, frame_tree, faces, clear, COLLECT * args.detail, funnel
+    )
+    tours = join_tours(pieces, surface, clear, funnel)
+    if not tours:
+        no_detail("no crease lines long enough that a pen tilt clears the frame")
+    ordered, cut_out = order_tours(tours, faces, funnel)
+    ready, dropped = choose_tilts(ordered, samples[2])
+    ready = planner_filter(
+        ready, args.profile, source, target, framework, faces, clear, samples[2], funnel
+    )
+    pick_strokes(ready, args.detail, args.minutes, funnel)
+    graph, rows, fused = build_graph(framework, ready, faces, samples)
+    rows, screen, minutes = write(source, target, graph, rows, faces, args)
+    report(funnel, taken, pieces, tours, cut_out, dropped, rows, fused, screen, minutes)
+
+
+# --- faces and the nose screen -------------------------------------------------------
+def face_azimuths(profile_path):
+    """World azimuth of each of the object's four faces, the one facing the robot first."""
+    profile = yaml.safe_load(profile_path.read_text())
     build = np.asarray(profile["world_from_build"])[:2, 3]
     base = np.asarray(profile["arms"][0]["world_from_base"])[:2, 3]
     robot_az = np.degrees(np.arctan2(*(base - build)[::-1]))
     # Four faces of the object: the one looking at the robot, then each
     # quarter turn round. A line keeps to one face; the pen leans toward it.
-    sectors = [(robot_az - 90 * k + 180) % 360 - 180 for k in range(4)]
+    return [(robot_az - 90 * k + 180) % 360 - 180 for k in range(4)]
 
-    def sector_of(az):
-        return np.argmin(np.abs((az[:, None] - np.array(sectors)[None] + 180) % 360 - 180), axis=1)
 
-    def pose_axis(sec, tilt):
-        h, t = np.radians(sectors[sec]), np.radians(tilt)
-        return np.array([np.sin(t) * np.cos(h), np.sin(t) * np.sin(h), np.cos(t)])
+def sector_of(az, faces):
+    """The face nearest each azimuth."""
+    return np.argmin(np.abs((az[:, None] - np.array(faces)[None] + 180) % 360 - 180), axis=1)
 
-    def nose_hits(x, a, pts, tree):
-        """Wire points inside the nose (+margin) at tip x, axis a; None if it meets the bed."""
-        s = np.linspace(0.003, 0.03, 10)
-        if np.any(x[2] + s * a[2] - nose_radius(s) * np.sqrt(max(0.0, 1 - a[2] ** 2)) <= 0):
-            return None
-        idx = tree.query_ball_point(x + a * 0.1, r=0.1 + 0.012 + WIRE_R + MARGIN)
-        if not idx:
-            return np.zeros(0, int)
-        idx = np.asarray(idx)
-        d = pts[idx] - x
-        s = d @ a
-        rho = np.linalg.norm(d - s[:, None] * a, axis=1)
-        return idx[(s > 0.003) & (rho < nose_radius(s) + WIRE_R + MARGIN)]
 
-    framework = read_json(source / "framework_graph.json")
-    frame = np.vstack([dense(np.asarray(e["segments"][0])[[0, -1]]) for e in framework["edges"]])
-    frame_tree = cKDTree(frame)
+def pen_axis(azimuth, tilt):
+    """Unit pen axis, tip to body, leaning ``tilt`` degrees toward ``azimuth``."""
+    h, t = np.radians(azimuth), np.radians(tilt)
+    return np.array([np.sin(t) * np.cos(h), np.sin(t) * np.sin(h), np.cos(t)])
 
-    def clear_sets(p, sec):
-        out = []
-        for x in p:
-            ok = set()
-            for t in TILTS:
-                h = nose_hits(x, pose_axis(sec, t), frame, frame_tree)
-                if h is not None and not len(h):
-                    ok.add(t)
-            out.append(ok)
-        return out
 
-    from time import perf_counter
+def nose_hits(x, a, pts, tree):
+    """Wire points inside the nose (+margin) at tip x, axis a; None if it meets the bed."""
+    s = np.linspace(NOSE_TIP, NOSE_LENGTH, NOSE_SAMPLES)
+    if np.any(x[2] + s * a[2] - nose_radius(s) * np.sqrt(max(0.0, 1 - a[2] ** 2)) <= 0):
+        return None
+    idx = tree.query_ball_point(x + a * NOSE_BALL, r=NOSE_BALL + NOSE_MAX_R + WIRE_R + MARGIN)
+    if not idx:
+        return np.zeros(0, int)
+    idx = np.asarray(idx)
+    d = pts[idx] - x
+    s = d @ a
+    rho = np.linalg.norm(d - s[:, None] * a, axis=1)
+    return idx[(s > NOSE_TIP) & (rho < nose_radius(s) + WIRE_R + MARGIN)]
 
-    clock, mark = {}, [perf_counter()]
 
-    def lap(name):
-        now = perf_counter()
-        clock[name] = clock.get(name, 0.0) + now - mark[0]
-        mark[0] = now
+def clear_sets(p, sec, faces, frame, tree):
+    """The tilts whose nose clears frame and bed at each sample, leaning toward face ``sec``."""
+    out = []
+    for x in p:
+        ok = set()
+        for t in TILTS:
+            h = nose_hits(x, pen_axis(faces[sec], t), frame, tree)
+            if h is not None and not len(h):
+                ok.add(t)
+        out.append(ok)
+    return out
 
-    candidates = sorted(candidate_lines(mesh, args.crease_threshold), key=lambda c: -c[2])
-    lap("find crease lines")
-    # 1-2. take lines by importance, skipping near-duplicates; lay each on the
-    #      surface and cut it where it turns to another face or where no tilt
-    #      clears the frame; stop once enough reachable line is collected
-    pieces, stages = [], {"laid": 0.0, "one face": 0.0}
-    chosen, taken, used, reachable = [], [], 0.0, 0.0
-    laying = clearing = 0.0
+
+# --- stages --------------------------------------------------------------------------
+def find_lines(mesh, thresholds):
+    """Candidate detail lines, most important first."""
+    return sorted(candidate_lines(mesh, thresholds), key=lambda c: -c[2])
+
+
+def lay_and_cut(candidates, surface, frame, frame_tree, faces, clear, enough, funnel):
+    """Pieces of laid line that keep one face and that some tilt clears, and the lines taken.
+
+    Lines are taken by importance, skipping near-duplicates, until ``enough``
+    metres are reachable. Each is laid on the surface and cut where it turns to
+    another face or where no tilt clears the frame. A piece is (points, face,
+    clear tilts per sample, line names).
+    """
+    pieces, taken, reachable = [], [], 0.0
+    funnel.update({"laid": 0.0, "one face": 0.0})
     for name, p, _ in candidates:
-        if reachable >= COLLECT * args.detail:
+        if reachable >= enough:
             break
         if length(p) < MIN_LINE:
             continue
-        q = resample(p, 0.0005)
-        if taken and (cKDTree(np.vstack(taken)).query(q)[0] < 0.0015).mean() > 0.5:
+        q = resample(p, STEP)
+        if taken and (cKDTree(np.vstack(taken)).query(q)[0] < DUPLICATE).mean() > 0.5:
             continue
-        chosen.append((name, q))
         taken.append(q)
-        used += length(q)
-        started = perf_counter()
         p, az = surface.lay(q)
-        stages["laid"] += length(p)
+        funnel["laid"] += length(p)
         p = dip(p, frame, frame_tree, DIP)
-        sec = sector_of(az)
+        sec = sector_of(az, faces)
         for i in range(1, len(sec) - 1):
             if sec[i - 1] == sec[i + 1] != sec[i]:
                 sec[i] = sec[i - 1]
         cuts = np.flatnonzero(np.diff(sec)) + 1
         for a, b in zip(np.r_[0, cuts], np.r_[cuts, len(p)], strict=True):
-            if b - a < 6:
+            if b - a < FACE_SAMPLES:
                 continue
             part, s = p[a:b], int(sec[a])
-            stages["one face"] += length(part)
-            laying += perf_counter() - started
-            started = perf_counter()
-            sets = clear_sets(part, s)
-            clearing += perf_counter() - started
-            started = perf_counter()
+            funnel["one face"] += length(part)
+            sets = clear(part, s)
             ok = np.array([bool(x) for x in sets], int)
             for run in np.split(np.arange(len(part)), np.flatnonzero(np.diff(ok)) + 1):
-                if ok[run[0]] and len(run) >= 8:
+                if ok[run[0]] and len(run) >= MIN_SAMPLES:
                     pieces.append((part[run], s, [sets[i] for i in run], [name]))
                     reachable += length(part[run])
-    lap("lay lines and check tilts")
-    clock["  of which laying on the surface"] = laying
-    clock["  of which tilt checks against the frame"] = clearing
-    stages["tilt clears frame"] = sum(length(r[0]) for r in pieces)
+    funnel["tilt clears frame"] = sum(length(r[0]) for r in pieces)
+    return pieces, taken
 
-    # 3. join pieces of one face end to end into tours
-    def bridge(a, b):
-        p = surface.push_out(
-            np.linspace(a, b, max(2, int(np.ceil(np.linalg.norm(b - a) / 0.001)) + 1))
-        )
-        return surface.push_out(smooth(p, 1))
 
+def bridge(surface, a, b):
+    """A connecting run on the surface from a to b."""
+    p = surface.push_out(
+        np.linspace(a, b, max(2, int(np.ceil(np.linalg.norm(b - a) / BRIDGE_STEP)) + 1))
+    )
+    return surface.push_out(smooth(p, 1))
+
+
+def join_tours(pieces, surface, clear, funnel):
+    """Tours (points, face, clear tilts per sample, line names): pieces of one face joined up.
+
+    Each tour starts at the lowest piece left and takes the nearest piece end
+    within BRIDGE whose connecting run a tilt clears; the longest MAX_STROKES
+    tours of MIN_TOUR or more are kept.
+    """
     tours = []
     for sec in range(4):
         left = [i for i, r in enumerate(pieces) if r[1] == sec]
@@ -637,8 +721,8 @@ def main():
                 q, qs = pieces[i][0], pieces[i][2]
                 if rev:
                     q, qs = q[::-1], qs[::-1]
-                b = bridge(end, q[0])[1:-1]
-                bs = clear_sets(b, sec) if len(b) else []
+                b = bridge(surface, end, q[0])[1:-1]
+                bs = clear(b, sec) if len(b) else []
                 if any(not x for x in bs):
                     tried.add(i)
                     continue
@@ -647,18 +731,58 @@ def main():
                 names += pieces[i][3]
                 left.remove(i)
             tours.append((np.vstack(path), sec, tilts, names))
-    stages["joined (with connecting runs)"] = sum(length(t[0]) for t in tours)
-    tours = sorted((t for t in tours if length(t[0]) >= 0.008), key=lambda t: -length(t[0]))[
+    funnel["joined (with connecting runs)"] = sum(length(t[0]) for t in tours)
+    tours = sorted((t for t in tours if length(t[0]) >= MIN_TOUR), key=lambda t: -length(t[0]))[
         :MAX_STROKES
     ]
-    stages["8 mm or longer, stroke cap"] = sum(length(t[0]) for t in tours)
+    funnel["8 mm or longer, stroke cap"] = sum(length(t[0]) for t in tours)
+    return tours
 
-    lap("join into tours")
-    if not tours:
-        no_detail("no crease lines long enough that a pen tilt clears the frame")
-    # 4. order tours so no nose meets detail drawn earlier. Peel from the end:
-    #    the last tour must clear all others. When none can, cut the conflicting
-    #    samples out of the tour that conflicts least.
+
+def allowed(k, items, owner, remaining):
+    """Clear tilts per sample: the nose misses every other remaining tour and
+    this tour's own wire more than OWN_WIRE samples along it (either drawing direction)."""
+    others = remaining - {k}
+    return [
+        {
+            t
+            for t, h in hs.items()
+            if not any(owner[j] in others or (owner[j] == k and abs(j - g) > OWN_WIRE) for j in h)
+        }
+        for g, hs in zip(items[k][0], items[k][2], strict=True)
+    ]
+
+
+def cut_conflicts(k, a, items, owner, remaining, next_id):
+    """Replace tour ``k`` by its runs where ``a`` has a clear tilt; the next id and samples cut.
+
+    Runs shorter than MIN_SAMPLES are cut too.
+    """
+    bad = np.array([not x for x in a])
+    g, sec, hits = items.pop(k)
+    remaining.discard(k)
+    owner[g[bad]] = -1
+    cut_out = int(bad.sum())
+    good = np.flatnonzero(~bad)
+    for run in np.split(good, np.flatnonzero(np.diff(good) > 1) + 1):
+        if len(run) >= MIN_SAMPLES:
+            items[next_id] = (g[run], sec, [hits[i] for i in run])
+            owner[g[run]] = next_id
+            remaining.add(next_id)
+            next_id += 1
+        elif len(run):
+            owner[g[run]] = -1
+            cut_out += len(run)
+    return next_id, cut_out
+
+
+def order_tours(tours, faces, funnel):
+    """Tours (points, face, clear tilts per sample, line names) in drawing order, and samples cut.
+
+    No nose meets detail drawn earlier. Peel from the end: the last tour must
+    clear all others. When none can, cut the conflicting samples out of the
+    tour that conflicts least.
+    """
     allp = np.vstack([t[0] for t in tours])
     tree = cKDTree(allp)
     start = np.cumsum([0] + [len(t[0]) for t in tours])
@@ -670,25 +794,11 @@ def main():
             g,
             sec,
             [
-                {t: nose_hits(allp[i], pose_axis(sec, t), allp, tree) for t in tilts[j]}
+                {t: nose_hits(allp[i], pen_axis(faces[sec], t), allp, tree) for t in tilts[j]}
                 for j, i in enumerate(g)
             ],
         )
     next_id, remaining, order, allowed_at, cut_out = len(tours), set(items), [], {}, 0
-
-    def allowed(k):
-        """Clear tilts per sample: the nose misses every other remaining tour and
-        this tour's own wire more than 4 mm along it (either drawing direction)."""
-        others = remaining - {k}
-        return [
-            {
-                t
-                for t, h in hs.items()
-                if not any(owner[j] in others or (owner[j] == k and abs(j - g) > 4) for j in h)
-            }
-            for g, hs in zip(items[k][0], items[k][2], strict=True)
-        ]
-
     while remaining:
         pick = next(
             (
@@ -703,7 +813,7 @@ def main():
                         -allp[items[k][0], 2].min(),
                     ),
                 )
-                for a in [allowed(k)]
+                for a in [allowed(k, items, owner, remaining)]
                 if all(a)
             ),
             None,
@@ -714,96 +824,75 @@ def main():
             allowed_at[pick[0]] = pick[1]
             continue
         k, a = min(
-            ((k, allowed(k)) for k in remaining), key=lambda r: sum(1 for x in r[1] if not x)
+            ((k, allowed(k, items, owner, remaining)) for k in remaining),
+            key=lambda r: sum(1 for x in r[1] if not x),
         )
-        bad = np.array([not x for x in a])
-        g, sec, hits = items.pop(k)
-        remaining.discard(k)
-        owner[g[bad]] = -1
-        cut_out += int(bad.sum())
-        good = np.flatnonzero(~bad)
-        for run in np.split(good, np.flatnonzero(np.diff(good) > 1) + 1):
-            if len(run) >= 8:
-                items[next_id] = (g[run], sec, [hits[i] for i in run])
-                owner[g[run]] = next_id
-                remaining.add(next_id)
-                next_id += 1
-            elif len(run):
-                owner[g[run]] = -1
-                cut_out += len(run)
+        next_id, cut = cut_conflicts(k, a, items, owner, remaining, next_id)
+        cut_out += cut
     order.reverse()
-    stages["ordered"] = sum(length(allp[items[k][0]]) for k in order)
+    ordered = [
+        (allp[items[k][0]], items[k][1], allowed_at[k], names_of(tours, start, items[k][0][0]))
+        for k in order
+    ]
+    funnel["ordered"] = sum(length(t[0]) for t in ordered)
+    return ordered, cut_out
 
-    def tilt_profile(sets):
-        """A clear tilt per sample that changes as little as possible (Viterbi)."""
-        T = np.array(TILTS, float)
-        unary = np.array([[0.01 * abs(t - 45) if t in s else np.inf for t in TILTS] for s in sets])
-        cost, back = unary[0].copy(), np.zeros((len(sets), len(T)), int)
-        for i in range(1, len(sets)):
-            total = cost[:, None] + np.abs(T[:, None] - T[None, :])
-            back[i] = np.argmin(total, axis=0)
-            cost = total[back[i], np.arange(len(T))] + unary[i]
-        path = [int(np.argmin(cost))]
-        for i in range(len(sets) - 1, 0, -1):
-            path.append(back[i][path[-1]])
-        return T[path[::-1]]
 
-    # 5. graph: tours on the frame, fused where they touch
-    graph = deepcopy(framework)
-    nodes = {n["id"]: n for n in graph["nodes"]}
-    edges = {e["id"]: e for e in graph["edges"]}
-    cuts = {key: {0.0: e["start"], 1.0: e["end"]} for key, e in edges.items()}
-    keys, fracs, pts = [], [], []
-    for key, e in edges.items():
-        a, b = np.asarray(e["segments"][0][0]), np.asarray(e["segments"][0][-1])
-        for t in np.linspace(0, 1, max(2, int(np.linalg.norm(b - a) / 0.0005))):
-            keys.append(key)
-            fracs.append(t)
-            pts.append(a + t * (b - a))
-    ftree = cKDTree(np.asarray(pts))
-    touch = WIRE_R * 2 + 0.0004
+def tilt_profile(sets):
+    """A clear tilt per sample that changes as little as possible (Viterbi)."""
+    T = np.array(TILTS, float)
+    unary = np.array(
+        [[TILT_COST * abs(t - LIKED_TILT) if t in s else np.inf for t in TILTS] for s in sets]
+    )
+    cost, back = unary[0].copy(), np.zeros((len(sets), len(T)), int)
+    for i in range(1, len(sets)):
+        total = cost[:, None] + np.abs(T[:, None] - T[None, :])
+        back[i] = np.argmin(total, axis=0)
+        cost = total[back[i], np.arange(len(T))] + unary[i]
+    path = [int(np.argmin(cost))]
+    for i in range(len(sets) - 1, 0, -1):
+        path.append(back[i][path[-1]])
+    return T[path[::-1]]
 
-    def new_node(point, prefix):
-        nid = f"{prefix}{len(nodes):05d}"
-        nodes[nid] = {
-            "id": nid,
-            "position": np.asarray(point).tolist(),
-            "ground": bool(point[2] <= 1e-7),
-        }
-        return nid
 
-    fused, art_edges, rows, rank, dropped = [], [], [], -1, 0
+def trim_overhang(p, tilt, ftree):
+    """Start on a contact, overhang at most OVERHANG mm; None if it never touches.
 
-    def supported(p, tilt):
-        """Start on a contact, overhang at most 8 mm; None if it never touches.
+    Of the two directions keep the one that keeps more line, and when they
+    keep about the same, the one that ends going up, so the pen backs away
+    from wire it has just laid.
+    """
+    d, _ = ftree.query(p)
+    on = np.flatnonzero(d <= TOUCH)
+    if not len(on):
+        return None
+    options = []
+    for flip in (False, True):
+        q, t, o = (p[::-1], tilt[::-1], len(p) - 1 - on[::-1]) if flip else (p, tilt, on)
+        end = min(len(q), o[-1] + OVERHANG + 1)
+        q, t = q[o[0] : end], t[o[0] : end]
+        rising = len(q) > RISE and q[-1, 2] > q[-RISE - 1, 2]
+        options.append((round(length(q) / SAME_LENGTH), rising, q, t))
+    _, _, q, t = max(options, key=lambda r: (r[0], r[1]))
+    return (q, t) if length(q) >= MIN_SUPPORTED else None
 
-        Of the two directions keep the one that keeps more line, and when they
-        keep about the same, the one that ends going up, so the pen backs away
-        from wire it has just laid.
-        """
-        d, _ = ftree.query(p)
-        on = np.flatnonzero(d <= touch)
-        if not len(on):
-            return None
-        options = []
-        for flip in (False, True):
-            q, t, o = (p[::-1], tilt[::-1], len(p) - 1 - on[::-1]) if flip else (p, tilt, on)
-            q, t = q[o[0] : min(len(q), o[-1] + 9)], t[o[0] : min(len(q), o[-1] + 9)]
-            rising = len(q) > 5 and q[-1, 2] > q[-6, 2]
-            options.append((round(length(q) / 0.003), rising, q, t))
-        _, _, q, t = max(options, key=lambda r: (r[0], r[1]))
-        return (q, t) if length(q) >= 0.006 else None
 
-    ready = []
-    for position, k in enumerate(order):
-        tilt = tilt_profile(allowed_at[k])
-        kept = supported(allp[items[k][0]], tilt)
+def choose_tilts(ordered, ftree):
+    """Ready entries for the ordered tours that touch the frame, and how many never do.
+
+    Each tour gets its smoothest clear tilt per sample, is trimmed to start on
+    a contact, and offers the planner its tilt hints.
+    """
+    ready, dropped = [], 0
+    for position, (p, sec, allowed_here, names) in enumerate(ordered):
+        tilt = tilt_profile(allowed_here)
+        kept = trim_overhang(p, tilt, ftree)
         if kept is None:
             dropped += 1
             continue
         # The planner holds one tilt per stroke: offer the tilts clear along the
         # whole tour first (steepest first), then the tour's most common ones.
-        whole = sorted(set.intersection(*allowed_at[k]), reverse=True)
+        whole = sorted(set.intersection(*allowed_here), reverse=True)
         common = [
             t
             for t, _ in sorted(
@@ -811,143 +900,173 @@ def main():
             )
         ]
         hints = [float(t) for t in dict.fromkeys([*whole, *common])]
-        ready.append({"position": position, "k": k, "p": kept[0], "tilt": kept[1], "hints": hints})
+        ready.append(
+            {
+                "position": position,
+                "p": kept[0],
+                "tilt": kept[1],
+                "hints": hints,
+                "face": sec,
+                "lines": names,
+            }
+        )
+    return ready, dropped
 
-    lap("order tours")
-    # Keep what the arm can draw; cut a failing tour at the failing point,
-    # or trim the end it cannot reach, and check the pieces again.
+
+def cut_parts(p, tilt, cut):
+    """What is left of a line (and its tilts) after cutting at ``cut``."""
+    if cut == "start":
+        return [(p[END_TRIM:], tilt[END_TRIM:])]
+    if cut == "end":
+        return [(p[:-END_TRIM], tilt[:-END_TRIM])]
+    before, after = max(0, cut - CUT_BEFORE), cut + CUT_AFTER
+    return [(p[:before], tilt[:before]), (p[after:], tilt[after:])]
+
+
+def planner_filter(ready, profile, source, target, framework, faces, clear, ftree, funnel):
+    """The ready entries the arm can draw, each with the tilts that work.
+
+    A failing tour is cut at the failing point, or trimmed at the end the arm
+    cannot reach, and the pieces are checked again, at most MAX_CUTS deep.
+    """
     # Scratch for the check, named for the object (its profile sits beside
     # the cell profile, whose robot paths are relative to it); both go
     # when the check is done.
     scratch = f"{target.parent.name}_{target.name}_check"
-    check_profile = detail_profile(args.profile, args.profile.parent / f"{scratch}.yaml")
+    check_profile = detail_profile(profile, profile.parent / f"{scratch}.yaml")
     check_cell = target.parent / scratch
-    checker = PlannerCheck(source, framework, check_profile, check_cell, sectors)
+    checker = PlannerCheck(source, framework, check_profile, check_cell, faces)
     queue, ready, checks = list(ready), [], 0
     while queue:
         entry = queue.pop(0)
         p, tilt = entry["p"], entry["tilt"]
-        works, cut = checker.check(p, items[entry["k"]][1], entry["hints"], clear_sets)
+        works, cut = checker.check(p, entry["face"], entry["hints"], clear)
         checks += 1
         if works:
             ready.append({**entry, "hints": works})
             continue
-        if cut is None or entry.get("depth", 0) >= 4:
+        if cut is None or entry.get("depth", 0) >= MAX_CUTS:
             continue
-        if cut == "start":
-            parts = [(p[5:], tilt[5:])]
-        elif cut == "end":
-            parts = [(p[:-5], tilt[:-5])]
-        else:
-            parts = [
-                (p[: max(0, cut - 2)], tilt[: max(0, cut - 2)]),
-                (p[cut + 3 :], tilt[cut + 3 :]),
-            ]
-        for q, t in parts:
-            kept = supported(q, t) if len(q) >= 8 else None
-            if kept is not None and length(kept[0]) >= 0.010:
+        for q, t in cut_parts(p, tilt, cut):
+            kept = trim_overhang(q, t, ftree) if len(q) >= MIN_SAMPLES else None
+            if kept is not None and length(kept[0]) >= MIN_CHECKED:
                 queue.append(
                     {**entry, "p": kept[0], "tilt": kept[1], "depth": entry.get("depth", 0) + 1}
                 )
     shutil.rmtree(check_cell, ignore_errors=True)
     check_profile.unlink(missing_ok=True)
-    stages["arm can draw it"] = sum(length(e["p"]) for e in ready)
+    funnel["arm can draw it"] = sum(length(e["p"]) for e in ready)
     print(f"planner check: {checks} lines checked, {len(ready)} drawable")
+    return ready
 
-    lap("planner check")
-    # The longest lines within budget are drawn; the rest stay as spares that
-    # plan-geometry draws instead of any the arm cannot draw after all.
-    picked = set(
-        choose_detail(
-            [(i, length(e["p"])) for i, e in enumerate(ready)], args.detail, args.minutes
-        )
-    )
+
+def pick_strokes(ready, detail_m, minutes, funnel):
+    """Mark each ready entry ``spare`` unless it is among the longest within budget.
+
+    Spares are drawn by plan-geometry instead of any the arm cannot draw after all.
+    """
+    lines = [(i, length(e["p"])) for i, e in enumerate(ready)]
+    picked = set(choose_detail(lines, detail_m, minutes))
     for i, entry in enumerate(ready):
         entry["spare"] = i not in picked
-    stages["within detail and time"] = sum(length(e["p"]) for e in ready if not e["spare"])
-    for entry in sorted(ready, key=lambda e: e["position"]):
-        p, tilt, hints, k = entry["p"], entry["tilt"], entry["hints"], entry["k"]
-        sec = items[k][1]
-        rank += 1
-        # The planner starts a stroke on a built node, so the tour begins on
-        # the frame wire itself, at a node it shares with the frame.
-        _, first = ftree.query(p[0])
-        key0, t0 = keys[first], fracs[first]
-        near = [u for u in cuts[key0] if abs(u - t0) < 1e-3]
-        t0 = near[0] if near else t0
-        if t0 not in cuts[key0]:
-            e = edges[key0]
-            ea, eb = np.asarray(e["segments"][0][0]), np.asarray(e["segments"][0][-1])
-            cuts[key0][t0] = new_node(ea + t0 * (eb - ea), "cut-n")
-        p = np.vstack([nodes[cuts[key0][t0]]["position"], p[1:]])
-        knots = resample(p, 0.003)
-        kk = np.vstack([2 * knots[0] - knots[1], knots, 2 * knots[-1] - knots[-2]])
-        segs = np.array(
-            [
-                [
-                    kk[i],
-                    kk[i] + (kk[i + 1] - kk[i - 1]) / 6,
-                    kk[i + 1] - (kk[i + 2] - kk[i]) / 6,
-                    kk[i + 1],
-                ]
-                for i in range(1, len(kk) - 2)
-            ]
-        )
-        segs[..., 2] = np.maximum(segs[..., 2], 0.0)
-        d, idx = ftree.query(knots)
-        s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(knots, axis=0), axis=1))]
-        contacts, last = [], -1.0
-        for i in range(len(knots)):
-            if d[i] <= touch and d[i] == d[max(0, i - 2) : i + 3].min() and s[i] - last >= 0.004:
-                contacts.append(i)
-                last = s[i]
-        contacts = [i for i in contacts if s[i] >= 0.002]
-        bounds = sorted(set([0, len(knots) - 1] + contacts))
-        tid = f"tour-{rank:03d}"
-        knot_node = {i: new_node(knots[i], "tour-n") for i in bounds}
-        knot_node[0] = cuts[key0][t0]
-        for i in contacts:
-            key, t = keys[idx[i]], fracs[idx[i]]
-            near = [u for u in cuts[key] if abs(u - t) < 1e-3]
-            t = near[0] if near else t
-            if t not in cuts[key]:
-                e = edges[key]
-                ea, eb = np.asarray(e["segments"][0][0]), np.asarray(e["segments"][0][-1])
-                cuts[key][t] = new_node(ea + t * (eb - ea), "cut-n")
-            fused.append([knot_node[i], cuts[key][t]])
-        for j, (a, b) in enumerate(zip(bounds[:-1], bounds[1:], strict=True)):
-            art_edges.append(
-                {
-                    "id": f"{tid}-m{j:03d}",
-                    "start": knot_node[a],
-                    "end": knot_node[b],
-                    "role": "artistic",
-                    "origin": "detail_tour",
-                    "required": True,
-                    "diameter_m": 2 * WIRE_R,
-                    "segments": segs[a:b].tolist(),
-                    "process_status": "not_checked",
-                    "parent_curve": tid,
-                    "source_interval": [a, b],
-                    "stage": "artistic",
-                    "order_hint": 20000 + rank,
-                    "face": int(sec),
-                    "pen_lean_azimuth_deg": float(sectors[sec]),
-                    "pen_tilt_candidates_deg": hints,
-                }
-            )
-        rows.append(
-            {
-                "id": tid,
-                "length_m": length(p),
-                "face": int(sec),
-                "contacts": len(contacts),
-                "tilt_deg": tilt.tolist(),
-                "lines": names_of(tours, start, items[k][0][0]),
-                "spare": entry["spare"],
-            }
-        )
+    funnel["within detail and time"] = sum(length(e["p"]) for e in ready if not e["spare"])
 
+
+# --- the stroke graph ----------------------------------------------------------------
+def frame_samples(framework):
+    """Points every STEP along the frame edges: edge id and fraction of each, and their tree."""
+    keys, fracs, pts = [], [], []
+    for key, e in {e["id"]: e for e in framework["edges"]}.items():
+        a, b = np.asarray(e["segments"][0][0]), np.asarray(e["segments"][0][-1])
+        for t in np.linspace(0, 1, max(2, int(np.linalg.norm(b - a) / STEP))):
+            keys.append(key)
+            fracs.append(t)
+            pts.append(a + t * (b - a))
+    return keys, fracs, cKDTree(np.asarray(pts))
+
+
+def new_node(nodes, point, prefix):
+    """Add a node at ``point`` to ``nodes``; its id."""
+    nid = f"{prefix}{len(nodes):05d}"
+    nodes[nid] = {
+        "id": nid,
+        "position": np.asarray(point).tolist(),
+        "ground": bool(point[2] <= 1e-7),
+    }
+    return nid
+
+
+def frame_node(nodes, edges, cuts, key, t):
+    """The node splitting frame edge ``key`` at fraction ``t`` (or a cut within CUT_SNAP)."""
+    near = [u for u in cuts[key] if abs(u - t) < CUT_SNAP]
+    t = near[0] if near else t
+    if t not in cuts[key]:
+        e = edges[key]
+        ea, eb = np.asarray(e["segments"][0][0]), np.asarray(e["segments"][0][-1])
+        cuts[key][t] = new_node(nodes, ea + t * (eb - ea), "cut-n")
+    return cuts[key][t]
+
+
+def add_tour(entry, rank, faces, samples, nodes, edges, cuts, fused):
+    """The graph edges and the detail row of one tour; adds its nodes, frame cuts and contacts."""
+    keys, fracs, ftree = samples
+    p, tilt, hints, sec = entry["p"], entry["tilt"], entry["hints"], entry["face"]
+    # The planner starts a stroke on a built node, so the tour begins on
+    # the frame wire itself, at a node it shares with the frame.
+    _, first = ftree.query(p[0])
+    start = frame_node(nodes, edges, cuts, keys[first], fracs[first])
+    p = np.vstack([nodes[start]["position"], p[1:]])
+    knots, segs = resample(p, KNOT_SPACING), cubic_pieces(p, KNOT_SPACING)
+    d, idx = ftree.query(knots)
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(knots, axis=0), axis=1))]
+    contacts, last = [], -1.0
+    for i in range(len(knots)):
+        w = d[max(0, i - CONTACT_WINDOW) : i + CONTACT_WINDOW + 1]
+        if d[i] <= TOUCH and d[i] == w.min() and s[i] - last >= CONTACT_SPACING:
+            contacts.append(i)
+            last = s[i]
+    contacts = [i for i in contacts if s[i] >= FIRST_CONTACT]
+    bounds = sorted(set([0, len(knots) - 1] + contacts))
+    tid = f"tour-{rank:03d}"
+    knot_node = {i: new_node(nodes, knots[i], "tour-n") for i in bounds}
+    knot_node[0] = start
+    for i in contacts:
+        fused.append([knot_node[i], frame_node(nodes, edges, cuts, keys[idx[i]], fracs[idx[i]])])
+    tour_edges = [
+        {
+            "id": f"{tid}-m{j:03d}",
+            "start": knot_node[a],
+            "end": knot_node[b],
+            "role": "artistic",
+            "origin": "detail_tour",
+            "required": True,
+            "diameter_m": 2 * WIRE_R,
+            "segments": segs[a:b].tolist(),
+            "process_status": "not_checked",
+            "parent_curve": tid,
+            "source_interval": [a, b],
+            "stage": "artistic",
+            "order_hint": DETAIL_ORDER + rank,
+            "face": int(sec),
+            "pen_lean_azimuth_deg": float(faces[sec]),
+            "pen_tilt_candidates_deg": hints,
+        }
+        for j, (a, b) in enumerate(zip(bounds[:-1], bounds[1:], strict=True))
+    ]
+    row = {
+        "id": tid,
+        "length_m": length(p),
+        "face": int(sec),
+        "contacts": len(contacts),
+        "tilt_deg": tilt.tolist(),
+        "lines": entry["lines"],
+        "spare": entry["spare"],
+    }
+    return tour_edges, row
+
+
+def split_frame(edges, cuts):
+    """The frame edges split at their cuts."""
     split = []
     for key, e in edges.items():
         ordered = sorted(cuts[key])
@@ -963,6 +1082,21 @@ def main():
                     "source_interval": [lo + a * (hi - lo), lo + b * (hi - lo)],
                 }
             )
+    return split
+
+
+def build_graph(framework, ready, faces, samples):
+    """The stroke graph: tours on the frame, fused where they touch; a row per tour; contacts."""
+    graph = deepcopy(framework)
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    edges = {e["id"]: e for e in graph["edges"]}
+    cuts = {key: {0.0: e["start"], 1.0: e["end"]} for key, e in edges.items()}
+    fused, art_edges, rows = [], [], []
+    for rank, entry in enumerate(sorted(ready, key=lambda e: e["position"])):
+        tour_edges, row = add_tour(entry, rank, faces, samples, nodes, edges, cuts, fused)
+        art_edges += tour_edges
+        rows.append(row)
+    split = split_frame(edges, cuts)
     for e in split + art_edges:
         e["length_m"] = curve_length(e)
     graph.update(
@@ -971,39 +1105,47 @@ def main():
         fused_turns=graph.get("fused_turns", []) + fused,
         method="wireprint_with_detail_tours",
     )
+    return graph, rows, len(fused)
 
-    lap("build graph")
+
+# --- output --------------------------------------------------------------------------
+def write(source, target, graph, rows, faces, args):
+    """Write the target run and ``detail_tours.json``; the drawn rows, screen and minutes."""
     spares = [r for r in rows if r.pop("spare")]
     rows = [r for r in rows if r not in spares]
     if not rows:
         no_detail("the arm can draw none of the detail lines")
     screen = write_detail_source(source, target, graph)
-    detail = sum(r["length_m"] for r in rows)
-    minutes = estimated_minutes(detail, len(rows))
+    minutes = estimated_minutes(sum(r["length_m"] for r in rows), len(rows))
     write_json(
         target / "detail_tours.json",
         {
             "tours": rows,
             # In the stroke graph too; plan-geometry leaves them out until needed.
             "spares": spares,
-            "face_azimuth_deg": sectors,
+            "face_azimuth_deg": faces,
             "estimated_added_minutes": minutes,
             "settings": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
         },
     )
+    return rows, screen, minutes
+
+
+def report(funnel, taken, pieces, tours, cut_out, dropped, rows, fused, screen, minutes):
+    """Print the metres kept by each stage and a summary of the detail."""
+    detail = sum(r["length_m"] for r in rows)
     tilts = np.concatenate([r["tilt_deg"] for r in rows])
     median = 1e3 * np.median([r["length_m"] for r in rows])
     counts = dict(zip(*[x.tolist() for x in np.unique(tilts, return_counts=True)], strict=True))
     steady = sum(1 for r in rows if len(set(r["tilt_deg"])) == 1)
     sag = 1e3 * screen.get("maximum_displacement_m", np.nan)
-    stages["touches frame, trimmed"] = detail
-    lap("write and structure check")
-    print("time by stage (s): " + ", ".join(f"{k} {v:.0f}" for k, v in clock.items()))
-    print("length by stage (m): " + ", ".join(f"{k} {v:.2f}" for k, v in stages.items()))
-    print(f"lines {len(chosen)} ({used:.2f} m) -> {len(pieces)} pieces -> {len(tours)} tours")
+    used = sum(length(q) for q in taken)
+    funnel["touches frame, trimmed"] = detail
+    print("length by stage (m): " + ", ".join(f"{k} {v:.2f}" for k, v in funnel.items()))
+    print(f"lines {len(taken)} ({used:.2f} m) -> {len(pieces)} pieces -> {len(tours)} tours")
     print(f"ordering cut {cut_out / 1000:.2f} m; {dropped} tours never touch the frame")
     print(f"detail {detail:.2f} m in {len(rows)} strokes (median {median:.0f} mm)")
-    print(f"{len(fused)} fused contacts, about {minutes:.1f} min more")
+    print(f"{fused} fused contacts, about {minutes:.1f} min more")
     print(f"tilt samples {counts}; {steady}/{len(rows)} strokes keep one tilt")
     print(f"structure pass {screen['modeled_pass']} sag {sag:.3f} mm {screen.get('failure', '')}")
 
