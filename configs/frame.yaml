@@ -101,7 +101,6 @@ transit:
     - [-1, 1, 1]
     - [1, -1, 1]
     - [-1, -1, 1]
-  parking_clearance_m: 0.10
   lift_sample_m: 0.030
   lift_position_tolerance_m: 0.0003
   lift_orientation_tolerance_rad: 0.003
@@ -109,4 +108,4 @@ transit:
   contact_radius_m: 0.004
   rrt_step_rad: 0.15
   rrt_maximum_nodes: 2000
-  rrt_maximum_seconds: 3.0
+  rrt_maximum_seconds: 30.0

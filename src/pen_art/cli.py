@@ -12,6 +12,7 @@ Each command prints one summary line. Everything is simulation.
 """
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -26,8 +27,15 @@ RUNS = Path("runs")
 PROFILE = CELL_DIR / "cell.yaml"
 
 
+def _name(name):
+    """An object's name is a plain folder name in runs/, nothing else."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise SystemExit(f"{name!r}: use letters, digits, '-' or '_' for an object's name")
+    return name
+
+
 def _folder(name):
-    folder = RUNS / name
+    folder = RUNS / _name(name)
     if not folder.is_dir():
         raise SystemExit(f"no object {name!r} in {RUNS}/: run `pen-art frame MESH --name {name}`")
     return folder
@@ -54,7 +62,9 @@ def frame(args):
     from .planning.section_build import prepare_framework, prepare_mesh_within_wire
 
     profile = _cell()
-    folder = RUNS / args.name
+    folder = RUNS / _name(args.name)
+    if not args.mesh.is_file():
+        raise SystemExit(f"no mesh at {args.mesh}")
     if folder.exists():
         shutil.rmtree(folder)  # A new frame invalidates everything planned from the old one.
     folder.mkdir(parents=True)
@@ -90,20 +100,33 @@ def frame(args):
 
 
 def detail(args):
+    from .detail import NO_DETAIL
+
     folder = _folder(args.name)
+    fresh = folder / "detail-new"
+    shutil.rmtree(fresh, ignore_errors=True)
+    command = [
+        sys.executable, "-m", "pen_art.detail", str(folder / "frame_source"), str(fresh),
+        "--profile", str(_cell()), "--check-with-planner", "--detail", str(args.detail),
+    ]
+    if args.crease_threshold:
+        command += ["--crease-threshold", *map(str, args.crease_threshold)]
+    with open(folder / "detail.log", "w") as log:
+        result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False)
+    if result.returncode not in (0, NO_DETAIL):
+        shutil.rmtree(fresh, ignore_errors=True)
+        raise SystemExit(f"detail {args.name} failed; see {folder / 'detail.log'}")
+    # New detail replaces the old, and every plan made with the old one goes.
     for old in [folder / "detail", folder / "state.json", *folder.glob("round-*")]:
         if old.is_dir():
             shutil.rmtree(old)
         elif old.exists():
             old.unlink()
-    command = [
-        sys.executable, "-m", "pen_art.detail", str(folder / "frame_source"),
-        str(folder / "detail"), "--profile", str(_cell()), "--check-with-planner",
-    ]
-    with open(folder / "detail.log", "w") as log:
-        result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False)
-    if result.returncode:
-        raise SystemExit(f"detail failed; see {folder / 'detail.log'}")
+    if result.returncode == NO_DETAIL:
+        why = (folder / "detail.log").read_text().strip().splitlines()[-1]
+        print(f"{why.replace('detail', f'detail {args.name}', 1)}; plan the frame alone")
+        return
+    fresh.rename(folder / "detail")
     tours = read_json(folder / "detail" / "detail_tours.json")["tours"]
     print(
         f"detail {args.name}: {sum(t['length_m'] for t in tours):.2f} m in {len(tours)} strokes "
@@ -121,12 +144,16 @@ def _lift_offs(state):
 def plan_geometry(args):
     from .stages import plan_geometry as stage
 
-    state = stage(_folder(args.name), _cell(), args.workers, frame_only=args.frame_only)
+    folder = _folder(args.name)
+    state = stage(folder, _cell(), args.workers, frame_only=args.frame_only)
     dropped = len(state.get("dropped", []))
     print(
         f"plan-geometry {args.name}: {state['geometry']}, {_lift_offs(state)}"
         + (f", dropped {dropped} detail strokes the arm cannot draw" if dropped else "")
     )
+    if state.get("blocked"):
+        print(f"  frame strokes the arm cannot draw: {', '.join(state['blocked'])}")
+    _finish(state["geometry"], "GEOMETRY_PLANNED", folder)
 
 
 def plan_timing(args):
@@ -141,13 +168,25 @@ def plan_timing(args):
     if state.get("trimmed"):
         line += f", trimmed {len(state['trimmed'])} detail strokes to fit"
     print(line)
+    _finish(state["timing"], "FULL_BUILD_PLANNED", RUNS / args.name)
 
 
 def verify_full_robot(args):
     from .stages import verify_full_robot as stage
 
-    state = stage(_folder(args.name), args.workers)
-    print(f"verify-full-robot {args.name}: {state['verification']} (simulation only)")
+    folder = _folder(args.name)
+    state = stage(folder, args.workers)
+    print(
+        f"verify-full-robot {args.name}: {state['verification']} (simulation only), "
+        f"{state['print_minutes']:.1f} min of printing, {_lift_offs(state)}"
+    )
+    _finish(state["verification"], "FULL_BUILD_VERIFIED", folder)
+
+
+def _finish(status, success, folder):
+    """A failed stage exits non-zero and says where to look."""
+    if status != success:
+        raise SystemExit(f"  see {folder / 'planning.log'}")
 
 
 def view(args):
@@ -178,6 +217,11 @@ def main(argv=None):
 
     step = steps.add_parser("detail", help="add detail strokes over the frame")
     step.add_argument("name")
+    step.add_argument("--detail", type=float, default=5.0, help="m of detail lines to collect")
+    step.add_argument(
+        "--crease-threshold", type=float, nargs="+",
+        help="mm a crease bulges or dents; smaller values add shallower creases",
+    )
     step.set_defaults(run=detail)
 
     for name, function, text in (

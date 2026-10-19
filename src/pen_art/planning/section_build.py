@@ -287,7 +287,6 @@ class SectionBuild:
         self.planner.adaptation_waypoint_checks = False
         if len(self.planner.arms) != 1:
             raise ValueError("Section builds require exactly one arm")
-        self.planner.transit["rrt_maximum_seconds"] = 30.0
         self.arm = next(iter(self.planner.arms.values()))
         self.initial = self.arm.initial_positions.copy()
         self.actions = self.planner.actions

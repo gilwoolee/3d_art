@@ -16,10 +16,14 @@ and refuses to run when it is missing or its inputs changed.
   far. A plan that passes is ``FULL_BUILD_VERIFIED``.
 """
 
+import hashlib
+import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 from .curves import curve_length
 from .io import read_json, sha256, write_json
@@ -28,6 +32,10 @@ from .planning.sections import section_actions
 from .structure import analyze_structure
 
 STATE = "state.json"
+# The frame.yaml sections read when the paths are planned and timed. The
+# others (wireprint, graph, structure, process) are copied into the frame by
+# `pen-art frame`, so they take effect when the frame is made again.
+PLANNING_SECTIONS = ("timing", "transit", "planning")
 
 
 class StageOrderError(RuntimeError):
@@ -89,19 +97,38 @@ def drop_strokes(source, target, tours):
     return screen["modeled_pass"]
 
 
-def _inputs(source, profile):
+def _inputs(source, profile, cell):
+    from .cell_config import load_frame_config
+
+    config = load_frame_config()
+    sections = json.dumps({name: config[name] for name in PLANNING_SECTIONS}, sort_keys=True)
     return {
         "stroke_graph": sha256(Path(source) / "stroke_graph.json"),
         "profile": sha256(Path(profile)),
+        "cell": sha256(Path(cell)),
+        "frame_config": hashlib.sha256(sections.encode()).hexdigest(),
     }
+
+
+def _check_build_volume(frame, cell):
+    """The frame must have been made for the cell's build volume."""
+    made = read_json(Path(frame) / "wire_budget.json")["requested_max_extent_m"]
+    wanted = yaml.safe_load(Path(cell).read_text())["build_volume_m"]
+    if abs(made - wanted) > 1e-9:
+        raise StageOrderError(
+            f"the frame was made for objects up to {made * 100:g} cm and the cell now says "
+            f"{wanted * 100:g} cm: run `pen-art frame` again"
+        )
 
 
 def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=20, log=print):
     """Plan untimed paths for the frame, and the detail when ``detail/`` exists."""
     folder, profile = Path(folder), Path(profile)
+    cell = profile
     frame = folder / "frame_source"
     if not (frame / "stroke_graph.json").exists():
         raise StageOrderError(f"no frame in {frame}: run `pen-art frame` first")
+    _check_build_volume(frame, cell)
     has_detail = (folder / "detail" / "stroke_graph.json").exists()
     source = folder / "detail" if has_detail and not frame_only else frame
     if source.name == "detail":
@@ -109,9 +136,12 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
 
         # Beside the cell profile: its robot paths are relative to it.
         profile = detail_profile(profile, profile.parent / f"{folder.name}_detail.yaml")
+    # Written first, so an interrupted run never leaves a state naming a
+    # round that is gone.
+    state = _save(folder, {"frame": str(frame), "cell": str(cell), "geometry": "RUNNING"})
     for old in folder.glob("round-*"):
         shutil.rmtree(old)
-    state = {"frame": str(frame), "source": str(source), "profile": str(profile)}
+    state.update(source=str(source), profile=str(profile))
     dropped = []
     for number in range(maximum_rounds):
         run = folder / f"round-{number:02d}"
@@ -139,7 +169,7 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         geometry=status,
         round=run.name,
         source=str(source),
-        inputs=_inputs(source, profile),
+        inputs=_inputs(source, profile, cell),
         dropped=dropped,
         lift_offs=report.get("lift_offs", []),
         minimum_trails=report.get("minimum_trails"),
@@ -149,13 +179,20 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
 
 def _require(folder, stage, status):
     state = _state(folder)
-    if state.get(stage) != status:
+    command = "plan-geometry" if stage == "geometry" else "plan-timing"
+    if state.get(stage) is None:
+        raise StageOrderError(f"{folder}: run `pen-art {command}` first")
+    if state[stage] != status:
         raise StageOrderError(
-            f"{folder}: run `pen-art {'plan-geometry' if stage == 'geometry' else 'plan-timing'}`"
-            " first"
+            f"{folder}: `pen-art {command}` ended with {state[stage]} (see "
+            f"{Path(folder) / 'planning.log'}); fix that and run it again"
         )
-    if state["inputs"] != _inputs(state["source"], state["profile"]):
-        raise StageOrderError(f"{folder}: the frame or cell changed; run `pen-art plan-geometry`")
+    _check_build_volume(state["frame"], state["cell"])
+    if state["inputs"] != _inputs(state["source"], state["profile"], state["cell"]):
+        raise StageOrderError(
+            f"{folder}: the frame, the cell or the planning settings in configs/frame.yaml "
+            "changed since `pen-art plan-geometry`: run it again"
+        )
     return state
 
 
@@ -217,7 +254,7 @@ def plan_timing(folder, workers=24, detail_m=2.0, minutes=15.0, maximum_rounds=2
     state.update(
         timing=status,
         source=str(source),
-        inputs=_inputs(source, profile),
+        inputs=_inputs(source, profile, state["cell"]),
         trimmed=state.get("trimmed", []) + trimmed,
         print_minutes=plan.get("modeled_duration_s", 0) / 60 or None,
         lift_offs=plan.get("lift_offs", state.get("lift_offs")),
@@ -239,7 +276,7 @@ def plan_geometry_round(folder, state, source, number, workers):
         "geometry": report["status"],
         "round": run.name,
         "source": str(source),
-        "inputs": _inputs(source, state["profile"]),
+        "inputs": _inputs(source, state["profile"], state["cell"]),
         "lift_offs": report.get("lift_offs", []),
     }
 
@@ -254,7 +291,14 @@ def verify_full_robot(folder, workers=24):
         "--run", str(run), "--config", state["profile"], "--workers", str(workers),
         "--maximum-seconds", "7200", "--accept-geometry-proofs",
     ]
+    (run / "verification.json").unlink(missing_ok=True)
     with open(folder / "planning.log", "a") as out:
-        subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, check=False)
-    state["verification"] = read_json(run / "section_build.json")["status"]
+        result = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, check=False)
+    # The verdict of this replay, never one left over from an earlier one.
+    finished = (run / "verification.json").exists()
+    state["verification"] = (
+        read_json(run / "section_build.json")["status"] if finished else "VERIFICATION_ERROR"
+    )
+    if result.returncode and state["verification"] == "FULL_BUILD_VERIFIED":
+        state["verification"] = "VERIFICATION_ERROR"
     return _save(folder, state)

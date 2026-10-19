@@ -169,7 +169,10 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     assert info["minimum_trails_after"] == 1
     assert 0 < info["added_m"] < 0.5
     connectors = [edge for edge in graph["edges"] if edge.get("origin") == "euler_connector"]
-    assert connectors and all(clear_of_other_wire(edge, graph) for edge in connectors)
+    chains = defaultdict(list)
+    for edge in connectors:
+        chains[edge["id"].rsplit("-m", 1)[0]].append(edge)  # euler-NNN-mKKK
+    assert chains and all(clear_of_other_wire(chain, graph) > 0 for chain in chains.values())
     # Every wire, connectors included, is one straight member between two nodes.
     assert all(len(edge["segments"]) == 1 for edge in graph["edges"])
     # The bed is drawn as one stroke that ends where the walls begin.
@@ -187,22 +190,29 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     assert breaks == sorted(breaks) and len(breaks) > 8
 
 
-def clear_of_other_wire(connector, graph, margin=0.003):
-    """No point of the connector away from its ends lies on another wire."""
+def clear_of_other_wire(chain, graph, margin=0.003):
+    """The points of one connector chain checked against other wire, or 0 if one
+    away from the chain's two ends lies on another wire."""
     nodes = {node["id"]: np.asarray(node["position"]) for node in graph["nodes"]}
-    ends = nodes[connector["start"]], nodes[connector["end"]]
-    points = [np.asarray(point) for segment in connector["segments"] for point in segment]
+    ids = {edge["id"] for edge in chain}
+    counts = defaultdict(int)
+    for edge in chain:
+        counts[edge["start"]] += 1
+        counts[edge["end"]] += 1
+    ends = [nodes[node] for node, count in counts.items() if count == 1]
+    points = [np.asarray(point) for edge in chain for segment in edge["segments"]
+              for point in segment]
     points = [p for p in points if min(np.linalg.norm(p - end) for end in ends) > margin]
     for edge in graph["edges"]:
-        if edge is connector:
+        if edge["id"] in ids:
             continue
         for segment in edge["segments"]:
             a, b = np.asarray(segment[0]), np.asarray(segment[-1])
             for p in points:
                 t = np.clip(np.dot(p - a, b - a) / max(np.dot(b - a, b - a), 1e-18), 0, 1)
-                if np.linalg.norm(p - (a + t * (b - a))) < connector["diameter_m"]:
-                    return False
-    return True
+                if np.linalg.norm(p - (a + t * (b - a))) < chain[0]["diameter_m"]:
+                    return 0
+    return len(points)
 
 
 def solidified_fork_drops_the_fin_and_keeps_printable_layers():

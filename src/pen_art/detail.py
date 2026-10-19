@@ -1,6 +1,8 @@
 """Add surface detail to a WirePrint frame as a few long strokes drawn after it.
 
-    .venv/bin/python scripts/detail_tours.py FRAME_SOURCE TARGET [options]
+    .venv/bin/python -m pen_art.detail FRAME_SOURCE TARGET [options]
+
+(``pen-art detail NAME`` runs this for an object.)
 
 FRAME_SOURCE is a source run whose ``framework_graph.json`` is the frame (for
 example one written by ``prepare_framework``). TARGET is written as a new
@@ -15,10 +17,10 @@ Rules the detail follows:
 * It is drawn after the frame. The planner lets the pen tip run along existing
   wire; only the nose behind the tip (estimated tapered nose, 3 mm and up)
   must keep ``--margin`` from it, and must stay above the bed.
-* One stroke keeps one face of the object (one of four sides; the pen body leans
-  toward the robot), so a stroke stays on one face of the object. Its tilt
-  may change along the stroke (0-60 degrees here); the chosen tilt profile
-  changes as little as possible.
+* One stroke keeps one side of the object (one of four), and the pen body
+  leans toward that side: toward the robot for the side facing it, away from
+  it for the far side. The planner draws a stroke at one tilt (0-60 degrees);
+  the tilts offered are those clear along the whole stroke first.
 * Print time is dominated by strokes, so lines on one face are joined end to
   end through short connecting runs on the surface into long tours.
 
@@ -49,6 +51,13 @@ TILTS = (0, 15, 30, 45, 60)
 # approach and withdrawal 6-7 s, waits and join about 4 s); detail draws at
 # about 10 mm/s.
 SECONDS_PER_STROKE, DRAW_SPEED = 20.0, 0.010
+# Exit status when no drawable detail was found; nothing is written.
+NO_DETAIL = 3
+
+
+def no_detail(why):
+    print(f"detail 0.00 m in 0 strokes: {why}")
+    raise SystemExit(NO_DETAIL)
 
 
 # --- geometry helpers ------------------------------------------------------------
@@ -251,7 +260,7 @@ def detail_profile(base, path, nose_clearance=0.0003):
     profile["transit"] = {"withdraw_distance_m": 0.015}
     profile["setup_description"] = (
         profile.get("setup_description", "")
-        + " Detail strokes after the frame may tilt the pen toward the robot; the nose"
+        + " Detail strokes after the frame may tilt the pen toward the side they draw; the nose"
         + f" keeps {nose_clearance * 1000:g} mm from wire."
     )
     Path(path).write_text(yaml.safe_dump(profile, sort_keys=False))
@@ -659,6 +668,8 @@ def main():
     stages["8 mm or longer, stroke cap"] = sum(length(t[0]) for t in tours)
 
     lap("join into tours")
+    if not tours:
+        no_detail("no crease lines long enough that a pen tilt clears the frame")
     # 4. order tours so no nose meets detail drawn earlier. Peel from the end:
     #    the last tour must clear all others. When none can, cut the conflicting
     #    samples out of the tour that conflicts least.
@@ -973,6 +984,8 @@ def main():
     )
 
     lap("build graph")
+    if not rows:
+        no_detail("the arm can draw none of the detail lines")
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source, target)

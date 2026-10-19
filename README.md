@@ -97,7 +97,10 @@ $ .venv/bin/pen-art detail ghost
 detail ghost: 3.18 m in 29 strokes (plan-geometry drops what the arm cannot draw; plan-timing trims to the budget)
 ```
 
-This takes about three minutes. Detail follows only the *shape*, so it misses
+This takes about three minutes. `--crease-threshold` (in mm; smaller values
+add shallower creases) and `--detail` (metres of lines to collect) change how
+much it finds. When it finds nothing drawable it says so and the frame is
+planned alone. Detail follows only the *shape*, so it misses
 what is only painted in the texture, like the ghost's eyes and mouth. This
 step is the place to add an AI agent that picks more artistic detail, for
 example from rendered views of the textured mesh.
@@ -157,8 +160,10 @@ verify-full-robot ghost: FULL_BUILD_VERIFIED (simulation only)
 Four panels: the object's picture, the textured model, the frame (green) and
 detail (orange), and the robot drawing it, with one set of play controls.
 
-Stages run in order. Running one before the stage it builds on, or after the
-frame or cell changed, stops with a message naming the stage to run.
+Stages run in order. Running one before the stage it builds on, after it
+failed, or after the frame, the cell or the planning settings changed, stops
+with a message naming the stage to run. A failed stage exits with a non-zero
+status and points to `runs/NAME/planning.log`.
 
 ## Concepts
 
@@ -177,8 +182,10 @@ grid lines end on the outline, so it needs at least 10 strokes. The frame
 step pairs those nodes by a minimum-weight matching and joins each pair with
 a short connector wire just inside the outline, never on top of other wire.
 That leaves two odd nodes, where the drawing starts and ends: one stroke.
-Hierholzer's algorithm then finds the order, bottom to top, so each piece is
-drawn after the wire that holds it up.
+Hierholzer's algorithm orders the base on the plate as one closed loop that
+ends where the walls begin; the walls are already generated in drawing order,
+each zigzag starting where the one below ended, so every piece is drawn after
+the wire that holds it up.
 
 **Lift-offs.** Every time the pen lifts, the arm must come back to the same
 point to rejoin the wire. It runs open loop, so nothing guarantees it does,
@@ -206,7 +213,7 @@ layers and less wire. With `build_volume_m: 0.08` in `configs/cell.yaml`
 | | 15 cm ghost | 8 cm ghost |
 | --- | ---: | ---: |
 | Frame wire | 9.9 m | 3.0 m |
-| Fewest frame strokes, before connector wire | 1, before 10 | 1, before 6 |
+| Fewest frame strokes with connector wire (without) | 1 (10) | 1 (6) |
 | Frame print time | 9.7 min | 3.2 min |
 | Frame lift-offs | 1 | 1 |
 | Detail kept | 1.87 m (+3.5 min) | 1.27 m (+4.2 min) |
@@ -214,8 +221,14 @@ layers and less wire. With `build_volume_m: 0.08` in `configs/cell.yaml`
 | Lift-offs with detail | 14 | 28 |
 | Verdict | `FULL_BUILD_VERIFIED` | `FULL_BUILD_VERIFIED` |
 
-The rest of `configs/frame.yaml` (pen speed, cooling, arm limits, withdraw
-distance) is there to experiment with too.
+The rest of `configs/frame.yaml` is there to experiment with too. Its
+`wireprint`, `graph`, `structure` and `process` sections (frame shape, strand,
+material, pen speed and cooling) are copied into the frame, so they take
+effect when you run `pen-art frame` again. `timing`, `transit` and `planning`
+(arm limits, lifting off and travelling, planner settings) are read when the
+paths are planned; after editing them, run `pen-art plan-geometry` again (the
+later stages refuse until you do). Detail strokes back away 15 mm instead of
+`withdraw_distance_m`, since they lie on the outside of the frame.
 
 ## Limitations
 
