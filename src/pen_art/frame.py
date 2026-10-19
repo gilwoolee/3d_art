@@ -102,7 +102,8 @@ def prepare_mesh_within_wire(mesh, source, source_up, max_extent_m, fabrication)
     longest side by the square root of the overshoot. The size settled on and
     the wire at each try are written to ``wire_budget.json``.
     """
-    from .abstraction.wireprint import connect_framework_islands, eulerize_frame, generate
+    from .abstraction.connectors import eulerize_frame
+    from .abstraction.wireprint import connect_framework_islands, generate
 
     budget = fabrication.get("wireprint", {}).get("maximum_wire_m")
     extent, tries = max_extent_m, []
@@ -141,12 +142,8 @@ def _sag(screen):
 
 def prepare_framework(source):
     """Generate the frame in ``source``, with a heavier strand if it would not stand."""
-    from .abstraction.wireprint import (
-        connect_framework_islands,
-        eulerize_frame,
-        generate,
-        reinforce_base,
-    )
+    from .abstraction.connectors import eulerize_frame
+    from .abstraction.wireprint import connect_framework_islands, generate, reinforce_base
 
     fabrication = read_json(source / "fabrication_config.json")
     material = fabrication["structure"]
@@ -155,17 +152,10 @@ def prepare_framework(source):
         graph = eulerize_frame(
             connect_framework_islands(generate(source, **settings)),
             fabrication.get("wireprint", {}).get("maximum_wire_m", float("inf")),
-            material,
         )
         screen = analyze_structure(graph, material)
         if not screen["modeled_pass"] and "maximum_displacement_m" in screen:
-            graph = reinforce_base(
-                graph,
-                {
-                    "initial_maximum_displacement_m": screen["maximum_displacement_m"],
-                    "initial_maximum_stress_pa": screen["maximum_stress_pa"],
-                },
-            )
+            graph = reinforce_base(graph)
             screen = analyze_structure(graph, material)
         return graph, screen
 

@@ -7,17 +7,23 @@ This is a WirePrint-style generator, not a calibrated printer implementation.
 The returned topology and order still require structural and robot validation.
 """
 
-from copy import deepcopy
 from pathlib import Path
+from typing import NamedTuple
 
-import networkx as nx
 import numpy as np
 import trimesh
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import polygonize, unary_union
 
-from ..graph import base_anchors, connect_components, straight_edge, topology
+from ..graph import base_anchors, connect_components, straight_edge
 from ..io import artifact, read_json, sha256, write_json
+
+# Geometric resolution: seams are chosen and junctions merged on this grid.
+JUNCTION_M = 0.00002
+# Diagonals are kept this far under the descent limit, to allow for the merge.
+DESCENT_MARGIN_DEG = 1
+# A point this close to the bed is on it.
+ON_BED_M = 1e-7
 
 
 def sample_loop(loop, fraction):
@@ -61,7 +67,7 @@ def _layer_heights(
     uniform = np.linspace(low, high, int(np.ceil((high - low) / layer_height)) + 1)
     if not connectors:
         return uniform
-    slope = np.tan(np.radians(descent_deg - 1))
+    slope = np.tan(np.radians(descent_deg - DESCENT_MARGIN_DEG))
     margin = min(0.000001, (high - low) / 1000)
 
     def shortest(z):
@@ -93,20 +99,8 @@ def _layer_heights(
     return np.asarray(heights)
 
 
-def _mesh_framework_at_height(
-    mesh,
-    *,
-    layer_height=0.01,
-    zigzag_spacing=0.025,
-    diameter=0.001,
-    slice_simplification=0.00002,
-    minimum_contour=0.0,
-    maximum_branch_descent_deg,
-    base_line_spacing=None,
-    coil_maximum_width=None,
-    coil_pitch=0.001,
-    minimum_connectors=None,
-):
+def _validate(mesh, layer_height, zigzag_spacing, diameter, slice_simplification, minimum_contour):
+    """Reject settings and meshes the generator cannot slice."""
     if min(layer_height, zigzag_spacing, diameter, slice_simplification) <= 0:
         raise ValueError("Positive layer, zigzag, diameter and simplification are required")
     if not np.isfinite(minimum_contour) or minimum_contour < 0:
@@ -114,489 +108,493 @@ def _mesh_framework_at_height(
     low, high = mesh.bounds[:, 2]
     if high <= low:
         raise ValueError("Mesh must have positive height")
-    heights = _layer_heights(
-        mesh,
-        layer_height,
-        maximum_branch_descent_deg,
-        minimum_connectors,
-        minimum_contour,
-        coil_maximum_width,
-    )
-    layers, repairs, omitted_small = [], [], 0
-    for layer, height in enumerate(heights):
-        # Stay beyond trimesh's plane/vertex tolerance at the extrema. Projecting
-        # these contours to the end plane moves them by at most one micron.
-        end_offset = min(0.000001, (high - low) / 1000)
-        cut_height = np.clip(height, low + end_offset, high - end_offset)
-        # A plane through mesh vertices or along flat faces can cut a closed
-        # surface into open pieces. Nudge the cut by a few microns before
-        # concluding that the surface itself is open.
-        for nudge in (0.0, 2e-6, -2e-6, 5e-6, -5e-6, 1e-5, -1e-5):
-            nudged = np.clip(cut_height + nudge, low + end_offset, high - end_offset)
-            section = mesh.section(plane_origin=[0, 0, nudged], plane_normal=[0, 0, 1])
-            paths = [] if section is None else section.discrete
-            if all(np.linalg.norm(points[0] - points[-1]) <= 1e-6 for points in paths):
-                if nudge:
-                    repairs.append({"layer": layer, "method": "nudged_cut", "offset_m": nudge})
-                break
-        loops = []
-        rings = []
-        for points in paths:
-            if np.linalg.norm(points[0] - points[-1]) > 1e-6:
-                raise ValueError(f"Open contour at layer {layer}; repair the input mesh")
-            original = LineString(points[:, :2])
-            simplified = original.simplify(slice_simplification)
-            if not Polygon(simplified).is_valid:
-                # Node real crossings into simple rings, retaining every unique
-                # boundary segment. Buffer-based repair can erase small features.
-                linework = unary_union(simplified)
-                polygons = list(polygonize(linework))
-                boundaries = unary_union([polygon.boundary for polygon in polygons])
-                lost_length = linework.difference(boundaries).length
-                if not polygons or lost_length > 1e-9:
-                    raise ValueError(f"Unclosed slice linework at layer {layer}: {lost_length} m")
-                unique = {}
-                for polygon in polygons:
-                    for ring in (polygon.exterior, *polygon.interiors):
-                        key = Polygon(ring).normalize().wkb
-                        unique[key] = np.asarray(ring.coords)
-                rings.extend(unique.values())
-                repairs.append(
-                    {
-                        "layer": layer,
-                        "method": "node_crossings",
-                        "simple_rings": len(unique),
-                        "lost_unique_boundary_m": lost_length,
-                    }
-                )
-            else:
-                rings.append(np.asarray(simplified.coords))
-        for xy in rings:
-            if len(xy) < 4:
-                continue
-            polygon = Polygon(xy)
-            if not polygon.is_valid:
-                raise ValueError(f"Self-intersecting slice at layer {layer}")
-            if polygon.area < 1e-12:
-                continue
-            # A rounded tip narrows to nothing, and a contour too small to carry
-            # zigzags within the descent angle would thin every layer of the
-            # object. End the shape at the last contour of printable size.
-            if polygon.length < np.pi * minimum_contour:
-                omitted_small += 1
-                continue
-            # Consistent counterclockwise winding and a repeatable geometric seam.
-            signed = np.sum(xy[:-1, 0] * xy[1:, 1] - xy[1:, 0] * xy[:-1, 1])
-            vertices = xy[:-1] if signed > 0 else xy[:-1][::-1]
-            # Near-equal X coordinates must not randomly choose different
-            # square corners on neighboring slices because of roundoff.
-            quantized = np.rint(vertices / 0.00002)
-            seam = np.lexsort((quantized[:, 1], quantized[:, 0]))[0]
-            vertices = np.roll(vertices, -int(seam), axis=0)
-            closed = np.vstack([vertices, vertices[0]])
-            loop = np.column_stack([closed, np.full(len(closed), height)])
-            loops.append({"points": loop, "polygon": polygon, "joins": {0.0}})
-        for loop in loops:
-            point = loop["polygon"].boundary.interpolate(0)
-            loop["depth"] = sum(
-                other["polygon"].contains(point) for other in loops if other is not loop
-            )
-        loops.sort(key=lambda loop: (loop["depth"], *loop["points"][0, :2]))
-        layers.append(loops)
 
-    # A shape with a rounded underside has no contour on the bed: its lowest
-    # one starts a layer up. Posts under that contour would be the only thing
-    # holding the object, each stuck to the bed at a point. Draw the same
-    # outline flat on the bed instead, so the usual band of risers and
-    # diagonals carries the object on a base that grips along its whole length.
-    base_ring = None
+
+def _section(mesh, height):
+    """Closed outlines where the plane at ``height`` cuts the mesh."""
+    low, high = mesh.bounds[:, 2]
+    # Stay beyond trimesh's plane/vertex tolerance at the extrema. Projecting
+    # these contours to the end plane moves them by at most one micron.
+    end_offset = min(0.000001, (high - low) / 1000)
+    cut_height = np.clip(height, low + end_offset, high - end_offset)
+    # A plane through mesh vertices or along flat faces can cut a closed
+    # surface into open pieces. Nudge the cut by a few microns before
+    # concluding that the surface itself is open.
+    for nudge in (0.0, 2e-6, -2e-6, 5e-6, -5e-6, 1e-5, -1e-5):
+        nudged = np.clip(cut_height + nudge, low + end_offset, high - end_offset)
+        section = mesh.section(plane_origin=[0, 0, nudged], plane_normal=[0, 0, 1])
+        paths = [] if section is None else section.discrete
+        if all(np.linalg.norm(points[0] - points[-1]) <= 1e-6 for points in paths):
+            break
+    return paths
+
+
+def _simple_rings(paths, slice_simplification, layer):
+    """Simplified outlines as simple rings, crossings split into separate rings."""
+    rings = []
+    for points in paths:
+        if np.linalg.norm(points[0] - points[-1]) > 1e-6:
+            raise ValueError(f"Open contour at layer {layer}; repair the input mesh")
+        original = LineString(points[:, :2])
+        simplified = original.simplify(slice_simplification)
+        if not Polygon(simplified).is_valid:
+            # Node real crossings into simple rings, retaining every unique
+            # boundary segment. Buffer-based repair can erase small features.
+            linework = unary_union(simplified)
+            polygons = list(polygonize(linework))
+            boundaries = unary_union([polygon.boundary for polygon in polygons])
+            lost_length = linework.difference(boundaries).length
+            if not polygons or lost_length > 1e-9:
+                raise ValueError(f"Unclosed slice linework at layer {layer}: {lost_length} m")
+            unique = {}
+            for polygon in polygons:
+                for ring in (polygon.exterior, *polygon.interiors):
+                    key = Polygon(ring).normalize().wkb
+                    unique[key] = np.asarray(ring.coords)
+            rings.extend(unique.values())
+        else:
+            rings.append(np.asarray(simplified.coords))
+    return rings
+
+
+def _contour_loops(rings, height, minimum_contour, layer):
+    """Counterclockwise loops at ``height`` with a repeatable seam, sorted by nesting depth."""
+    loops = []
+    for xy in rings:
+        if len(xy) < 4:
+            continue
+        polygon = Polygon(xy)
+        if not polygon.is_valid:
+            raise ValueError(f"Self-intersecting slice at layer {layer}")
+        if polygon.area < 1e-12:
+            continue
+        # A rounded tip narrows to nothing, and a contour too small to carry
+        # zigzags within the descent angle would thin every layer of the
+        # object. End the shape at the last contour of printable size.
+        if polygon.length < np.pi * minimum_contour:
+            continue
+        # Consistent counterclockwise winding and a repeatable geometric seam.
+        signed = np.sum(xy[:-1, 0] * xy[1:, 1] - xy[1:, 0] * xy[:-1, 1])
+        vertices = xy[:-1] if signed > 0 else xy[:-1][::-1]
+        # Near-equal X coordinates must not randomly choose different
+        # square corners on neighboring slices because of roundoff.
+        quantized = np.rint(vertices / JUNCTION_M)
+        seam = np.lexsort((quantized[:, 1], quantized[:, 0]))[0]
+        vertices = np.roll(vertices, -int(seam), axis=0)
+        closed = np.vstack([vertices, vertices[0]])
+        loop = np.column_stack([closed, np.full(len(closed), height)])
+        loops.append({"points": loop, "polygon": polygon, "joins": {0.0}})
+    for loop in loops:
+        point = loop["polygon"].boundary.interpolate(0)
+        loop["depth"] = sum(
+            other["polygon"].contains(point) for other in loops if other is not loop
+        )
+    loops.sort(key=lambda loop: (loop["depth"], *loop["points"][0, :2]))
+    return loops
+
+
+def _slice_layers(mesh, heights, slice_simplification, minimum_contour):
+    """The contour loops of each layer, bottom up."""
+    return [
+        _contour_loops(
+            _simple_rings(_section(mesh, height), slice_simplification, layer),
+            height,
+            minimum_contour,
+            layer,
+        )
+        for layer, height in enumerate(heights)
+    ]
+
+
+def _add_base_ring(layers, low):
+    """Copy the lowest contours onto the bed when the shape starts above it.
+
+    A shape with a rounded underside has no contour on the bed: its lowest
+    one starts a layer up. Posts under that contour would be the only thing
+    holding the object, each stuck to the bed at a point. Draw the same
+    outline flat on the bed instead, so the usual band of risers and
+    diagonals carries the object on a base that grips along its whole length.
+    """
     first = next((index for index, loops in enumerate(layers) if loops), None)
-    if first:
-        base = []
-        for loop in layers[first]:
-            points = loop["points"].copy()
-            points[:, 2] = low
-            base.append({**loop, "points": points, "joins": {0.0}})
-        layers[first - 1] = base
-        base_ring = {
-            "contours": len(base),
-            "height_m": float(layers[first][0]["points"][0, 2] - low),
-        }
+    if not first:
+        return layers
+    base = []
+    for loop in layers[first]:
+        points = loop["points"].copy()
+        points[:, 2] = low
+        base.append({**loop, "points": points, "joins": {0.0}})
+    return [*layers[: first - 1], base, *layers[first:]]
 
-    # An inner contour that begins above the bed is the wall of a cavity, such
-    # as the inside of a vase: a ring with nothing beneath it. Print the outer
-    # shell only. Removing it bottom-up also removes the contours it would have
-    # carried. Inner contours that start on the bed, like a torus's hole, stay.
-    # An outer contour that begins in mid-air, above the object's lowest
-    # contour, has nothing to be drawn onto either: an overhanging tip that
-    # joins the shape a layer or two up. It is left out the same way, and the
-    # contour it joins covers that part of the shape.
-    omitted_cavities = omitted_floating = 0
+
+def _overlaps(loop, other):
+    """Whether two loops of neighbouring layers are the same wall, one on the other."""
+    return loop["depth"] == other["depth"] and loop["polygon"].intersects(other["polygon"])
+
+
+def _prune_unsupported(layers):
+    """Leave out cavity walls and contours that begin in mid-air.
+
+    An inner contour that begins above the bed is the wall of a cavity, such
+    as the inside of a vase: a ring with nothing beneath it. Print the outer
+    shell only. Removing it bottom-up also removes the contours it would have
+    carried. Inner contours that start on the bed, like a torus's hole, stay.
+    An outer contour that begins in mid-air, above the object's lowest
+    contour, has nothing to be drawn onto either: an overhanging tip that
+    joins the shape a layer or two up. It is left out the same way, and the
+    contour it joins covers that part of the shape.
+    """
+    kept_layers = layers[:1]
     started = bool(layers and layers[0])
     for index in range(1, len(layers)):
         kept = []
         for up in layers[index]:
-            carried = any(
-                up["depth"] == down["depth"] and up["polygon"].intersects(down["polygon"])
-                for down in layers[index - 1]
-            )
-            if up["depth"] and not carried:
-                omitted_cavities += 1
-                continue
-            if started and not carried:
-                omitted_floating += 1
+            carried = any(_overlaps(up, down) for down in kept_layers[index - 1])
+            if not carried and (up["depth"] or started):
                 continue
             kept.append(up)
-        layers[index] = kept
+        kept_layers.append(kept)
         started = started or bool(kept)
+    return kept_layers
 
-    # A coil tower: a part too narrow for loops and zigzags, such as a raised
-    # arm, is wound as one strand that climbs by its own thickness each turn,
-    # so the turns touch and form a thin tube. It applies to a run of narrow
-    # outlines that ends without widening again, standing on one wider outline
-    # or on the bed. Those outlines leave the layers and are wound instead.
-    towers = []
-    if coil_maximum_width:
 
-        def narrow(loop):
-            x0, y0, x1, y1 = loop["polygon"].bounds
-            return not loop["depth"] and max(x1 - x0, y1 - y0) <= coil_maximum_width
+def _narrow(loop, maximum_width):
+    """Whether an outer loop is narrow enough to be wound as a coil."""
+    x0, y0, x1, y1 = loop["polygon"].bounds
+    return not loop["depth"] and max(x1 - x0, y1 - y0) <= maximum_width
 
-        def touching(loop, others):
-            return [
-                other
-                for other in others
-                if other["depth"] == loop["depth"] and other["polygon"].intersects(loop["polygon"])
-            ]
 
-        wound = set()
-        for index in range(len(layers) - 1, -1, -1):
-            for loop in layers[index]:
-                # It ends, or everything it carries is itself wound.
-                ends = index + 1 == len(layers) or all(
-                    id(above) in wound for above in touching(loop, layers[index + 1])
-                )
-                if id(loop) in wound or not narrow(loop) or not ends:
+def _touching(loop, others):
+    return [other for other in others if _overlaps(other, loop)]
+
+
+def _narrow_run(layers, index, loop, maximum_width):
+    """The run of narrow loops ending at ``loop``, and the layer it starts on."""
+    chain, level = [loop], index
+    while level > 0:
+        below = _touching(chain[0], layers[level - 1])
+        if (
+            len(below) != 1
+            or not _narrow(below[0], maximum_width)
+            or len(_touching(below[0], layers[level])) != 1
+        ):
+            break
+        chain.insert(0, below[0])
+        level -= 1
+    return chain, level
+
+
+def _find_coil_towers(layers, low, maximum_width, diameter, pitch):
+    """Take narrow runs of outlines out of the layers, to be wound as coils.
+
+    A coil tower: a part too narrow for loops and zigzags, such as a raised
+    arm, is wound as one strand that climbs by its own thickness each turn,
+    so the turns touch and form a thin tube. It applies to a run of narrow
+    outlines that ends without widening again, standing on one wider outline
+    or on the bed. Those outlines leave the layers and are wound instead.
+    """
+    if not maximum_width:
+        return layers, []
+    towers, wound = [], set()
+    for index in range(len(layers) - 1, -1, -1):
+        for loop in layers[index]:
+            # It ends, or everything it carries is itself wound.
+            ends = index + 1 == len(layers) or all(
+                id(above) in wound for above in _touching(loop, layers[index + 1])
+            )
+            if id(loop) in wound or not _narrow(loop, maximum_width) or not ends:
+                continue
+            chain, level = _narrow_run(layers, index, loop, maximum_width)
+            support = _touching(chain[0], layers[level - 1]) if level else []
+            grounded = abs(chain[0]["points"][0, 2] - low) < ON_BED_M
+            if len(support) != 1 and not (grounded and len(chain) > 1):
+                continue
+            # The first layer leans from the supporting outline to the
+            # tower. More than two strand widths per turn and its turns
+            # would hang in air, so such a part is not wound.
+            if support and not grounded:
+                below = LineString(support[0]["points"][:, :2])
+                reach = max(below.distance(Point(p)) for p in chain[0]["points"][:, :2])
+                rise = chain[0]["points"][0, 2] - support[0]["points"][0, 2]
+                if reach > 2 * diameter / pitch * rise:
                     continue
-                chain, level = [loop], index
-                while level > 0:
-                    below = touching(chain[0], layers[level - 1])
-                    if (
-                        len(below) != 1
-                        or not narrow(below[0])
-                        or len(touching(below[0], layers[level])) != 1
-                    ):
-                        break
-                    chain.insert(0, below[0])
-                    level -= 1
-                support = touching(chain[0], layers[level - 1]) if level else []
-                grounded = abs(chain[0]["points"][0, 2] - low) < 1e-7
-                if len(support) != 1 and not (grounded and len(chain) > 1):
-                    continue
-                # The first layer leans from the supporting outline to the
-                # tower. More than two strand widths per turn and its turns
-                # would hang in air, so such a part is not wound.
-                if support and not grounded:
-                    below = LineString(support[0]["points"][:, :2])
-                    reach = max(below.distance(Point(p)) for p in chain[0]["points"][:, :2])
-                    rise = chain[0]["points"][0, 2] - support[0]["points"][0, 2]
-                    if reach > 2 * diameter / coil_pitch * rise:
-                        continue
-                towers.append(
-                    {
-                        "level": level,
-                        "loops": chain,
-                        "support": None if grounded or not support else support[0],
-                    }
-                )
-                wound.update(id(member) for member in chain)
-        layers = [[loop for loop in loops if id(loop) not in wound] for loops in layers]
+            towers.append(
+                {
+                    "level": level,
+                    "loops": chain,
+                    "support": None if grounded or not support else support[0],
+                }
+            )
+            wound.update(id(member) for member in chain)
+    layers = [[loop for loop in loops if id(loop) not in wound] for loops in layers]
+    return layers, towers
 
-    relations, bridges, omitted_steep, nearest_pairs = [], [], 0, 0
-    stretched = 0
+
+class _Pair(NamedTuple):
+    """A lower and an upper contour joined by one zigzag."""
+
+    down: dict
+    up: dict
+    beneath: LineString
+    overhead: LineString
+    chained: bool
+
+
+def _anchors(pair, u, v, nearest, count):
+    """Foot, top and next foot of one zigzag: a riser and a diagonal.
+
+    ``u`` and ``v`` are how far round the loop this riser and the
+    next one stand, as fractions from the zigzag's starting point.
+
+    As in WirePrint, the riser goes straight up, or as near to it as
+    the two outlines allow, and only the stroke back down is
+    slanted. Like outlines space the feet evenly on the lower
+    contour and put each top at the nearest point above. Where the
+    outlines differ the tops are spaced evenly on the upper contour
+    and each foot is the nearest point beneath.
+    """
+    down, up, beneath, overhead, chained = pair
+    # A zigzag starts where the zigzag beneath its lower contour
+    # put its last riser top, so the pen can run from that zigzag
+    # round the contour and straight into this one. With equal
+    # counts the risers then also line up from layer to layer.
+    # Otherwise an inner wall can stand on almost the same ring as
+    # the outer wall beside it (a torus resting on the bed). Start
+    # its zigzags half a spacing along, so they do not share feet.
+    origin = down["chain"] if chained else (0.5 / count if down["depth"] % 2 else 0.0)
+    if nearest:
+        start = (
+            overhead.project(Point(sample_loop(down["points"], origin)[:2]), normalized=True)
+            if chained
+            else origin
+        )
+        first, following = start + u, start + v
+        a, c = (
+            beneath.project(Point(sample_loop(up["points"], f)[:2]), normalized=True)
+            for f in (first, following)
+        )
+        return (origin if chained and u == 0 else a), first, c
+    first, following = origin + u, origin + v
+    foot = Point(sample_loop(down["points"], first)[:2])
+    top = overhead.project(foot, normalized=True)
+    return first, top, following
+
+
+def _descent(pair, b, c):
+    """Degrees below horizontal of the diagonal from top ``b`` to foot ``c``."""
+    fall = sample_loop(pair.up["points"], b) - sample_loop(pair.down["points"], c)
+    return np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2])))
+
+
+def _steepest(pair, count, nearest):
+    return max(
+        _descent(pair, *_anchors(pair, i / count, (i + 1) / count, nearest, count)[1:])
+        for i in range(count - 1)
+    )
+
+
+def _pair_contours(lower, upper):
+    """Pairs of overlapping lower and upper contours; each upper seam follows its main parent."""
+    pairs = []
+    for ui, up in enumerate(upper):
+        parents = [li for li, down in enumerate(lower) if _overlaps(up, down)]
+        for li in parents:
+            pairs.append((li, ui))
+        if parents:
+            parent = max(
+                parents, key=lambda li: up["polygon"].intersection(lower[li]["polygon"]).area
+            )
+            up["points"] = align_loop(up["points"], lower[parent]["points"][0])
+    return pairs
+
+
+def _riser_count(pair, lower, co_parents, branching, spacing, limit, minimum_connectors):
+    """How many risers the zigzag has, and whether they stand on the nearest part beneath."""
+    perimeter = max(LineString(loop["points"]).length for loop in (pair.down, pair.up))
+    fewest = max(3, minimum_connectors or 3)
+    count = max(fewest, int(np.ceil(perimeter / spacing)))
+    above = max(fewest, int(np.ceil(LineString(pair.up["points"]).length / spacing)))
+    # Two contours of different outline can also pair badly by equal
+    # fractions. Use the nearest part beneath when that alone brings
+    # the diagonals within the limit; like outlines keep equal fractions.
+    # A degree of margin covers the later 20 micron junction merge.
+    nearest = branching or (
+        _steepest(pair, count, False) > limit
+        and _steepest(pair, above, True) <= limit - DESCENT_MARGIN_DEG
+    )
+    if nearest:
+        count = above
+    if branching and len(co_parents) > 1 and minimum_connectors:
+        # Contours merging into one (pillars into a roof): risers stand
+        # round the upper contour and go to the nearest one beneath.
+        # Space them so each merging contour gets at least its share.
+        narrowest = min(LineString(lower[k]["points"]).length for k in co_parents)
+        length = LineString(pair.up["points"]).length
+        count = max(count, int(np.ceil(length * fewest / narrowest)))
+    return count, nearest
+
+
+def _risers(pair, count, nearest, stretch, limit):
+    """Yield foot, top, next foot and whether it is the last, for each riser round the loop."""
+    # Where equal spacing would make a diagonal too steep, its foot and
+    # the riser that follows stand further round the loop, far enough
+    # for the diagonal to come down within the limit.
+    i, shift = 0, 0.0
+    while i / count + shift < 1 - 1e-9:
+        u, v = i / count + shift, (i + 1) / count + shift
+        ended = False
+        a, b, c = _anchors(pair, u, v, nearest, count)
+        if stretch and v < 1 - 1e-9 and _descent(pair, b, c) > limit - DESCENT_MARGIN_DEG:
+            reach = v
+            while (
+                reach < min(u + 0.75, 1 - 0.5 / count)
+                and _descent(pair, b, c) > limit - DESCENT_MARGIN_DEG
+            ):
+                reach += 0.125 / count
+                a, b, c = _anchors(pair, u, reach, nearest, count)
+            if _descent(pair, b, c) <= limit - DESCENT_MARGIN_DEG:
+                shift += reach - v
+                v = reach
+            else:
+                # No foot before the loop closes is far enough: this
+                # riser ends the zigzag, as the closing one would.
+                ended = reach >= 1 - 0.5 / count
+                a, b, c = _anchors(pair, u, v, nearest, count)
+        # A riser that would stand within half a spacing of the first
+        # one is left out; this riser is then the zigzag's last.
+        last = ended or v >= 1 - 1e-9 or bool(stretch and shift and v > 1 - 0.5 / count)
+        if last:
+            shift = 1.0
+        i += 1
+        yield a, b, c, last
+
+
+def _zigzag(lower, upper, li, ui, pairs, spacing, limit, minimum_connectors):
+    """Foot, top, next foot (or None) and step of each riser from ``li`` up to ``ui``."""
+    down, up = lower[li], upper[ui]
+    # Where contours split or merge, equal fractions pair unrelated
+    # points. Stand each upper contour on the nearest part of the
+    # contour beneath it instead.
+    co_parents = [parent for parent, u in pairs if u == ui]
+    branching = len(co_parents) > 1 or sum(parent == li for parent, _ in pairs) > 1
+    # Only one zigzag can begin at the lower contour's chain point; a
+    # sibling starting there would stand on the first one's riser.
+    takes_chain = "chain" in down and down.setdefault("chain_user", ui) == ui
+    pair = _Pair(
+        down,
+        up,
+        LineString(down["points"][:, :2]),
+        LineString(up["points"][:, :2]),
+        takes_chain,
+    )
+    count, nearest = _riser_count(
+        pair, lower, co_parents, branching, spacing, limit, minimum_connectors
+    )
+    rows = []
+    for a, b, c, last in _risers(pair, count, nearest, not branching, limit):
+        if branching:
+            top = Point(sample_loop(up["points"], b)[:2])
+            if li != min(co_parents, key=lambda k: lower[k]["polygon"].distance(top)):
+                continue
+        # WirePrint omits the closing diagonal to leave print-head
+        # access. With one anchor this also avoids retracing the riser.
+        if last:
+            c = None
+        # A diagonal that still comes out too steep is left out rather
+        # than thinning every layer; its riser still stands.
+        if c is not None and _descent(pair, b, c) > limit - DESCENT_MARGIN_DEG:
+            c = None
+        down["joins"].add(a % 1.0)
+        if c is not None:
+            down["joins"].add(c % 1.0)
+        up["joins"].add(b % 1.0)
+        # The last riser top, where the next zigzag up will begin.
+        up["chain"] = b % 1.0
+        rows.append((a, b, c, len(rows)))
+    return rows
+
+
+def _plan_zigzags(layers, spacing, limit, minimum_connectors):
+    """Every riser between neighbouring layers, as (layer, lower, upper, a, b, c, step)."""
+    bridges = []
     for index in range(1, len(layers)):
         lower, upper = layers[index - 1], layers[index]
-        pairs = []
-        for ui, up in enumerate(upper):
-            parents = [
-                li
-                for li, down in enumerate(lower)
-                if up["depth"] == down["depth"] and up["polygon"].intersects(down["polygon"])
-            ]
-            if not parents:
-                relations.append({"layer": index, "upper": ui, "event": "unsupported_birth"})
-            for li in parents:
-                pairs.append((li, ui))
-            if parents:
-                parent = max(
-                    parents, key=lambda li: up["polygon"].intersection(lower[li]["polygon"]).area
-                )
-                up["points"] = align_loop(up["points"], lower[parent]["points"][0])
+        pairs = _pair_contours(lower, upper)
         for li, ui in pairs:
-            down, up = lower[li], upper[ui]
-            perimeter = max(LineString(loop["points"]).length for loop in (down, up))
-            # Where contours split or merge, equal fractions pair unrelated
-            # points. Stand each upper contour on the nearest part of the
-            # contour beneath it instead.
-            co_parents = [parent for parent, u in pairs if u == ui]
-            branching = len(co_parents) > 1 or sum(parent == li for parent, _ in pairs) > 1
-            beneath = LineString(down["points"][:, :2])
-            overhead = LineString(up["points"][:, :2])
+            rows = _zigzag(lower, upper, li, ui, pairs, spacing, limit, minimum_connectors)
+            bridges.extend((index, li, ui, *row) for row in rows)
+    return bridges
 
-            # Only one zigzag can begin at the lower contour's chain point; a
-            # sibling starting there would stand on the first one's riser.
-            takes_chain = "chain" in down and down.setdefault("chain_user", ui) == ui
 
-            def anchors(
-                u, v, nearest, count, up=up, down=down, beneath=beneath, overhead=overhead,
-                chained=takes_chain,
-            ):
-                """Foot, top and next foot of one zigzag: a riser and a diagonal.
+def _grid_pieces(inside, spacing):
+    """Straight lines across ``inside`` along x (0) and y (1), ``spacing`` apart."""
+    bounds = np.reshape(inside.bounds, (2, 2))
+    pieces = {0: [], 1: []}
+    for axis in (0, 1):
+        across = 1 - axis
+        count = int((bounds[1, across] - bounds[0, across]) // spacing)
+        for row in range(count):
+            level = bounds[:, across].mean() + (row - (count - 1) / 2) * spacing
+            ends = np.zeros((2, 2))
+            ends[:, axis] = bounds[0, axis] - 1, bounds[1, axis] + 1
+            ends[:, across] = level
+            crossing = inside.intersection(LineString(ends))
+            for piece in getattr(crossing, "geoms", [crossing]):
+                if piece.geom_type == "LineString" and piece.length >= spacing:
+                    pieces[axis].append(np.asarray([piece.coords[0], piece.coords[-1]]))
+    return pieces
 
-                ``u`` and ``v`` are how far round the loop this riser and the
-                next one stand, as fractions from the zigzag's starting point.
 
-                As in WirePrint, the riser goes straight up, or as near to it as
-                the two outlines allow, and only the stroke back down is
-                slanted. Like outlines space the feet evenly on the lower
-                contour and put each top at the nearest point above. Where the
-                outlines differ the tops are spaced evenly on the upper contour
-                and each foot is the nearest point beneath.
-                """
-                # A zigzag starts where the zigzag beneath its lower contour
-                # put its last riser top, so the pen can run from that zigzag
-                # round the contour and straight into this one. With equal
-                # counts the risers then also line up from layer to layer.
-                # Otherwise an inner wall can stand on almost the same ring as
-                # the outer wall beside it (a torus resting on the bed). Start
-                # its zigzags half a spacing along, so they do not share feet.
-                origin = down["chain"] if chained else (0.5 / count if down["depth"] % 2 else 0.0)
-                if nearest:
-                    start = (
-                        overhead.project(
-                            Point(sample_loop(down["points"], origin)[:2]), normalized=True
-                        )
-                        if chained
-                        else origin
-                    )
-                    first, following = start + u, start + v
-                    a, c = (
-                        beneath.project(Point(sample_loop(up["points"], f)[:2]), normalized=True)
-                        for f in (first, following)
-                    )
-                    return (origin if chained and u == 0 else a), first, c
-                first, following = origin + u, origin + v
-                foot = Point(sample_loop(down["points"], first)[:2])
-                top = overhead.project(foot, normalized=True)
-                return first, top, following
+def _base_grid(layers, low, spacing):
+    """Grid lines across the outlines on the bed, and the index of that layer.
 
-            def descent(b, c, up=up, down=down):
-                fall = sample_loop(up["points"], b) - sample_loop(down["points"], c)
-                return np.degrees(np.arctan2(fall[2], np.linalg.norm(fall[:2])))
-
-            def steepest(count, nearest, anchors=anchors, descent=descent):
-                return max(
-                    descent(*anchors(i / count, (i + 1) / count, nearest, count)[1:])
-                    for i in range(count - 1)
-                )
-
-            fewest = max(3, minimum_connectors or 3)
-            count = max(fewest, int(np.ceil(perimeter / zigzag_spacing)))
-            above = max(fewest, int(np.ceil(LineString(up["points"]).length / zigzag_spacing)))
-            # Two contours of different outline can also pair badly by equal
-            # fractions. Use the nearest part beneath when that alone brings
-            # the diagonals within the limit; like outlines keep equal fractions.
-            # A degree of margin covers the later 20 micron junction merge.
-            nearest = branching or (
-                steepest(count, False) > maximum_branch_descent_deg
-                and steepest(above, True) <= maximum_branch_descent_deg - 1
-            )
-            if nearest:
-                count = above
-                nearest_pairs += 1
-            if branching and len(co_parents) > 1 and minimum_connectors:
-                # Contours merging into one (pillars into a roof): risers stand
-                # round the upper contour and go to the nearest one beneath.
-                # Space them so each merging contour gets at least its share.
-                narrowest = min(LineString(lower[k]["points"]).length for k in co_parents)
-                length = LineString(up["points"]).length
-                count = max(count, int(np.ceil(length * fewest / narrowest)))
-            # Where equal spacing would make a diagonal too steep, its foot and
-            # the riser that follows stand further round the loop, far enough
-            # for the diagonal to come down within the limit.
-            stretch = not branching
-            step, i, shift = 0, 0, 0.0
-            while i / count + shift < 1 - 1e-9:
-                u, v = i / count + shift, (i + 1) / count + shift
-                ended = False
-                a, b, c = anchors(u, v, nearest, count)
-                if stretch and v < 1 - 1e-9 and descent(b, c) > maximum_branch_descent_deg - 1:
-                    reach = v
-                    while (
-                        reach < min(u + 0.75, 1 - 0.5 / count)
-                        and descent(b, c) > maximum_branch_descent_deg - 1
-                    ):
-                        reach += 0.125 / count
-                        a, b, c = anchors(u, reach, nearest, count)
-                    if descent(b, c) <= maximum_branch_descent_deg - 1:
-                        shift += reach - v
-                        v = reach
-                        stretched += 1
-                    else:
-                        # No foot before the loop closes is far enough: this
-                        # riser ends the zigzag, as the closing one would.
-                        ended = reach >= 1 - 0.5 / count
-                        a, b, c = anchors(u, v, nearest, count)
-                # A riser that would stand within half a spacing of the first
-                # one is left out; this riser is then the zigzag's last.
-                last = (
-                    ended
-                    or v >= 1 - 1e-9
-                    or bool(stretch and shift and v > 1 - 0.5 / count)
-                )
-                if last:
-                    shift = 1.0
-                i += 1
-                if branching:
-                    top = Point(sample_loop(up["points"], b)[:2])
-                    if li != min(co_parents, key=lambda k: lower[k]["polygon"].distance(top)):
-                        continue
-                # WirePrint omits the closing diagonal to leave print-head
-                # access. With one anchor this also avoids retracing the riser.
-                if last:
-                    c = None
-                # A diagonal that still comes out too steep is left out rather
-                # than thinning every layer; its riser still stands.
-                if (
-                    c is not None
-                    and (branching or stretch)
-                    and descent(b, c) > maximum_branch_descent_deg - 1
-                ):
-                    omitted_steep += 1
-                    c = None
-                down["joins"].add(a % 1.0)
-                if c is not None:
-                    down["joins"].add(c % 1.0)
-                up["joins"].add(b % 1.0)
-                # The last riser top, where the next zigzag up will begin.
-                up["chain"] = b % 1.0
-                bridges.append((index, li, ui, a, b, c, step))
-                step += 1
-            relations.append(
-                {
-                    "layer": index,
-                    "lower": li,
-                    "upper": ui,
-                    "event": "merge"
-                    if sum(u == ui for _, u in pairs) > 1
-                    else "split"
-                    if sum(parent == li for parent, _ in pairs) > 1
-                    else "continue",
-                }
-            )
-        for li in range(len(lower)):
-            if not any(parent == li for parent, _ in pairs):
-                relations.append({"layer": index, "lower": li, "event": "contour_end"})
-
-    # A grid of straight lines across each outline that lies on the bed. It
-    # ties the base together both ways and gives it more length gripping the
-    # bed than the outline alone. Lines meet at shared points, as a contour
-    # meets the riser tops it is drawn across.
-    base_lines = []
+    A grid of straight lines across each outline that lies on the bed. It
+    ties the base together both ways and gives it more length gripping the
+    bed than the outline alone. Lines meet at shared points, as a contour
+    meets the riser tops it is drawn across.
+    """
+    lines = []
     ground = next((index for index, loops in enumerate(layers) if loops), None)
-    if (
-        base_line_spacing
-        and ground is not None
-        and abs(layers[ground][0]["points"][0, 2] - low) < 1e-7
+    if not (
+        spacing and ground is not None and abs(layers[ground][0]["points"][0, 2] - low) < ON_BED_M
     ):
-        loops = layers[ground]
-        rings = [LineString(loop["points"][:, :2]) for loop in loops]
-        inside = unary_union([loop["polygon"] for loop in loops if loop["depth"] % 2 == 0])
-        holes = [loop["polygon"] for loop in loops if loop["depth"] % 2]
-        if holes:
-            inside = inside.difference(unary_union(holes))
-        bounds = np.reshape(inside.bounds, (2, 2))
-        pieces = {0: [], 1: []}
-        for axis in (0, 1):
-            across = 1 - axis
-            count = int((bounds[1, across] - bounds[0, across]) // base_line_spacing)
-            for row in range(count):
-                level = bounds[:, across].mean() + (row - (count - 1) / 2) * base_line_spacing
-                ends = np.zeros((2, 2))
-                ends[:, axis] = bounds[0, axis] - 1, bounds[1, axis] + 1
-                ends[:, across] = level
-                crossing = inside.intersection(LineString(ends))
-                for piece in getattr(crossing, "geoms", [crossing]):
-                    if piece.geom_type == "LineString" and piece.length >= base_line_spacing:
-                        pieces[axis].append(np.asarray([piece.coords[0], piece.coords[-1]]))
-        for axis in (0, 1):
-            for piece in pieces[axis]:
-                for point in piece:
-                    li = min(range(len(loops)), key=lambda k: rings[k].distance(Point(point)))
-                    loops[li]["joins"].add(rings[li].project(Point(point), normalized=True) % 1.0)
-                stops = [piece[0], piece[1]]
-                for other in pieces[1 - axis]:
-                    meet = np.array(other[0])
-                    meet[axis] = other[0][axis]
-                    meet[1 - axis] = piece[0][1 - axis]
-                    if (
-                        piece[:, axis].min() < meet[axis] < piece[:, axis].max()
-                        and other[:, 1 - axis].min() < meet[1 - axis] < other[:, 1 - axis].max()
-                    ):
-                        stops.append(meet)
-                stops.sort(key=lambda point: point[axis])
-                base_lines.append([np.r_[point, low] for point in stops])
+        return lines, ground
+    loops = layers[ground]
+    rings = [LineString(loop["points"][:, :2]) for loop in loops]
+    inside = unary_union([loop["polygon"] for loop in loops if loop["depth"] % 2 == 0])
+    holes = [loop["polygon"] for loop in loops if loop["depth"] % 2]
+    if holes:
+        inside = inside.difference(unary_union(holes))
+    pieces = _grid_pieces(inside, spacing)
+    for axis in (0, 1):
+        for piece in pieces[axis]:
+            for point in piece:
+                li = min(range(len(loops)), key=lambda k: rings[k].distance(Point(point)))
+                loops[li]["joins"].add(rings[li].project(Point(point), normalized=True) % 1.0)
+            stops = [piece[0], piece[1]]
+            for other in pieces[1 - axis]:
+                meet = np.array(other[0])
+                meet[axis] = other[0][axis]
+                meet[1 - axis] = piece[0][1 - axis]
+                if (
+                    piece[:, axis].min() < meet[axis] < piece[:, axis].max()
+                    and other[:, 1 - axis].min() < meet[1 - axis] < other[:, 1 - axis].max()
+                ):
+                    stops.append(meet)
+            stops.sort(key=lambda point: point[axis])
+            lines.append([np.r_[point, low] for point in stops])
+    return lines, ground
 
-    nodes, edges, positions, by_edge = {}, [], [], {}
 
-    def node(point):
-        # Plane intersections close to mesh vertices can leave micron-long
-        # slivers. Merge them at the same declared geometric resolution used by
-        # simplification, before defining source members or mechanical beams.
-        if positions:
-            distances = np.linalg.norm(np.asarray(positions) - point, axis=1)
-            nearest = int(np.argmin(distances))
-            if distances[nearest] <= 0.00002:
-                return f"n{nearest:05d}"
-        identity = f"n{len(nodes):05d}"
-        positions.append(np.asarray(point))
-        nodes[identity] = {
-            "id": identity,
-            "position": np.asarray(point).tolist(),
-            "ground": bool(abs(point[2] - low) < 1e-7),
-        }
-        return identity
+def _build_order(layers, bridges):
+    """Order hint of each stroke, keyed (layer, "zigzag", li, ui) or (layer, "contour", ui).
 
-    def add(a, b, source, interval, order, role):
-        first, second = node(a), node(b)
-        if first == second:
-            return
-        key = tuple(sorted((first, second)))
-        if key in by_edge:
-            by_edge[key].setdefault("shared_sources", []).append(
-                {
-                    "parent_curve": source,
-                    "source_interval": interval,
-                }
-            )
-            return
-        edge = straight_edge(first, second, nodes, f"member-{len(edges):05d}", role, diameter)
-        edge.update(
-            origin="wireprint",
-            parent_curve=source,
-            source_interval=interval,
-            stage="framework",
-            order_hint=order,
-        )
-        by_edge[key] = edge
-        edges.append(edge)
-
-    # Build order within a layer: each contour straight after the zigzags that
-    # carry it, starting with a loop that stands on the contour finished last,
-    # so that consecutive strokes meet end to start wherever the shape allows.
-    # Loops that share a lower contour are the exception: a finished contour
-    # would stand in the pen's way to its sibling's feet just beneath, so all
-    # of their zigzags come first and their contours after.
+    Build order within a layer: each contour straight after the zigzags that
+    carry it, starting with a loop that stands on the contour finished last,
+    so that consecutive strokes meet end to start wherever the shape allows.
+    Loops that share a lower contour are the exception: a finished contour
+    would stand in the pen's way to its sibling's feet just beneath, so all
+    of their zigzags come first and their contours after.
+    """
     turns, last = {}, None
     for index, loops in enumerate(layers):
         pairs = [(li, ui) for layer, li, ui, *_ in bridges if layer == index]
@@ -615,45 +613,114 @@ def _mesh_framework_at_height(
             turns[(index, *stroke)] = 1000 * index + position
         if held:
             last = held[-1][1]
+    return turns
 
-    coil_turns, fused, tops = 0, [], {}
-    towers.sort(key=lambda tower: tower["level"])
-    for number, tower in enumerate(towers):
-        loops, support, level = tower["loops"], tower["support"], tower["level"]
-        stack, reference = [], loops[0]["points"][0]
-        if support is not None:
-            # The strand leaves the supporting outline at its nearest point and
-            # widens to the tower's own outline over the first layer.
-            centre = np.asarray(loops[0]["polygon"].centroid.coords[0])
-            if id(support) in tops:
-                # Standing on another tower: start from a point of its last turn.
-                reference = min(
-                    tops[id(support)], key=lambda point: np.linalg.norm(point[:2] - centre)
-                )
-            else:
-                ring = LineString(support["points"][:, :2])
-                fraction = ring.project(Point(centre), normalized=True)
-                support["joins"].add(fraction % 1.0)
-                reference = sample_loop(support["points"], fraction)
-            stack.append(reference)
-        for loop in loops:
-            stack.append(align_loop(loop["points"], reference))
-            reference = stack[-1][0]
-        first, beneath = level + (support is None), []
+
+class _Wire:
+    """The frame's nodes and straight members, as they are drawn."""
+
+    def __init__(self, low, diameter):
+        self.low, self.diameter = low, diameter
+        self.nodes, self.edges, self.positions, self.by_edge = {}, [], [], {}
+
+    def node(self, point):
+        """The id of the node at ``point``, merged with any node within ``JUNCTION_M``."""
+        # Plane intersections close to mesh vertices can leave micron-long
+        # slivers. Merge them at the same declared geometric resolution used by
+        # simplification, before defining source members or mechanical beams.
+        if self.positions:
+            distances = np.linalg.norm(np.asarray(self.positions) - point, axis=1)
+            nearest = int(np.argmin(distances))
+            if distances[nearest] <= JUNCTION_M:
+                return f"n{nearest:05d}"
+        identity = f"n{len(self.nodes):05d}"
+        self.positions.append(np.asarray(point))
+        self.nodes[identity] = {
+            "id": identity,
+            "position": np.asarray(point).tolist(),
+            "ground": bool(abs(point[2] - self.low) < ON_BED_M),
+        }
+        return identity
+
+    def add(self, a, b, source, interval, order):
+        """Add a member from ``a`` to ``b``, or record a second source of an existing one."""
+        first, second = self.node(a), self.node(b)
+        if first == second:
+            return
+        key = tuple(sorted((first, second)))
+        if key in self.by_edge:
+            self.by_edge[key].setdefault("shared_sources", []).append(
+                {
+                    "parent_curve": source,
+                    "source_interval": interval,
+                }
+            )
+            return
+        edge = straight_edge(
+            first, second, self.nodes, f"member-{len(self.edges):05d}", "framework", self.diameter
+        )
+        edge.update(
+            origin="wireprint",
+            parent_curve=source,
+            source_interval=interval,
+            stage="framework",
+            order_hint=order,
+        )
+        self.by_edge[key] = edge
+        self.edges.append(edge)
+
+
+def _coil_stack(tower, tops):
+    """The outlines a tower's strand climbs through, from where it leaves its support."""
+    loops, support = tower["loops"], tower["support"]
+    stack, reference = [], loops[0]["points"][0]
+    if support is not None:
+        # The strand leaves the supporting outline at its nearest point and
+        # widens to the tower's own outline over the first layer.
+        centre = np.asarray(loops[0]["polygon"].centroid.coords[0])
+        if id(support) in tops:
+            # Standing on another tower: start from a point of its last turn.
+            reference = min(
+                tops[id(support)], key=lambda point: np.linalg.norm(point[:2] - centre)
+            )
+        else:
+            ring = LineString(support["points"][:, :2])
+            fraction = ring.project(Point(centre), normalized=True)
+            support["joins"].add(fraction % 1.0)
+            reference = sample_loop(support["points"], fraction)
+        stack.append(reference)
+    for loop in loops:
+        stack.append(align_loop(loop["points"], reference))
+        reference = stack[-1][0]
+    return stack
+
+
+def _coil_points(lower, upper, pitch):
+    """Points of the strand winding from ``lower`` up to ``upper``, and points per turn."""
+    z0, z1 = (lower[2] if lower.ndim == 1 else lower[0, 2]), upper[0, 2]
+    turns = max(1, int(round((z1 - z0) / pitch)))
+    per_turn = max(8, int(np.ceil(LineString(upper[:, :2]).length / 0.0015)))
+    points = []
+    for sample in range(turns * per_turn + 1):
+        along = sample / (turns * per_turn)
+        around = (sample % per_turn) / per_turn
+        high = sample_loop(upper, around)
+        base = lower if lower.ndim == 1 else sample_loop(lower, around)
+        point = (1 - along) * base + along * high
+        point[2] = z0 + along * (z1 - z0)
+        points.append(point)
+    return points, per_turn
+
+
+def _wind_coils(wire, towers, diameter, pitch):
+    """Draw each coil tower as one climbing strand; return the node pairs of touching turns."""
+    fused, tops = [], {}
+    for number, tower in enumerate(sorted(towers, key=lambda tower: tower["level"])):
+        loops = tower["loops"]
+        stack = _coil_stack(tower, tops)
+        first, beneath = tower["level"] + (tower["support"] is None), []
         for step, (lower, upper) in enumerate(zip(stack[:-1], stack[1:], strict=True)):
-            z0, z1 = (lower[2] if lower.ndim == 1 else lower[0, 2]), upper[0, 2]
-            turns_here = max(1, int(round((z1 - z0) / coil_pitch)))
-            per_turn = max(8, int(np.ceil(LineString(upper[:, :2]).length / 0.0015)))
-            points = []
-            for sample in range(turns_here * per_turn + 1):
-                along = sample / (turns_here * per_turn)
-                around = (sample % per_turn) / per_turn
-                high = sample_loop(upper, around)
-                base = lower if lower.ndim == 1 else sample_loop(lower, around)
-                point = (1 - along) * base + along * high
-                point[2] = z0 + along * (z1 - z0)
-                points.append(point)
-            coil_turns += turns_here
+            points, per_turn = _coil_points(lower, upper, pitch)
             # Each point rests on the turn below it: the same place one turn
             # back, or the nearest point of the section beneath.
             for sample, point in enumerate(points):
@@ -664,83 +731,98 @@ def _mesh_framework_at_height(
                 else:
                     continue
                 if np.linalg.norm(under - point) <= 2 * diameter:
-                    fused.append([node(under), node(point)])
+                    fused.append([wire.node(under), wire.node(point)])
             beneath = points[-per_turn - 1 :]
             tops[id(loops[-1])] = beneath
             for sample, (start, end) in enumerate(zip(points[:-1], points[1:], strict=True)):
-                add(
+                wire.add(
                     start,
                     end,
                     f"coil-{number}-{first + step}",
                     [sample, sample + 1],
                     1000 * (first + step) + 900 + number,
-                    "framework",
                 )
-    for number, stops in enumerate(base_lines):
-        # Drawn before the outlines they join, while the bed is still clear.
+    return fused
+
+
+def _draw_base_lines(wire, lines, ground):
+    """Draw the base grid, before the outlines it joins while the bed is still clear."""
+    for number, stops in enumerate(lines):
         for step, (start, end) in enumerate(zip(stops[:-1], stops[1:], strict=True)):
-            add(
-                start,
-                end,
-                f"base-{number}",
-                [step, step + 1],
-                1000 * ground - len(base_lines) + number,
-                "framework",
+            wire.add(
+                start, end, f"base-{number}", [step, step + 1], 1000 * ground - len(lines) + number
             )
+
+
+def _draw_layers(wire, layers, bridges, turns):
+    """Draw each layer's zigzags and contours, the contours split at every join."""
     for index, loops in enumerate(layers):
         # Rising/descending strokes stand on the already completed lower contour.
         for layer, li, ui, a, b, c, step in (row for row in bridges if row[0] == index):
             down, up = layers[layer - 1][li]["points"], layers[layer][ui]["points"]
             name = f"zigzag-{layer}-{li}-{ui}"
-            add(
-                sample_loop(down, a),
-                sample_loop(up, b),
-                name,
-                [2 * step, 2 * step + 1],
-                turns[(index, "zigzag", li, ui)],
-                "framework",
-            )
+            order = turns[(index, "zigzag", li, ui)]
+            top = sample_loop(up, b)
+            wire.add(sample_loop(down, a), top, name, [2 * step, 2 * step + 1], order)
             if c is not None:
-                add(
-                    sample_loop(up, b),
-                    sample_loop(down, c),
-                    name,
-                    [2 * step + 1, 2 * step + 2],
-                    turns[(index, "zigzag", li, ui)],
-                    "framework",
-                )
+                wire.add(top, sample_loop(down, c), name, [2 * step + 1, 2 * step + 2], order)
         for li, loop in enumerate(loops):
             points = loop["points"]
             distances = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))]
             fractions = sorted(loop["joins"] | set(distances[:-1] / distances[-1]) | {1.0})
             for a, b in zip(fractions[:-1], fractions[1:], strict=True):
-                add(
+                wire.add(
                     sample_loop(points, a),
                     sample_loop(points, b),
                     f"contour-{index}-{li}",
                     [a, b],
                     turns[(index, "contour", li)],
-                    "framework",
                 )
+
+
+def _mesh_framework_at_height(
+    mesh,
+    *,
+    layer_height=0.01,
+    zigzag_spacing=0.025,
+    diameter=0.001,
+    slice_simplification=JUNCTION_M,
+    minimum_contour=0.0,
+    maximum_branch_descent_deg,
+    base_line_spacing=None,
+    coil_maximum_width=None,
+    coil_pitch=0.001,
+    minimum_connectors=None,
+):
+    """The stroke graph of contours, zigzags, base grid and coils for one layer height."""
+    _validate(mesh, layer_height, zigzag_spacing, diameter, slice_simplification, minimum_contour)
+    low = mesh.bounds[0, 2]
+    heights = _layer_heights(
+        mesh,
+        layer_height,
+        maximum_branch_descent_deg,
+        minimum_connectors,
+        minimum_contour,
+        coil_maximum_width,
+    )
+    layers = _slice_layers(mesh, heights, slice_simplification, minimum_contour)
+    layers = _prune_unsupported(_add_base_ring(layers, low))
+    layers, towers = _find_coil_towers(layers, low, coil_maximum_width, diameter, coil_pitch)
+    bridges = _plan_zigzags(layers, zigzag_spacing, maximum_branch_descent_deg, minimum_connectors)
+    base_lines, ground = _base_grid(layers, low, base_line_spacing)
+    turns = _build_order(layers, bridges)
+    wire = _Wire(low, diameter)
+    fused = _wind_coils(wire, towers, diameter, coil_pitch)
+    _draw_base_lines(wire, base_lines, ground)
+    _draw_layers(wire, layers, bridges, turns)
     return artifact(
         "stroke_graph",
         frame="build",
         units="m",
         method="wireprint_contours_zigzags",
-        nodes=list(nodes.values()),
-        edges=edges,
-        contour_events=relations,
-        contour_repairs=repairs,
-        omitted_cavity_contours=omitted_cavities,
-        omitted_floating_contours=omitted_floating,
-        base_ring=base_ring,
-        base_lines=len(base_lines),
-        coil_towers={"count": len(towers), "turns": coil_turns},
+        nodes=list(wire.nodes.values()),
+        edges=wire.edges,
         fused_turns=[pair for pair in fused if pair[0] != pair[1]],
-        omitted_small_contours=omitted_small,
-        omitted_steep_branch_diagonals=omitted_steep,
-        nearest_point_zigzags=nearest_pairs,
-        stretched_diagonals=stretched,
         generation={
             "layer_height_m": layer_height,
             "zigzag_spacing_m": zigzag_spacing,
@@ -749,7 +831,7 @@ def _mesh_framework_at_height(
             "strand_diameter_m": diameter,
             "slice_simplification_m": slice_simplification,
             "minimum_contour_m": minimum_contour,
-            "junction_merge_m": 0.00002,
+            "junction_merge_m": JUNCTION_M,
             "base_line_spacing_m": base_line_spacing,
             "coil_maximum_width_m": coil_maximum_width,
             "coil_pitch_m": coil_pitch,
@@ -782,7 +864,7 @@ def mesh_framework(
     zigzag_spacing=0.025,
     diameter=0.001,
     maximum_descent_angle_deg,
-    slice_simplification=0.00002,
+    slice_simplification=JUNCTION_M,
     minimum_contour=0.0,
     base_line_spacing=None,
     coil_maximum_width=None,
@@ -800,10 +882,9 @@ def mesh_framework(
         raise ValueError("Layer height must be finite and positive")
     low, high = mesh.bounds[:, 2]
     candidate_height = float(layer_height)
-    refinements = []
     for iteration in range(13):
         intervals = int(np.ceil((high - low) / candidate_height))
-        if intervals < 1 or (high - low) / intervals <= 0.00002:
+        if intervals < 1 or (high - low) / intervals <= JUNCTION_M:
             raise ValueError(
                 "Cannot satisfy maximum descent angle at the 20 micron junction resolution"
             )
@@ -829,10 +910,6 @@ def mesh_framework(
         effective_height = max(np.diff(layer_z), default=0.0)
         angles = _descending_angles(graph)
         maximum = max(angles, default=0.0)
-        omitted = sum(
-            event.get("event") in {"continue", "split", "merge"}
-            for event in graph["contour_events"]
-        )
         graph["generation"].update(
             layer_height_m=float(layer_height),
             requested_layer_height_m=float(layer_height),
@@ -840,21 +917,12 @@ def mesh_framework(
             maximum_descent_angle_deg=maximum_descent_angle_deg,
             actual_maximum_descent_angle_deg=maximum,
             descending_member_count=len(angles),
-            closing_diagonal_omitted=bool(omitted),
-            omitted_closing_diagonals=omitted,
-            descent_angle_refinements=refinements,
         )
         if maximum <= maximum_descent_angle_deg + 1e-8:
             return graph
         if iteration == 12:
             break
         ratio = np.tan(np.radians(maximum_descent_angle_deg)) / np.tan(np.radians(maximum))
-        refinements.append(
-            {
-                "effective_layer_height_m": float(effective_height),
-                "actual_maximum_descent_angle_deg": maximum,
-            }
-        )
         # Re-slice the source: a perimeter-derived formula alone misses short
         # corner chords and differences between adjacent curved contours.
         candidate_height = effective_height * min(0.9, max(0.1, float(ratio) * 0.95))
@@ -925,13 +993,12 @@ def connect_framework_islands(graph, maximum_connector_m=0.035):
     edges = graph["edges"]
     diameter = graph["generation"]["strand_diameter_m"]
     active = {edge[end] for edge in edges for end in ("start", "end")}
-    bed_supports = []
     if active and not any(nodes[key]["ground"] for key in active):
         lowest = min(nodes[key]["position"][2] for key in active)
-        if lowest < -1e-7:
+        if lowest < -ON_BED_M:
             raise ValueError("Framework extends below the normalized build surface")
         low_nodes = sorted(key for key in active if nodes[key]["position"][2] <= lowest + 1e-7)
-        for key in base_anchors(nodes, low_nodes, 1e-7):
+        for key in base_anchors(nodes, low_nodes, ON_BED_M):
             foot = f"bed-foot-{key}"
             nodes[foot] = {
                 "id": foot,
@@ -947,14 +1014,13 @@ def connect_framework_islands(graph, maximum_connector_m=0.035):
                 order_hint=-1,
             )
             edges.append(edge)
-            bed_supports.append(edge["id"])
         graph["nodes"] = list(nodes.values())
     count = len(edges)
     orders = {}
     for edge in edges:
         for end in ("start", "end"):
             orders.setdefault(edge[end], []).append(edge["order_hint"])
-    original_components = connect_components(
+    connect_components(
         nodes,
         edges,
         {
@@ -970,16 +1036,10 @@ def connect_framework_islands(graph, maximum_connector_m=0.035):
             origin="explicit_component_connector",
             order_hint=max(min(orders[edge[end]]) for end in ("start", "end")) - 0.5,
         )
-    graph["component_connections"] = {
-        "original_components": original_components,
-        "added_members": [edge["id"] for edge in edges[count:]],
-        "maximum_connector_m": maximum_connector_m,
-        "bed_supports": bed_supports,
-    }
     return graph
 
 
-def reinforce_base(graph, reason):
+def reinforce_base(graph):
     """Add bed posts along the first usable contour after a failed screen."""
     nodes = {node["id"]: node for node in graph["nodes"]}
     active = {edge[end] for edge in graph["edges"] for end in ("start", "end")}
@@ -1012,7 +1072,6 @@ def reinforce_base(graph, reason):
         if gap[furthest] < spacing:
             break
         anchors.append(furthest)
-    added = []
     for key in anchors:
         foot = f"reinforcement-foot-{key}"
         nodes[foot] = {"id": foot, "position": [*nodes[key]["position"][:2], 0.0], "ground": True}
@@ -1025,226 +1084,5 @@ def reinforce_base(graph, reason):
             order_hint=-1,
         )
         graph["edges"].append(edge)
-        added.append(edge["id"])
     graph["nodes"] = list(nodes.values())
-    graph["base_reinforcement"] = {
-        "reason": reason,
-        "added_members": added,
-        "target_contour_height_m": height,
-    }
     return graph
-
-
-
-
-def _trails(graph):
-    """Fewest pen-down trails that draw every piece once, and the odd nodes.
-
-    Euler's rule: a connected frame is one trail exactly when at most two of
-    its nodes have an odd number of pieces; in general it takes half the
-    number of odd nodes.
-    """
-    network = topology(graph)
-    odd = sum(1 for _, degree in network.degree() if degree % 2)
-    trails = sum(
-        max(1, sum(1 for node in part if network.degree(node) % 2) // 2)
-        for part in nx.connected_components(network)
-    )
-    return trails, odd
-
-
-def _straight_pieces(points):
-    return [
-        [a.tolist(), (a + (b - a) / 3).tolist(), (a + 2 * (b - a) / 3).tolist(), b.tolist()]
-        for a, b in zip(points[:-1], points[1:], strict=True)
-    ]
-
-
-def _bowed_arc(points, outline, bow_m):
-    """The outline between two nodes, pulled inside it by up to ``bow_m``.
-
-    Each point moves toward the nearest point of the outline shrunk by
-    ``bow_m``, by a share that is zero at both nodes and full halfway, so the
-    connector leaves and joins the outline at the nodes and runs clear of it
-    between. Following the shrunk outline keeps the path from folding back on
-    itself at convex corners.
-    """
-    inner = outline.buffer(-bow_m, join_style=2).exterior
-    lengths = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))]
-    s = np.r_[np.arange(0.0, lengths[-1], 0.001), lengths[-1]]
-    dense = np.column_stack([np.interp(s, lengths, points[:, k]) for k in range(3)])
-    result = dense.copy()
-    for i in range(1, len(dense) - 1):
-        target = inner.interpolate(inner.project(Point(*dense[i, :2])))
-        share = np.sin(np.pi * s[i] / s[-1])
-        result[i, :2] += share * (np.array([target.x, target.y]) - dense[i, :2])
-    # Points pulled toward a corner of the shrunk outline crowd together; keep
-    # them at least half a millimetre apart so no wire piece is a stub.
-    kept = [result[0]]
-    for point in result[1:-1]:
-        if np.linalg.norm(point - kept[-1]) >= 0.0005:
-            kept.append(point)
-    if len(kept) > 1 and np.linalg.norm(result[-1] - kept[-1]) < 0.0005:
-        kept.pop()
-    return np.vstack([*kept, result[-1]])
-
-
-def eulerize_frame(graph, budget_m, structure=None, bow_m=0.003):
-    """Add connector wire so the frame can be drawn in as few trails as possible.
-
-    Each base line ends on the bed outline at a node where an odd number of
-    pieces meet. Neighbouring ends along the outline are paired by a
-    minimum-weight perfect matching and joined by connector wire bowed just
-    inside the outline, so a connector never lies on other wire. The bed
-    (outline, base lines and connectors) then becomes one closed trail from
-    the node where the walls start, ordered by Hierholzer's algorithm, and is
-    drawn as one stroke. Odd nodes above the bed are left as they are and
-    reported. ``structure`` is accepted for connectors above the bed, which
-    are not added.
-    """
-    graph = deepcopy(graph)
-    nodes = {node["id"]: np.asarray(node["position"], float) for node in graph["nodes"]}
-    trails_before, odd_before = _trails(graph)
-    network = topology(graph)
-    odd = {node for node, degree in network.degree() if degree % 2}
-    diameter = graph["generation"]["strand_diameter_m"]
-
-    def on_bed(node):
-        return nodes[node][2] <= 1e-9
-
-    bed_edges = [e for e in graph["edges"] if on_bed(e["start"]) and on_bed(e["end"])]
-    walls = {
-        node
-        for e in graph["edges"]
-        if not (on_bed(e["start"]) and on_bed(e["end"]))
-        for node in (e["start"], e["end"])
-        if on_bed(node)
-    }
-    left, connectors = [], []
-    rings = {}
-    for edge in bed_edges:
-        if edge.get("parent_curve", "").startswith("contour-"):
-            rings.setdefault(edge["parent_curve"], []).append(edge)
-    for edges in rings.values():
-        edges = sorted(edges, key=lambda e: e.get("source_interval", [0])[0])
-        order = [edges[0]["start"]] + [e["end"] for e in edges]
-        if order[0] != order[-1]:
-            continue
-        ring = set(order)
-        points = [nodes[order[0]]]
-        index = {order[0]: 0}
-        for edge in edges:
-            for segment in edge["segments"]:
-                points.append(np.asarray(segment[-1], float))
-            index.setdefault(edge["end"], len(points) - 1)
-        points = np.asarray(points)
-        outline = Polygon(points[:, :2])
-        if outline.buffer(-bow_m).is_empty:
-            continue  # Too small to fit a connector inside its outline.
-        attached = {
-            node
-            for e in bed_edges
-            if e["parent_curve"] not in rings or e["start"] not in ring or e["end"] not in ring
-            for node in (e["start"], e["end"])
-            if node in ring
-        }
-        junctions = [node for node in order[:-1] if node in attached]
-        pairs = nx.Graph()
-        for a, b in zip(junctions, junctions[1:] + junctions[:1], strict=True):
-            if a in odd and b in odd and a not in walls and b not in walls and a != b:
-                i, j = index[a], index[b]
-                arc = points[i : j + 1] if i < j else np.vstack([points[i:-1], points[: j + 1]])
-                length = float(np.linalg.norm(np.diff(arc, axis=0), axis=1).sum())
-                pairs.add_edge(a, b, weight=length, arc=arc)
-        matched = nx.min_weight_matching(pairs)
-        for a, b in matched:
-            arc = pairs[a][b]["arc"]
-            if not np.allclose(arc[0], nodes[a]):
-                a, b = b, a
-            connectors.append((a, b, _bowed_arc(arc, outline, bow_m)))
-        paired = {node for pair in matched for node in pair}
-        left += [
-            {"node": node, "reason": "no free neighbour on its outline"}
-            for node in junctions
-            if node in odd and node not in walls and node not in paired
-        ]
-    added = sum(float(np.linalg.norm(np.diff(c[2], axis=0), axis=1).sum()) for c in connectors)
-    total = sum(edge["length_m"] for edge in graph["edges"])
-    if connectors and total + added > budget_m:
-        left += [{"node": n, "reason": "wire budget"} for a, b, _ in connectors for n in (a, b)]
-        connectors, added = [], 0.0
-    hint = min(e.get("order_hint", 0) for e in bed_edges) if bed_edges else 0
-    for number, (a, b, path) in enumerate(connectors):
-        # A chain of straight members, like every other wire, through new
-        # nodes on the bed.
-        ids = [a]
-        for k, point in enumerate(path[1:-1]):
-            ids.append(f"euler-{number:03}-n{k:03}")
-            graph["nodes"].append({"id": ids[-1], "position": point.tolist(), "ground": True})
-            nodes[ids[-1]] = np.asarray(point, float)
-        ids.append(b)
-        for k, (start, end) in enumerate(zip(ids[:-1], ids[1:], strict=True)):
-            piece = path[k : k + 2]
-            graph["edges"].append(
-                {
-                    "id": f"euler-{number:03}-m{k:03}",
-                    "start": start,
-                    "end": end,
-                    "role": "framework",
-                    "origin": "euler_connector",
-                    "required": True,
-                    "diameter_m": diameter,
-                    "segments": _straight_pieces(piece),
-                    "length_m": float(np.linalg.norm(piece[1] - piece[0])),
-                    "process_status": "not_checked",
-                    "parent_curve": f"euler-{number:03}",
-                    "source_interval": [k, k + 1],
-                    "stage": "framework",
-                    "order_hint": hint,
-                }
-            )
-    left += [
-        {"node": node, "reason": "above the bed"}
-        for node in sorted(odd)
-        if not on_bed(node) and node != max(odd, key=lambda n: nodes[n][2])
-    ]
-    _order_bed_trail(graph, walls & odd, on_bed)
-    trails_after, odd_after = _trails(graph)
-    graph["generation"]["eulerization"] = {
-        "odd_nodes_before": odd_before,
-        "odd_nodes_after": odd_after,
-        "minimum_trails_before": trails_before,
-        "minimum_trails_after": trails_after,
-        "connectors": len(connectors),
-        "added_m": added,
-        "left_odd": left,
-        "method": "minimum-weight matching of odd outline nodes; Hierholzer order of the bed",
-    }
-    return graph
-
-
-def _order_bed_trail(graph, starts, on_bed):
-    """Draw the whole bed as one closed trail ending where the walls start."""
-    bed = [e for e in graph["edges"] if on_bed(e["start"]) and on_bed(e["end"])]
-    network = nx.MultiGraph()
-    for edge in bed:
-        network.add_edge(edge["start"], edge["end"], key=edge["id"])
-    if (
-        len(starts) != 1
-        or not network.number_of_edges()
-        or not nx.is_connected(network)
-        or not nx.is_eulerian(network)
-    ):
-        return
-    by_id = {edge["id"]: edge for edge in bed}
-    hint = min(edge.get("order_hint", 0) for edge in bed)
-    position = 0
-    for a, _, key in nx.eulerian_circuit(network, source=next(iter(starts)), keys=True):
-        edge = by_id[key]
-        if edge["start"] != a:
-            edge["start"], edge["end"] = edge["end"], edge["start"]
-            edge["segments"] = [list(reversed(piece)) for piece in reversed(edge["segments"])]
-        edge["parent_curve"] = "base-trail"
-        edge["source_interval"] = [position, position + len(edge["segments"])]
-        edge["order_hint"] = hint
-        position += len(edge["segments"])
