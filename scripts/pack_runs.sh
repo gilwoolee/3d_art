@@ -1,7 +1,7 @@
 #!/bin/bash
-# Pack the release files (runs/ is not in git):
+# Pack the runs a new machine needs (runs/ is not in git):
 #   scripts/pack_runs.sh [OUTPUT_DIR]      default ..
-# Writes two archives, attached to the GitHub release:
+# Writes two archives:
 #   pen_art_final_runs.tar.zst      the final runs and a runs/viewer_runs.json
 #                                   that lists them
 #   pen_art_motion_library.tar.zst  the motion library frame strokes are

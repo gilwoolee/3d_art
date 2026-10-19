@@ -32,7 +32,3 @@ tools/node/bin/node --test web/tests/*.test.mjs
 .venv/bin/ruff check src tests
 git diff --check
 ```
-
-Real full-cube scaling, blocked-material/cold-fallback probes and full browser
-playback remain explicit C6 acceptance runs in
-[PLAN.md](../docs/PLAN.md). The small routine suite does not replace them.

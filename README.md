@@ -28,8 +28,8 @@ its waits and speeds are settings, not measurements.
 | Palace | 7.0 m + 1.98 m | 172 | 24.6 min |
 | Palace, thinner layers on the pillars (frame only) | 9.9 m | 177 | 23.1 min |
 
-The meshes are in `objs/`. The planned runs are attached to the
-[v1.0 release](https://github.com/gilwoolee/3d_art/releases/tag/v1.0).
+The meshes are in `objs/`. The planned runs are not in the repository; the
+commands below make them again.
 
 ## Setup
 
@@ -44,22 +44,14 @@ This pulls the meshes, makes `.venv`, checks out the Flexiv robot description
 into `external/`, writes the robot cell, installs Node into `tools/node` and
 builds the viewer.
 
-Then download the release files and unpack them in the repository root:
-
-```bash
-base=https://github.com/gilwoolee/3d_art/releases/download/v1.0
-curl -LO $base/pen_art_final_runs.tar.zst       # the planned results, to view
-curl -LO $base/pen_art_motion_library.tar.zst   # needed to plan new frames
-tar --zstd -xf pen_art_final_runs.tar.zst
-tar --zstd -xf pen_art_motion_library.tar.zst
-```
-
-Frame strokes are adapted from the motion library. Without it they are planned
-from scratch and print slower (ghost: 13.0 min instead of 10.1).
+Frame strokes are adapted from a library of earlier drawings
+(`runs/motion_library_phase1_upright27_v1`), which is not in the repository.
+Without it they are planned from scratch and print slower (ghost: 13.0 min
+instead of 10.1).
 
 ## Usage
 
-**View the results.** Start the viewer and open <http://127.0.0.1:8765>:
+**View planned runs.** Start the viewer and open <http://127.0.0.1:8765>:
 
 ```bash
 .venv/bin/python -m pen_art.server --root "$PWD" --port 8765
@@ -147,8 +139,21 @@ env -u DISPLAY tools/node/bin/node --test web/tests/*.test.mjs
 (cd web && PATH=$PWD/../tools/node/bin:$PATH npm run build)
 ```
 
-Code map and design notes: [docs/HANDOFF.md](docs/HANDOFF.md),
-[fast planning and verification](docs/2026_1013_fast_planning_and_verification.md).
+If your shell sets `PYTHONPATH` (for example for ROS), unset it first, or
+pytest loads ROS's plugins and fails.
+
+| Area | Where |
+| --- | --- |
+| Frame generator (loops, zigzags, coils, layer heights) | `src/pen_art/abstraction/wireprint.py`, `solidify.py` |
+| Mesh to frame source, wire budget | `scripts/frame_source.py`, `src/pen_art/planning/section_build.py` |
+| Structural check | `src/pen_art/structure.py` |
+| Parallel planning | `src/pen_art/planning/parallel_build.py`, `cell_planner.py`, `cell_motion.py`, `indexed_build.py`, `transit.py` |
+| Pen and wire collision | `src/pen_art/planning/pen_spheres.py`, `axis_corridor.py`, `collision.py`, `tool.py` |
+| Full-robot verification | `src/pen_art/planning/cell_replay.py` |
+| Plan and verify driver | `scripts/benchmark_parallel_build.py`, `scripts/plan_frame.sh` |
+| Detail | `scripts/detail_tours.py`, `scripts/plan_detail.py` |
+| Viewer | `src/pen_art/server.py`, `web/src/simple.ts`, `web/src/viewer.ts` |
+| Setup | `scripts/setup_machine.sh`, `scripts/pack_runs.sh` |
 
 ## License
 

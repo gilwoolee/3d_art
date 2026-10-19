@@ -1,8 +1,0 @@
-{
-  "status": "PASSED",
-  "sections": 1250,
-  "backward_order_preserved": true,
-  "forward_backtracked_to_first_section": true,
-  "scope": "search control flow; mocked motion and structure, no robot feasibility claim",
-  "cached_motion_retains_backtracking": true
-}

@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test tests/*.test.mjs",
-    "check:replay": "node scripts/check-replay.mjs",
-    "check:playback": "node scripts/check-playback.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "three": "0.186.1"

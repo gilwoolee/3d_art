@@ -1,7 +1,7 @@
 # Agent instructions
 
-Start with [docs/HANDOFF.md](docs/HANDOFF.md): current state, setup on a new
-machine, how to run, next work. Adding detail to a frame:
+Start with [README.md](README.md): what the code does, setup, how to run, and
+a code map. Adding detail to a frame:
 [.claude/skills/detail-tours/SKILL.md](.claude/skills/detail-tours/SKILL.md).
 
 ## Rules from the user
