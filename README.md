@@ -44,8 +44,8 @@ builds the viewer.
 
 Frame strokes are adapted from a library of earlier drawings
 (`runs/motion_library_phase1_upright27_v1`), which is not in the repository.
-Without it they are planned from scratch and print slower (ghost: 13.0 min
-instead of 10.1).
+Without it they are planned from scratch and print slower (ghost: 14.2 min
+instead of 10.9).
 
 ## Usage
 
