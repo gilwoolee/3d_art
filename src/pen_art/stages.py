@@ -83,7 +83,10 @@ def drop_strokes(source, target, tours):
 
 
 def _inputs(source, profile):
-    return {"stroke_graph": sha256(Path(source) / "stroke_graph.json"), "profile": sha256(profile)}
+    return {
+        "stroke_graph": sha256(Path(source) / "stroke_graph.json"),
+        "profile": sha256(Path(profile)),
+    }
 
 
 def plan_geometry(folder, profile, workers=24, maximum_rounds=20, log=print):

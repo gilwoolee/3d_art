@@ -1268,9 +1268,12 @@ def prepare_context(build, action_budget=240.0, workers=1):
 
 
 def run_parallel_forward(
-    build, workers, *, action_budget=240.0, inject_rejections=()
+    build, workers, *, action_budget=240.0, inject_rejections=(), stage="all"
 ):
     """Plan one supported order with parallel workers, then export playback.
+
+    ``stage`` "geometry" stops after the untimed paths and saves them in
+    ``geometry_plan.json``; "timing" times those saved paths and exports.
 
     ``inject_rejections`` is a test facility: the first accepted check of each
     listed action index is treated as rejected, forcing a real replacement
@@ -1399,29 +1402,68 @@ def run_parallel_forward(
     )
     exported, timing_rejections = None, []
     try:
-        started = perf_counter()
-        status = coordinator.run()
-        progress(coordinator, final=True)
-        phases["planning_0"] = perf_counter() - started
         timed_keys = {}
+        geometry_file = build.run / "geometry_plan.json"
+        if stage == "timing":
+            # The geometry stage planned the paths; time them.
+            saved = read_json(geometry_file)
+            if saved["status"] != "COMPLETE" or saved["binding"] != context["binding"]:
+                raise ValueError("The paths were planned for other inputs; plan the geometry again")
+            planned, returned_key, lift_offs = (
+                saved["actions"], saved["returned_key"], saved["lift_offs"]
+            )
+            status = "COMPLETE"
+        else:
+            started = perf_counter()
+            status = coordinator.run()
+            progress(coordinator, final=True)
+            phases["planning_0"] = perf_counter() - started
+            lift_offs, planned, returned_key = schedule.lift_offs(), None, None
+            if status == "COMPLETE":
+                planned = [
+                    {
+                        "connect_key": schedule._connected(index)["key"],
+                        "untimed": bool(schedule._connected(index).get("untimed")),
+                        # The wire this action's pen was checked against, and its own.
+                        "chain": schedule.chain(index),
+                        "deposit": [
+                            schedule.slots[index]["candidate"]["deposit_key"],
+                            schedule.slots[index]["candidate"]["table_index"],
+                        ],
+                    }
+                    for index in range(len(order))
+                ]
+                returned_key = schedule.returned["key"]
+            if stage == "geometry":
+                write_json(
+                    geometry_file,
+                    {
+                        "status": status,
+                        "binding": context["binding"],
+                        "order": [row["id"] for row in order],
+                        "actions": planned,
+                        "returned_key": returned_key,
+                        "lift_offs": lift_offs,
+                        "minimum_trails": _minimum_trails(build),
+                    },
+                )
+                if status == "COMPLETE":
+                    status = "GEOMETRY_PLANNED"
         if status == "COMPLETE":
             # The whole object now has a checked chain. Time its untimed
             # actions; each is independent of the others.
             started = perf_counter()
             futures = {}
-            for index in range(len(order)):
-                connected = schedule._connected(index)
-                if not connected.get("untimed"):
+            for index, action in enumerate(planned):
+                if not action["untimed"]:
                     continue
-                candidate = schedule.slots[index]["candidate"]
                 spec = {
                     "kind": "time",
                     "index": index,
-                    "connected": connected["key"],
-                    # The wire this action's pen was checked against, and its own.
-                    "chain": schedule.chain(index),
-                    "deposit": [candidate["deposit_key"], candidate["table_index"]],
-                    "key": digest({"time": connected["key"], "binding": context["binding"]}),
+                    "connected": action["connect_key"],
+                    "chain": action["chain"],
+                    "deposit": action["deposit"],
+                    "key": digest({"time": action["connect_key"], "binding": context["binding"]}),
                 }
                 futures[submit(spec)] = spec
             for future, spec in futures.items():
@@ -1455,9 +1497,7 @@ def run_parallel_forward(
             started = perf_counter()
             witnesses = []
             for index, row in enumerate(order):
-                payload = _load(
-                    root, timed_keys.get(index, schedule._connected(index)["key"])
-                )
+                payload = _load(root, timed_keys.get(index, planned[index]["connect_key"]))
                 clock, drawing = payload["clock"], payload["drawing"]
                 witnesses.append(
                     (
@@ -1474,7 +1514,7 @@ def run_parallel_forward(
                         drawing,
                     )
                 )
-            returned = _load(root, schedule.returned["key"])["returned"]
+            returned = _load(root, returned_key)["returned"]
             phases["assembly_0"] = perf_counter() - started
             # Finished workers no longer need their library/material copies.
             release_pool()
@@ -1485,7 +1525,7 @@ def run_parallel_forward(
             gc.collect()
             coordinator.submit = submit
             started = perf_counter()
-            build.lift_offs = schedule.lift_offs()
+            build.lift_offs = lift_offs
             build.minimum_trails = _minimum_trails(build)
             exported = export_sections(
                 build,
@@ -1506,7 +1546,7 @@ def run_parallel_forward(
     summary["export_status"] = None if exported is None else exported["status"]
     summary["blocked"] = schedule.blocked()
     summary["timing_rejections"] = timing_rejections
-    summary["lift_offs"] = schedule.lift_offs()
+    summary["lift_offs"] = lift_offs
     summary["minimum_trails"] = _minimum_trails(build)
     write_json(build.run / "parallel_build.json", summary)
     compact = {
@@ -1522,6 +1562,7 @@ def run_parallel_forward(
     if status != "COMPLETE":
         build.report(
             {
+                "GEOMETRY_PLANNED": "GEOMETRY_PLANNED",
                 "TIME_BUDGET": "SEARCH_TIME_BUDGET",
                 "TIMING_REJECTED": "PARALLEL_FORWARD_TIMING_REJECTED",
                 "BLOCKED": "PARALLEL_FORWARD_INCOMPLETE",

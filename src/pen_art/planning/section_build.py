@@ -506,7 +506,7 @@ class SectionBuild:
             ),
         )
 
-    def run_build(self, workers, *, action_budget=240.0):
+    def run_build(self, workers, *, action_budget=240.0, stage="all"):
         if not self.stable(self.actions):
             self.report(
                 "GOAL_STRUCTURE_REJECTED", structure=self.structure[frozenset(self.actions)]
@@ -514,7 +514,7 @@ class SectionBuild:
             return
         from .parallel_build import run_parallel_forward
 
-        run_parallel_forward(self, workers, action_budget=action_budget)
+        run_parallel_forward(self, workers, action_budget=action_budget, stage=stage)
 
 
 def combine_clocks(*paths):
@@ -566,6 +566,12 @@ def main():
     parser.add_argument(
         "--action-budget", type=float, default=240.0, help="Seconds per parallel planning job"
     )
+    parser.add_argument(
+        "--stage",
+        choices=("all", "geometry", "timing"),
+        default="all",
+        help="geometry: untimed paths only; timing: time the saved paths and export",
+    )
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers needs at least one worker")
@@ -574,12 +580,13 @@ def main():
         prepare_candidates(args.run)
     build = SectionBuild(args.run, args.profile, args.maximum_seconds)
     try:
-        build.run_build(args.workers, action_budget=args.action_budget)
+        build.run_build(args.workers, action_budget=args.action_budget, stage=args.stage)
     except Exception as error:
         build.report("ERROR", error={"type": type(error).__name__, "message": str(error)})
         raise
     print(read_json(args.run / "section_build.json")["status"], flush=True)
-    return 0 if read_json(args.run / "section_build.json")["status"] == "FULL_BUILD_PLANNED" else 1
+    status = read_json(args.run / "section_build.json")["status"]
+    return 0 if status in {"FULL_BUILD_PLANNED", "GEOMETRY_PLANNED"} else 1
 
 
 if __name__ == "__main__":
