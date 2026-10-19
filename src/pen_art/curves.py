@@ -91,6 +91,12 @@ def flatten_curve(curve, tolerance=0.00005, max_chord=0.003):
     return np.array(points), np.array(parameters)
 
 
+def source_points(curve, transform):
+    """The curve's flattened samples (50 µm, 3 mm chords), mapped by ``transform``."""
+    points, _ = flatten_curve(curve, 0.00005, 0.003)
+    return transform_points(points, transform)
+
+
 def orient_stroke(stroke, reverse=False, start_visit=0):
     """Re-root a closed contour at a real junction, preserving its material exactly."""
     result = deepcopy(stroke)

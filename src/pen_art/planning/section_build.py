@@ -10,7 +10,7 @@ from time import monotonic
 import numpy as np
 
 from ..cell import load_frame_config, prepare_cell
-from ..curves import flatten_curve, transform_points
+from ..curves import source_points
 from ..io import artifact, read_json, sha256, write_json
 from ..structure import analyze_structure
 from .cell_planner import CellPlanner
@@ -99,8 +99,7 @@ class SectionBuild:
         scene = MaterialScene()
         for key in sorted(ids):
             row = self.actions[key]
-            points, _ = flatten_curve(row, 0.00005, 0.003)
-            points = transform_points(points, self.transform)
+            points = source_points(row, self.transform)
             for index, (a, b) in enumerate(zip(points[:-1], points[1:], strict=True)):
                 # Enclose both source flattening and the permitted tracking error.
                 scene.add(a, b, row["diameter_m"] / 2 + 0.00035, f"{key}/{index}")
@@ -115,7 +114,7 @@ class SectionBuild:
         )
         return ScheduleState(
             0.0,
-            ((self.arm.identity, tuple(q)),),
+            tuple(q),
             frozenset(ids),
             tuple((node, 0.0) for node in sorted(available)),
             payload=self.scene(ids) if scene is None else scene,

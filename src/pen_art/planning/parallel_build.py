@@ -11,10 +11,10 @@ Nothing here certifies a build. Workers use the planner's pen-candidate
 collision scope; acceptance remains the independent ordered full-robot replay.
 """
 
+import gc
 import os
 import pickle
 import traceback
-from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
@@ -23,7 +23,7 @@ from time import monotonic, perf_counter
 
 import numpy as np
 
-from ..curves import flatten_curve, transform_points
+from ..curves import source_points
 from ..io import artifact, read_json, sha256, stage_update, write_json
 from .cell_motion import (
     DEFAULT_PEN_TILTS_DEG,
@@ -32,21 +32,16 @@ from .cell_motion import (
     fixed_rotation_families,
     pen_clear,
 )
-from .material_journal import (
-    MaterialPrefix,
-    _merged,
-    cached_journal,
-    deposit_difference,
-    deposit_key,
-    write_journal,
-)
+from .material_journal import JournalFolder, _merged, deposit_difference
 from .path_certificates import IMPLEMENTATION, digest
-from .process_clock import action_ready_times, feed_events
+from .process_clock import add_ready_times, feed_events
 from .scene import FixedPlate, MaterialScene
 from .schedule import MotionProposal, ScheduledMotion
 
 POLICY = "parallel-forward-v1"
 HOME = "home"
+# The untimed paths the geometry stage saves for the timing stage.
+GEOMETRY_PLAN = "geometry_plan.json"
 # Outcomes that say nothing about feasibility of the candidate itself.
 UNRESOLVED = {"UNRESOLVED", "ERROR", "WORKER_LOST"}
 # Seconds between live progress reports while jobs are finishing.
@@ -489,8 +484,7 @@ class Motions:
         transform = self.table.build_transform()
         # Keep the pen orientations whose pen clears the wire at the stroke's
         # start, middle and end; IK then runs along the stroke for those.
-        points, _ = flatten_curve(row, 0.00005, 0.003)
-        points = transform_points(points, transform)
+        points = source_points(row, transform)
         tilts = row.get("pen_tilt_candidates_deg") or planner.profile.get(
             "drawing_pen_tilt_candidates_deg", DEFAULT_PEN_TILTS_DEG
         )
@@ -624,14 +618,11 @@ def _load(root, key):
     return pickle.loads((root / "jobs" / f"{key}.pkl").read_bytes())
 
 
-def _deposits(root, key):
-    return cached_journal(_WORKER.setdefault("deposits", OrderedDict()), root / "deposits", key)
-
-
-def _prefix(context):
-    if "prefix" not in _WORKER:
-        _WORKER["prefix"] = MaterialPrefix(lambda key: _deposits(context["root"], key))
-    return _WORKER["prefix"]
+def _journals(context):
+    """This worker's deposit journals of the predicted material."""
+    if "journals" not in _WORKER:
+        _WORKER["journals"] = JournalFolder(context["root"] / "deposits")
+    return _WORKER["journals"]
 
 
 def _completed(context, index):
@@ -639,8 +630,20 @@ def _completed(context, index):
 
 
 def _points(context, row):
-    points, _ = flatten_curve(row, 0.00005, 0.003)
-    return transform_points(points, context["model"].table.build_transform())
+    return source_points(row, context["model"].table.build_transform())
+
+
+def _out_of_time(planner, otherwise="REJECTED"):
+    """``UNRESOLVED`` once the job's time is up, else ``otherwise``."""
+    return "UNRESOLVED" if monotonic() >= planner.deadline else otherwise
+
+
+def _interval_failure(failure):
+    """A failed interval check as a job result; running out of time leaves it unresolved."""
+    return {
+        "status": "UNRESOLVED" if failure.get("status") == "TIME_BUDGET" else "REJECTED",
+        "failure": failure,
+    }
 
 
 def _journal(context, index, clock):
@@ -683,7 +686,7 @@ def _propose(context, spec, seconds):
         # Carry on from the predecessor's end: same node, joint position and
         # pen orientation, with the pen still down.
         available = {chain_from["node"]}
-    scene = _prefix(context).scene_for(spec["chain"])
+    scene = _journals(context).prefix.scene_for(spec["chain"])
     started = perf_counter()
     for drawing in model.drawings(
         row, available, build.initial, scene,
@@ -703,10 +706,7 @@ def _propose(context, spec, seconds):
         local["deposits"] = [row for _, rows in operations for row in rows]
         operations = _merged(planner, operations)
         seconds["predicted_deposit"] += perf_counter() - started
-        key = deposit_key(operations)
-        path = context["root"] / "deposits" / f"{key}.json"
-        if not path.exists():
-            write_journal(path, operations)
+        key = _journals(context).keep(operations)
         seconds["serialization"] += _store(
             context["root"],
             spec["key"],
@@ -730,7 +730,7 @@ def _propose(context, spec, seconds):
         }
     seconds["proposal"] += perf_counter() - started
     return {
-        "status": "UNRESOLVED" if monotonic() >= planner.deadline else "NO_CANDIDATE",
+        "status": _out_of_time(planner, "NO_CANDIDATE"),
         "failure": {"attempts": planner.attempts[-3:]},
     }
 
@@ -746,7 +746,7 @@ def _check(context, spec, seconds):
     seconds["serialization"] += perf_counter() - started
     drawing = candidate["drawing"]
     started = perf_counter()
-    scene = _prefix(context).scene_for(spec["chain"])
+    scene = _journals(context).prefix.scene_for(spec["chain"])
     seconds["material_reconstruction"] += perf_counter() - started
     state = build.state(completed, build.initial, scene)
     started = perf_counter()
@@ -761,7 +761,7 @@ def _check(context, spec, seconds):
     seconds["approach_withdraw"] += perf_counter() - started
     if move is None:
         return {
-            "status": "UNRESOLVED" if monotonic() >= planner.deadline else "REJECTED",
+            "status": _out_of_time(planner),
             "failure": planner.attempts[-1] if planner.attempts else None,
         }
     local = move.payload
@@ -775,12 +775,9 @@ def _check(context, spec, seconds):
     )
     seconds["material_validation"] += perf_counter() - started
     if failure:
-        return {
-            "status": "UNRESOLVED" if failure.get("status") == "TIME_BUDGET" else "REJECTED",
-            "failure": failure,
-        }
+        return _interval_failure(failure)
     difference = deposit_difference(
-        _merged(planner, operations), _deposits(context["root"], spec["deposit_key"])
+        _merged(planner, operations), _journals(context).load(spec["deposit_key"])
     )
     if difference is None or difference > 1e-9:
         return {
@@ -820,7 +817,7 @@ def _connect(context, spec, seconds):
     start = np.asarray(build.initial if spec["start"] is None else spec["start"], float)
     end = np.asarray(build.initial if spec["end"] is None else spec["end"], float)
     started = perf_counter()
-    scene = _prefix(context).scene_for(spec["chain"])
+    scene = _journals(context).prefix.scene_for(spec["chain"])
     seconds["material_reconstruction"] += perf_counter() - started
     started = perf_counter()
     # A chained stroke begins exactly where its predecessor stopped.
@@ -828,10 +825,7 @@ def _connect(context, spec, seconds):
     incoming = None if chained else build.travel_clock(scene, start, end)
     seconds["transit"] += perf_counter() - started
     if incoming is False:
-        return {
-            "status": "UNRESOLVED" if monotonic() >= planner.deadline else "REJECTED",
-            "failure": {"status": "NO_CONNECTING_TRANSIT"},
-        }
+        return {"status": _out_of_time(planner), "failure": {"status": "NO_CONNECTING_TRANSIT"}}
     if incoming is not None:
         move = MotionProposal(
             f"transit-{index}",
@@ -851,10 +845,7 @@ def _connect(context, spec, seconds):
         )
         seconds["transit_validation"] += perf_counter() - started
         if failure:
-            return {
-                "status": "UNRESOLVED" if failure.get("status") == "TIME_BUDGET" else "REJECTED",
-                "failure": failure,
-            }
+            return _interval_failure(failure)
     if spec["end"] is None:
         seconds["serialization"] += _store(context["root"], spec["key"], {"returned": incoming})
         return {"status": "OK", "duration_s": 0.0 if incoming is None else incoming.duration_s}
@@ -1001,7 +992,7 @@ def run_job(spec):
         }
     finally:
         planner.deadline = context["deadline"]
-    prefix = _WORKER.get("prefix")
+    journals = _WORKER.get("journals")
     return {
         **summary,
         "seconds": {**seconds, "total": perf_counter() - started},
@@ -1010,12 +1001,27 @@ def run_job(spec):
         },
         "worker": os.getpid(),
         "memory": _memory(),
-        "prefix_rebuilds": 0 if prefix is None else prefix.rebuilds,
+        "prefix_rebuilds": 0 if journals is None else journals.prefix.rebuilds,
     }
 
 
 # --------------------------------------------------------------------------
 # Coordinator.
+
+
+def _job_record(spec, summary, current):
+    """One finished job, as the build report lists it."""
+    return {
+        "kind": spec["kind"],
+        "index": spec["index"],
+        "status": summary["status"],
+        "current": current,
+        "failure": summary.get("failure"),
+        "seconds": summary.get("seconds", {}),
+        "counters": summary.get("counters", {}),
+        "worker": summary.get("worker"),
+        "memory": summary.get("memory", {}),
+    }
 
 
 class Coordinator:
@@ -1026,7 +1032,6 @@ class Coordinator:
         schedule,
         submit,
         workers,
-        root,
         *,
         deadline,
         restart=None,
@@ -1035,58 +1040,31 @@ class Coordinator:
         kill=None,
     ):
         self.schedule, self.submit, self.workers = schedule, submit, workers
-        self.root, self.deadline = Path(root), deadline
+        self.deadline = deadline
         self.restart, self.progress = restart, progress
         self.stall_seconds, self.kill = stall_seconds, kill
+        # Finished results by job key: a job wanted again is not run again.
         self.inflight, self.memo, self.retried, self.started = {}, {}, set(), {}
-        self.jobs, self.resumed, self.lost = [], 0, 0
-
-    def _recorded(self, key):
-        """A summary published by an earlier interrupted run of this binding."""
-        if key in self.memo:
-            return self.memo[key]
-        path = self.root / "jobs" / f"{key}.json"
-        if path.is_file():
-            try:
-                self.memo[key] = read_json(path)
-                self.resumed += 1
-                return self.memo[key]
-            except (OSError, ValueError):
-                pass
-        return None
+        self.jobs, self.lost = [], 0
 
     def _finish(self, spec, summary):
-        key = spec["key"]
         # Timeouts and lost workers are not reusable facts about a candidate.
         if summary["status"] not in UNRESOLVED:
-            self.memo[key] = summary
-            write_json(self.root / "jobs" / f"{key}.json", summary)
+            self.memo[spec["key"]] = summary
         current = self.schedule.apply(spec, summary)
-        self.jobs.append(
-            {
-                "kind": spec["kind"],
-                "index": spec["index"],
-                "status": summary["status"],
-                "current": current,
-                "failure": summary.get("failure"),
-                "seconds": summary.get("seconds", {}),
-                "counters": summary.get("counters", {}),
-                "worker": summary.get("worker"),
-                "memory": summary.get("memory", {}),
-            }
-        )
+        self.jobs.append(_job_record(spec, summary, current))
         if self.progress is not None:
             self.progress(self)
 
     def _dispatch(self):
-        """Apply recorded results, then fill idle workers in construction order."""
+        """Apply results already known, then fill idle workers in construction order."""
         while True:
             wanted = self.schedule.wanted()
             known = next(
                 (
-                    (spec, self._recorded(spec["key"]))
+                    (spec, self.memo[spec["key"]])
                     for spec in wanted
-                    if spec["key"] not in self.inflight and self._recorded(spec["key"])
+                    if spec["key"] not in self.inflight and self.memo.get(spec["key"])
                 ),
                 None,
             )
@@ -1199,7 +1177,6 @@ def _summarize(coordinator, schedule, workers, phases):
         },
         "stale_results": schedule.stale,
         "lost_worker_jobs": coordinator.lost,
-        "resumed_job_results": coordinator.resumed,
         "selected": len(selected),
         "worker_peak_memory": peak,
         "worker_peak_pss_total_mb": sum(row["pss_mb"] for row in peak.values()),
@@ -1295,28 +1272,86 @@ def prepare_context(build, action_budget=240.0, workers=1):
     return _CONTEXT
 
 
-def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
-    """Plan one supported order with parallel workers, then export playback.
+class _Workers:
+    """The forked worker pool: started on first use, started again after a lost
+    worker or once released."""
 
-    ``stage`` "geometry" stops after the untimed paths and saves them in
-    ``geometry_plan.json``; "timing" times those saved paths and exports;
-    "all" does both.
+    def __init__(self, count):
+        self.count, self.pools = count, []
+
+    def start(self):
+        pool = ProcessPoolExecutor(max_workers=self.count, mp_context=get_context("fork"))
+        self.pools.append(pool)
+        return self.submit
+
+    def submit(self, spec):
+        if not self.pools or self.pools[-1] is None:
+            self.start()
+        return self.pools[-1].submit(run_job, spec)
+
+    def release(self):
+        """Let the workers go, with their library and material copies."""
+        if self.pools and self.pools[-1] is not None:
+            self.pools[-1].shutdown(wait=True, cancel_futures=True)
+            self.pools.append(None)
+
+    def kill(self):
+        for process in list(getattr(self.pools[-1], "_processes", {}).values()):
+            process.kill()
+
+    def close(self):
+        for pool in self.pools:
+            if pool is not None:
+                pool.shutdown(wait=False, cancel_futures=True)
+
+
+class _Progress:
+    """Live progress of the geometry stage.
+
+    The report grows with the plan (40 MB for 366 actions); writing it after
+    every job kept the coordinator busier than the workers, so it goes out at
+    most every ``PROGRESS_INTERVAL_S``.
     """
-    if workers < 1:
-        raise ValueError("Parallel planning needs at least one worker")
-    started = launched = perf_counter()
-    phases = {}
-    build.report("PARALLEL_FORWARD_ORDER_RUNNING")
-    context = prepare_context(build, action_budget, workers)
-    if context is None:
+
+    def __init__(self, build, schedule, context, workers, launched):
+        self.build, self.schedule, self.context = build, schedule, context
+        self.workers, self.launched, self.published = workers, launched, -np.inf
+
+    def __call__(self, coordinator, final=False):
+        if not final and perf_counter() - self.published < PROGRESS_INTERVAL_S:
+            return
+        self.published = perf_counter()
+        build, schedule = self.build, self.schedule
+        build.best = [
+            schedule.actions[index]
+            for index in range(len(schedule.actions))
+            if schedule._checked(index) is not None
+        ]
         build.report(
-            "SEARCH_TIME_BUDGET"
-            if monotonic() >= build.planner.deadline
-            else "NO_GREEDY_FORWARD_ORDER"
+            "PARALLEL_FORWARD_RUNNING",
+            parallel={
+                "workers": self.workers, "jobs": len(coordinator.jobs), "stale": schedule.stale
+            },
         )
-        return None
-    order, root = context["order"], context["root"]
-    schedule = ForwardSchedule(
+        write_json(
+            self.context["root"] / "progress.json",
+            {
+                "elapsed_s": perf_counter() - self.launched,
+                "checked": len(build.best),
+                "required": len(self.context["order"]),
+                "in_flight": [
+                    [spec["kind"], spec["index"]] for _, spec in coordinator.inflight.values()
+                ],
+                "recent_jobs": coordinator.jobs[-12:],
+                "actions": schedule.report(),
+            },
+        )
+
+
+def _forward_schedule(context):
+    """The dependency bookkeeping for the context's order."""
+    order = context["order"]
+    return ForwardSchedule(
         [row["id"] for row in order],
         context["binding"],
         [
@@ -1333,210 +1368,116 @@ def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
         ],
     )
 
-    phases["setup"] = perf_counter() - started
-    build.search_metadata = {
-        "strategy": "parallel_local_actions_in_greedy_supported_order",
-        "material": "predicted_preceding_deposition_enclosures",
-        "workers": workers,
-    }
-    pools = []
 
-    def start_pool():
-        pool = ProcessPoolExecutor(max_workers=workers, mp_context=get_context("fork"))
-        pools.append(pool)
-        return lambda spec: pool.submit(run_job, spec)
-
-    def submit(spec):
-        # Forked on first use, and again after the replay released the workers.
-        if not pools or pools[-1] is None:
-            start_pool()
-        return pools[-1].submit(run_job, spec)
-
-    def release_pool():
-        if pools and pools[-1] is not None:
-            pools[-1].shutdown(wait=True, cancel_futures=True)
-            pools.append(None)
-
-    def kill_pool():
-        for process in list(getattr(pools[-1], "_processes", {}).values()):
-            process.kill()
-
-    published = [-np.inf]
-
-    def progress(coordinator, final=False):
-        # The report grows with the plan (40 MB for 366 actions); writing it
-        # after every job kept the coordinator busier than the workers.
-        if not final and perf_counter() - published[0] < PROGRESS_INTERVAL_S:
-            return
-        published[0] = perf_counter()
-        build.best = [
-            schedule.actions[index]
-            for index in range(len(schedule.actions))
-            if schedule._checked(index) is not None
-        ]
-        build.report(
-            "PARALLEL_FORWARD_RUNNING",
-            parallel={"workers": workers, "jobs": len(coordinator.jobs), "stale": schedule.stale},
-        )
-        write_json(
-            root / "progress.json",
+def plan_geometry(build, context, schedule, coordinator, progress, phases):
+    """Find every stroke's untimed path on the workers and save the result in
+    ``geometry_plan.json``. Returns the status and the lift-offs."""
+    started = perf_counter()
+    status = coordinator.run()
+    progress(coordinator, final=True)
+    phases["planning_0"] = perf_counter() - started
+    lift_offs, planned, returned_key = schedule.lift_offs(), None, None
+    if status == "COMPLETE":
+        planned = [
             {
-                "elapsed_s": perf_counter() - launched,
-                "checked": len(build.best),
-                "required": len(order),
-                "in_flight": [
-                    [spec["kind"], spec["index"]] for _, spec in coordinator.inflight.values()
-                ],
-                "recent_jobs": coordinator.jobs[-12:],
-                "actions": schedule.report(),
-            },
-        )
-
-    coordinator = Coordinator(
-        schedule,
-        submit,
-        workers,
-        root,
-        deadline=build.planner.deadline,
-        restart=start_pool,
-        progress=progress,
-        stall_seconds=3 * action_budget + 120,
-        kill=kill_pool,
+                "connect_key": schedule._connected(index)["key"],
+                # The wire this action's pen was checked against, and its own.
+                "chain": schedule.chain(index),
+                "deposit": schedule.slots[index]["candidate"]["deposit_key"],
+            }
+            for index in range(len(context["order"]))
+        ]
+        returned_key = schedule.returned["key"]
+    write_json(
+        build.run / GEOMETRY_PLAN,
+        {
+            "status": status,
+            "binding": context["binding"],
+            "order": [row["id"] for row in context["order"]],
+            "actions": planned,
+            "returned_key": returned_key,
+            "lift_offs": lift_offs,
+            "minimum_trails": _minimum_trails(build),
+        },
     )
-    exported, timing_rejections = None, []
-    try:
-        timed_keys = {}
-        geometry_file = build.run / "geometry_plan.json"
-        if stage == "timing":
-            # The geometry stage planned the paths; time them.
-            saved = read_json(geometry_file)
-            if saved["status"] != "COMPLETE" or saved["binding"] != context["binding"]:
-                raise ValueError("The paths were planned for other inputs; plan the geometry again")
-            planned, returned_key, lift_offs = (
-                saved["actions"], saved["returned_key"], saved["lift_offs"]
-            )
-            status = "COMPLETE"
-        else:
-            started = perf_counter()
-            status = coordinator.run()
-            progress(coordinator, final=True)
-            phases["planning_0"] = perf_counter() - started
-            lift_offs, planned, returned_key = schedule.lift_offs(), None, None
-            if status == "COMPLETE":
-                planned = [
-                    {
-                        "connect_key": schedule._connected(index)["key"],
-                        # The wire this action's pen was checked against, and its own.
-                        "chain": schedule.chain(index),
-                        "deposit": schedule.slots[index]["candidate"]["deposit_key"],
-                    }
-                    for index in range(len(order))
-                ]
-                returned_key = schedule.returned["key"]
-            if stage == "geometry":
-                write_json(
-                    geometry_file,
-                    {
-                        "status": status,
-                        "binding": context["binding"],
-                        "order": [row["id"] for row in order],
-                        "actions": planned,
-                        "returned_key": returned_key,
-                        "lift_offs": lift_offs,
-                        "minimum_trails": _minimum_trails(build),
-                    },
-                )
-                if status == "COMPLETE":
-                    status = "GEOMETRY_PLANNED"
-        if status == "COMPLETE":
-            # The whole object now has a checked chain. Time its actions;
-            # each is independent of the others.
-            started = perf_counter()
-            futures = {}
-            for index, action in enumerate(planned):
-                spec = {
-                    "kind": "time",
-                    "index": index,
-                    "connected": action["connect_key"],
-                    "chain": action["chain"],
-                    "deposit": action["deposit"],
-                    "key": digest({"time": action["connect_key"], "binding": context["binding"]}),
-                }
-                futures[submit(spec)] = spec
-            for future, spec in futures.items():
-                summary = future.result()
-                coordinator.jobs.append(
-                    {
-                        "kind": "time",
-                        "index": spec["index"],
-                        "status": summary["status"],
-                        "current": True,
-                        "failure": summary.get("failure"),
-                        "seconds": summary.get("seconds", {}),
-                        "counters": summary.get("counters", {}),
-                        "worker": summary.get("worker"),
-                        "memory": summary.get("memory", {}),
-                    }
-                )
-                if summary["status"] == "OK":
-                    timed_keys[spec["index"]] = spec["key"]
-                else:
-                    status = "TIMING_REJECTED"
-                    timing_rejections.append(
-                        {
-                            "action": order[spec["index"]]["id"],
-                            "status": summary["status"],
-                            "failure": summary.get("failure"),
-                        }
-                    )
-            phases["timing_0"] = perf_counter() - started
-        if status == "COMPLETE":
-            started = perf_counter()
-            witnesses = []
-            for index, row in enumerate(order):
-                payload = _load(root, timed_keys[index])
-                clock, drawing = payload["clock"], payload["drawing"]
-                witnesses.append(
-                    (
-                        row["id"],
-                        MotionProposal(
-                            row["id"],
-                            build.arm.identity,
-                            drawing["variant"],
-                            clock.duration_s,
-                            drawing["start_anchor"],
-                            tuple(clock.edges[-1].q1),
-                            clock,
-                        ),
-                        drawing,
-                    )
-                )
-            returned = _load(root, returned_key)["returned"]
-            phases["assembly_0"] = perf_counter() - started
-            # Finished workers no longer need their library/material copies.
-            release_pool()
-            # Selected seeds remain available in the frozen originals.
-            import gc
+    return ("GEOMETRY_PLANNED" if status == "COMPLETE" else status), lift_offs
 
-            _WORKER.clear()
-            gc.collect()
-            coordinator.submit = submit
-            started = perf_counter()
-            build.lift_offs = lift_offs
-            build.minimum_trails = _minimum_trails(build)
-            exported = export_sections(build, witnesses, returned)
-            phases["export_0"] = perf_counter() - started
-    finally:
-        for pool in pools:
-            if pool is not None:
-                pool.shutdown(wait=False, cancel_futures=True)
+
+def saved_geometry(build, context):
+    """The untimed paths, return home and lift-offs the geometry stage saved."""
+    saved = read_json(build.run / GEOMETRY_PLAN)
+    if saved["status"] != "COMPLETE" or saved["binding"] != context["binding"]:
+        raise ValueError("The paths were planned for other inputs; plan the geometry again")
+    return saved["actions"], saved["returned_key"], saved["lift_offs"]
+
+
+def plan_timing(context, planned, coordinator, submit, phases):
+    """Time every planned action on the workers; each is independent of the
+    others. Returns each action's timed job key and the timing rejections."""
+    started = perf_counter()
+    futures = {}
+    for index, action in enumerate(planned):
+        spec = {
+            "kind": "time",
+            "index": index,
+            "connected": action["connect_key"],
+            "chain": action["chain"],
+            "deposit": action["deposit"],
+            "key": digest({"time": action["connect_key"], "binding": context["binding"]}),
+        }
+        futures[submit(spec)] = spec
+    timed_keys, rejections = {}, []
+    for future, spec in futures.items():
+        summary = future.result()
+        coordinator.jobs.append(_job_record(spec, summary, True))
+        if summary["status"] == "OK":
+            timed_keys[spec["index"]] = spec["key"]
+        else:
+            rejections.append(
+                {
+                    "action": context["order"][spec["index"]]["id"],
+                    "status": summary["status"],
+                    "failure": summary.get("failure"),
+                }
+            )
+    phases["timing_0"] = perf_counter() - started
+    return timed_keys, rejections
+
+
+def assemble(build, context, timed_keys, returned_key):
+    """The timed clocks as the arm's drawings, in order, and its return home."""
+    root, witnesses = context["root"], []
+    for index, row in enumerate(context["order"]):
+        payload = _load(root, timed_keys[index])
+        clock, drawing = payload["clock"], payload["drawing"]
+        witnesses.append(
+            (
+                row["id"],
+                MotionProposal(
+                    row["id"],
+                    build.arm.identity,
+                    drawing["variant"],
+                    clock.duration_s,
+                    drawing["start_anchor"],
+                    tuple(clock.edges[-1].q1),
+                    clock,
+                ),
+                drawing,
+            )
+        )
+    return witnesses, _load(root, returned_key)["returned"]
+
+
+def write_reports(build, coordinator, schedule, workers, phases, status, exported, rejected,
+                  lift_offs):
+    """Save ``parallel_build.json`` and record the stage's outcome in the build report."""
     phases["total"] = sum(phases.values())
     summary = _summarize(coordinator, schedule, workers, phases)
     summary["planning_status"] = status
     summary["replay_status"] = "NOT_RUN"
     summary["export_status"] = None if exported is None else exported["status"]
     summary["blocked"] = schedule.blocked()
-    summary["timing_rejections"] = timing_rejections
+    summary["timing_rejections"] = rejected
     summary["lift_offs"] = lift_offs
     summary["minimum_trails"] = _minimum_trails(build)
     write_json(build.run / "parallel_build.json", summary)
@@ -1550,7 +1491,7 @@ def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
         report["lift_offs"] = summary["lift_offs"]
         report["minimum_trails"] = summary["minimum_trails"]
         write_json(build.run / "section_build.json", report)
-    if status != "COMPLETE":
+    else:
         build.report(
             {
                 "GEOMETRY_PLANNED": "GEOMETRY_PLANNED",
@@ -1566,20 +1507,129 @@ def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
     return summary
 
 
-def export_sections(build, witnesses, returned):
-    """Save the planned clocks as ``plan.json``, for verification and playback.
+def run_parallel_forward(build, workers, *, stage, action_budget=240.0):
+    """Plan one supported order with parallel workers.
+
+    ``stage`` "geometry" plans the untimed paths and saves them in
+    ``geometry_plan.json``; "timing" times those saved paths and exports
+    playback.
+    """
+    if workers < 1:
+        raise ValueError("Parallel planning needs at least one worker")
+    if stage not in ("geometry", "timing"):
+        raise ValueError(f"Unknown planning stage: {stage}")
+    started = launched = perf_counter()
+    phases = {}
+    build.report("PARALLEL_FORWARD_ORDER_RUNNING")
+    context = prepare_context(build, action_budget, workers)
+    if context is None:
+        build.report(
+            "SEARCH_TIME_BUDGET"
+            if monotonic() >= build.planner.deadline
+            else "NO_GREEDY_FORWARD_ORDER"
+        )
+        return None
+    schedule = _forward_schedule(context)
+    phases["setup"] = perf_counter() - started
+    build.search_metadata = {
+        "strategy": "parallel_local_actions_in_greedy_supported_order",
+        "material": "predicted_preceding_deposition_enclosures",
+        "workers": workers,
+    }
+    # Forked on first use, and again after the workers were released.
+    pool = _Workers(workers)
+    progress = _Progress(build, schedule, context, workers, launched)
+    coordinator = Coordinator(
+        schedule,
+        pool.submit,
+        workers,
+        deadline=build.planner.deadline,
+        restart=pool.start,
+        progress=progress,
+        stall_seconds=3 * action_budget + 120,
+        kill=pool.kill,
+    )
+    exported, rejected = None, []
+    try:
+        if stage == "geometry":
+            status, lift_offs = plan_geometry(
+                build, context, schedule, coordinator, progress, phases
+            )
+        else:
+            planned, returned_key, lift_offs = saved_geometry(build, context)
+            timed_keys, rejected = plan_timing(context, planned, coordinator, pool.submit, phases)
+            status = "TIMING_REJECTED" if rejected else "COMPLETE"
+            if status == "COMPLETE":
+                started = perf_counter()
+                witnesses, returned = assemble(build, context, timed_keys, returned_key)
+                phases["assembly_0"] = perf_counter() - started
+                # Finished workers no longer need their library/material copies.
+                pool.release()
+                # Selected seeds remain available in the frozen originals.
+                _WORKER.clear()
+                gc.collect()
+                started = perf_counter()
+                build.lift_offs = lift_offs
+                build.minimum_trails = _minimum_trails(build)
+                exported = export_sections(build, witnesses, returned)
+                phases["export_0"] = perf_counter() - started
+    finally:
+        pool.close()
+    return write_reports(
+        build, coordinator, schedule, workers, phases, status, exported, rejected, lift_offs
+    )
+
+
+# The construction fields every saved drawing row repeats.
+SECTION_FIELDS = (
+    "id",
+    "parent_curve",
+    "source_interval",
+    "members",
+    "stage",
+    "start",
+    "end",
+    "role",
+    "junction_visits",
+    "closed",
+)
+
+
+def _section_row(build, key, move, drawing, start_s):
+    """One drawing as ``plan.json`` saves it, starting at ``start_s``."""
+    section, path = build.actions[key], move.payload
+    return {
+        **{field: section[field] for field in SECTION_FIELDS},
+        **(
+            {"source_intervals": section["source_intervals"]}
+            if "source_intervals" in section
+            else {}
+        ),
+        "arm": build.arm.identity,
+        "stroke_id": key,
+        "variant": move.variant,
+        "start_anchor": move.start_anchor,
+        "reverse": drawing["reverse"],
+        "start_visit": drawing.get("start_visit", 0),
+        "proposal_source": drawing.get("proposal_source", "planner"),
+        "start_s": start_s,
+        "end_s": start_s + path.duration_s,
+        "trajectory": path.record(),
+        "auxiliary": False,
+    }
+
+
+def schedule_sections(build, witnesses, returned):
+    """The saved action rows, return home last, and the print time.
 
     Each stroke starts once its start joint has cooled, or at once when it is
-    chained to the stroke before. The plan is simulation only and awaits the
-    separate full-robot verification.
+    chained to the stroke before; detail waits until the whole frame is ready.
     """
-    planner, run = build.planner, build.run
     actions, clock = [], 0.0
-    ready = {node: 0.0 for node in planner.ground}
+    ready = {node: 0.0 for node in build.planner.ground}
     framework_ready = 0.0
     for key, move, drawing in witnesses:
-        section = build.actions[key]
-        path = move.payload
+        section, path = build.actions[key], move.payload
         # A chained stroke continues from its predecessor with the pen down;
         # only a stroke that attaches afresh waits for its joint to cool.
         if not path.metadata.get("chained_in"):
@@ -1590,46 +1640,10 @@ def export_sections(build, witnesses, returned):
             clock = max(clock, framework_ready)
         if not np.isfinite(clock):
             raise ValueError("Cannot schedule a section on absent material")
-        actions.append(
-            {
-                **{
-                    field: section[field]
-                    for field in (
-                        "id",
-                        "parent_curve",
-                        "source_interval",
-                        "members",
-                        "stage",
-                        "start",
-                        "end",
-                        "role",
-                        "junction_visits",
-                        "closed",
-                    )
-                },
-                **(
-                    {"source_intervals": section["source_intervals"]}
-                    if "source_intervals" in section
-                    else {}
-                ),
-                "arm": build.arm.identity,
-                "stroke_id": key,
-                "variant": move.variant,
-                "start_anchor": move.start_anchor,
-                "reverse": drawing["reverse"],
-                "start_visit": drawing.get("start_visit", 0),
-                "proposal_source": drawing.get("proposal_source", "planner"),
-                "start_s": clock,
-                "end_s": clock + path.duration_s,
-                "trajectory": path.record(),
-                "auxiliary": False,
-            }
-        )
-        availability = action_ready_times(path)
-        for node, relative in availability.items():
-            ready[node] = min(ready.get(node, float("inf")), clock + relative)
+        actions.append(_section_row(build, key, move, drawing, clock))
+        own = add_ready_times(ready, path, clock)
         if section["stage"] == "framework":
-            framework_ready = max(framework_ready, clock + max(availability.values()))
+            framework_ready = max(framework_ready, clock + max(own.values()))
         clock += path.duration_s
     if returned is not None:
         actions.append(
@@ -1645,6 +1659,17 @@ def export_sections(build, witnesses, returned):
             }
         )
         clock += returned.duration_s
+    return actions, clock
+
+
+def export_sections(build, witnesses, returned):
+    """Save the planned clocks as ``plan.json``, for verification and playback.
+
+    The plan is simulation only and awaits the separate full-robot
+    verification.
+    """
+    planner, run = build.planner, build.run
+    actions, clock = schedule_sections(build, witnesses, returned)
     settings = "plan_config.json"
     write_json(
         run / settings,
@@ -1699,8 +1724,6 @@ def export_sections(build, witnesses, returned):
     stage_update(run, "validation", "pending", message="Separate full-robot verification required")
     build.best = [key for key, _, _ in witnesses]
     # The viewer reads the saved JSON; release export-only clocks now.
-    import gc
-
     actions.clear()
     witnesses.clear()
     plan.clear()

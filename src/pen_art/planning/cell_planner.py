@@ -1088,7 +1088,7 @@ class CellPlanner:
                         )
                 else:
                     edge = None
-                    q = np.array(dict(state.configurations)[identity])
+                    q = np.array(state.configuration)
 
                     def position(u, q=q):
                         return q

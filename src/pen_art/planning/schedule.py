@@ -47,12 +47,14 @@ class ScheduledMotion:
 
 @dataclass(frozen=True)
 class ScheduleState:
+    """The arm at ``time_s``: its joint position, the strokes it finished, when
+    each node is ready to build on, the motion still running and the material."""
+
     time_s: float
-    configurations: tuple[tuple[str, tuple[float, ...]], ...]
+    configuration: tuple[float, ...]
     completed: frozenset[str]
-    support_ready: tuple[tuple[str, float], ...]
+    support_ready: tuple[tuple[str, float], ...] = ()
     active: tuple[ScheduledMotion, ...] = ()
-    history: tuple[ScheduledMotion, ...] = ()
     payload: object = field(default=None, compare=False, repr=False)
 
     def ready_nodes(self):

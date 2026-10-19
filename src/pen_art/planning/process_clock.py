@@ -86,6 +86,15 @@ def action_ready_times(path):
     return result
 
 
+def add_ready_times(ready, path, start_s):
+    """Fold a drawing started at ``start_s`` into ``ready``, each node's earliest
+    ready time. Returns the drawing's own ready times, from its start."""
+    own = action_ready_times(path)
+    for node, relative in own.items():
+        ready[node] = min(ready.get(node, float("inf")), start_s + relative)
+    return own
+
+
 def next_visit(points, start, target, tolerance):
     """Index of the first pass of ``points`` (from ``start``) through ``target``.
 

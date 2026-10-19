@@ -175,20 +175,6 @@ class RobotCollisionModel:
                 self._material_poses.popitem(last=False)
         return pose
 
-    def pairs(self, positions, obstacles=None):
-        frames = self.robot.frames(positions)
-        objects = [
-            (body, placed(body.geometry, frames[body.link] @ body.origin)) for body in self.bodies
-        ]
-        for index, (body, obj) in enumerate(objects):
-            for other_index, _ in self._self_pairs[index]:
-                other, other_obj = objects[other_index]
-                yield body.name, other.name, obj, other_obj
-            for name, obstacle in (obstacles or {}).items():
-                if name == "table" and body.link in self.mount_links:
-                    continue
-                yield body.name, name, obj, obstacle
-
     def distances(self, positions, obstacles=None, *, deadline=float("inf"), only=None):
         """Yield names, signed clearance and overlap; cache only self pairs.
 

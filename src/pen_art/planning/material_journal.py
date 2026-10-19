@@ -3,6 +3,7 @@ the material they rebuild. Each worker constructs its own FCL objects."""
 
 import hashlib
 import os
+from collections import OrderedDict
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -71,18 +72,33 @@ def load_journal(path):
     return operations
 
 
-def cached_journal(cache, folder, key):
-    """The journal ``key`` in ``folder``, checked against its key. ``cache`` (an
-    OrderedDict) keeps the last four loaded."""
-    if key not in cache:
-        operations = load_journal(Path(folder) / f"{key}.json")
-        if deposit_key(operations) != key:
-            raise ValueError("Changed material journal")
-        cache[key] = operations
-        while len(cache) > 4:
-            cache.popitem(last=False)
-    cache.move_to_end(key)
-    return cache[key]
+class JournalFolder:
+    """The deposit journals in one folder, as one process uses them: each kept
+    once under its key, checked against it when read, the last four read held,
+    and the material they name rebuilt by one ``MaterialPrefix``."""
+
+    def __init__(self, folder):
+        self.folder, self.cache = Path(folder), OrderedDict()
+        self.prefix = MaterialPrefix(self.load)
+
+    def keep(self, operations):
+        """Write ``operations`` under their key unless already there; returns the key."""
+        key = deposit_key(operations)
+        path = self.folder / f"{key}.json"
+        if not path.exists():
+            write_journal(path, operations)
+        return key
+
+    def load(self, key):
+        if key not in self.cache:
+            operations = load_journal(self.folder / f"{key}.json")
+            if deposit_key(operations) != key:
+                raise ValueError("Changed material journal")
+            self.cache[key] = operations
+            while len(self.cache) > 4:
+                self.cache.popitem(last=False)
+        self.cache.move_to_end(key)
+        return self.cache[key]
 
 
 def _distance_to_segment(points, first, last):
