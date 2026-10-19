@@ -89,13 +89,14 @@ def _inputs(source, profile):
     }
 
 
-def plan_geometry(folder, profile, workers=24, maximum_rounds=20, log=print):
+def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=20, log=print):
     """Plan untimed paths for the frame, and the detail when ``detail/`` exists."""
     folder, profile = Path(folder), Path(profile)
     frame = folder / "frame_source"
     if not (frame / "stroke_graph.json").exists():
         raise StageOrderError(f"no frame in {frame}: run `pen-art frame` first")
-    source = folder / "detail" if (folder / "detail" / "stroke_graph.json").exists() else frame
+    has_detail = (folder / "detail" / "stroke_graph.json").exists()
+    source = folder / "detail" if has_detail and not frame_only else frame
     if source.name == "detail":
         from .detail import detail_profile
 

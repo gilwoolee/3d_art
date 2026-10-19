@@ -32,7 +32,7 @@ if [ ! -d external/flexiv_description ]; then
 fi
 git -C external/flexiv_description checkout --quiet --detach "$flexiv"
 if [ ! -f runs/cell/robot.urdf ] || ! grep -q "$root/external" runs/cell/robot.urdf; then
-  .venv/bin/python -c "from pen_art.cell_config import prepare_cell_model; prepare_cell_model()"
+  .venv/bin/pen-art cell
 fi
 
 echo "== 4. Node and the viewer"

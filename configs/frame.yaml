@@ -15,7 +15,9 @@
 wireprint:
   # Geometric descent angle from horizontal, not tool tilt.
   maximum_descent_angle_deg: 27.0
-  layer_height: 0.01
+  layer_height: 0.0097
+  # Parts thinner than this are left out: a wire frame cannot draw them.
+  minimum_feature_m: 0.008
   zigzag_spacing: 0.025
   # Every loop gets at least this many risers and diagonals. A narrow part
   # (a pillar) is sliced thinner where its loops are too short to hold them

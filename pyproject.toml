@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "httpx>=0.28,<1", "ruff>=0.11,<1"]
 
+[project.scripts]
+pen-art = "pen_art.cli:main"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
