@@ -18,19 +18,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-learning = ["torch>=2.5,<3"]
 dev = ["pytest>=8,<10", "httpx>=0.28,<1", "ruff>=0.11,<1"]
-
-[project.scripts]
-pen-art = "pen_art.pipeline:main"
-pen-art-serve = "pen_art.server:main"
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-
-[tool.ruff.per-file-target-version]
-"src/pen_art/abstraction/wir3d_runner.py" = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

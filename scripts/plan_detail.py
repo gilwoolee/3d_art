@@ -141,7 +141,6 @@ def main():
                     str(args.workers),
                     "--maximum-seconds",
                     "7200",
-                    "--build-option=--geometry-first",
                     "--verification-option=--accept-geometry-proofs",
                 ],
                 stdout=log,

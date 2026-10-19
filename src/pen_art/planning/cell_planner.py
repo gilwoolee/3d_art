@@ -517,7 +517,7 @@ class CellPlanner:
         if pen:
             # What a pen-only collision proof read, whichever scope asks for it:
             # the kinematic context, the fixed obstacles and the pen's geometry.
-            from .motion_library import collision_context_hash
+            from .collision_context import collision_context_hash
 
             arm, full = self.arms[identity], self._path_certificate_context(identity)
             return {
@@ -540,8 +540,12 @@ class CellPlanner:
                 name: value for name, value in self.settings.items() if name != "collision_scope"
             }
             return context
-        from .motion_library import collision_context_hash, digest, obstacle_context
-        from .motion_runtime import static_shapes
+        from .collision_context import (
+            collision_context_hash,
+            digest,
+            obstacle_context,
+            static_shapes,
+        )
 
         arm = self.arms[identity]
         model = getattr(arm.collision, "model", arm.collision)
@@ -2004,7 +2008,7 @@ class CellPlanner:
                         else self.collision_tip_model(identity)
                     )
                     if identity in invariant_hits:
-                        from .motion_library import MaterialOnlyCollisionModel
+                        from .collision_context import MaterialOnlyCollisionModel
 
                         model = MaterialOnlyCollisionModel(model)
                         self.verification_stats[

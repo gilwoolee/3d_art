@@ -543,17 +543,7 @@ def _replay_cell_body(
         expected_sections = list(planner.actions.values())
         provenance_graph = planner.graph
         if partial_sections:
-            from .partial_export import prefix_source_graph
-
-            expected_sections = [planner.actions[row["stroke_id"]] for row in sections]
-            if any(row["stage"] == "artistic" for row in sections):
-                completed = {row["stroke_id"] for row in sections}
-                framework = {
-                    key for key, row in planner.actions.items() if row["stage"] == "framework"
-                }
-                if not framework <= completed:
-                    raise ValueError("Partial schedule starts art before the full framework")
-            provenance_graph = prefix_source_graph(planner.graph, sections)
+            raise ValueError("Partial schedules are not supported")
         section_audits["source_coverage"] = coverage_audit(sections, expected_sections)
         section_audits["source_provenance"] = audit_source_provenance(sections, provenance_graph)
         section_audits["source_audit_scope"] = (

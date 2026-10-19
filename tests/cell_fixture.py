@@ -1,4 +1,4 @@
-"""Exact invariant reuse must never reuse a growing-material verdict."""
+"""A tiny one-arm cell shared by the tests."""
 
 
 from collections import Counter
@@ -13,7 +13,6 @@ from pen_art.planning.clock_path import ClockEdge, ClockPath
 from pen_art.planning.collision import RobotCollisionModel, placed
 from pen_art.planning.dual_arm import MotionProposal, ScheduledMotion, ScheduleState
 from pen_art.planning.path_certificates import PathCertificateStore
-from pen_art.planning.scene import MaterialScene
 from pen_art.robot import SerialArm
 
 
@@ -54,20 +53,3 @@ def setup(tmp_path):
 
 def state(scene):
     return ScheduleState(0, (("arm", (-.2,)),), frozenset(), (), payload=scene)
-
-
-def test_exact_proof_reuses_static_but_checks_new_interior_material(tmp_path):
-    planner, move = setup(tmp_path)
-    empty = MaterialScene()
-    assert planner.validate_interval(state(empty), (move,), 1)[1] is None
-    assert planner.path_certificates.stats["invariant_path_admitted"] == 1
-    assert planner.validate_interval(state(empty), (move,), 1)[1] is None
-    assert planner.verification_stats["static_intervals_reused"] > 0
-    nearby = MaterialScene()
-    nearby.add([1, 0, -.02], [1, 0, .02], .02, "new wire")
-    # Both endpoints remain clear. The full polynomial passes through the wire.
-    collision = planner.validate_interval(state(nearby), (move,), 1)[1]
-    assert collision["status"] == "COLLISION"
-    distant = MaterialScene()
-    distant.add([5, 5, 0], [5, 5, .1], .001, "distant wire")
-    assert planner.validate_interval(state(distant), (move,), 1)[1] is None

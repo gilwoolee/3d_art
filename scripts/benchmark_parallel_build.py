@@ -56,9 +56,6 @@ def launch(args, workers):
         str(run),
         "--profile",
         str(args.profile),
-        "--motion-library",
-        str(args.motion_library),
-        "--progression-only",
         "--maximum-seconds",
         str(args.maximum_seconds),
         "--action-budget",
@@ -171,9 +168,6 @@ def main():
     parser.add_argument("--source-run", type=Path, required=True)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--output", required=True, help="Run prefix; _w<N> is appended")
-    parser.add_argument(
-        "--motion-library", type=Path, default=Path("runs/motion_library_phase1_upright27_v1")
-    )
     parser.add_argument("--workers", type=int, nargs="+", default=[1, 2, 4])
     parser.add_argument("--maximum-seconds", type=float, default=14400)
     parser.add_argument(
@@ -222,8 +216,6 @@ def main():
         "scope": "Planning/export followed by a separate full-robot verification command",
         "source_run": str(args.source_run),
         "profile": str(args.profile),
-        "motion_library": str(args.motion_library),
-        "motion_library_frozen": True,
         "concurrent_runs": args.concurrent,
         "cpu_count": os.cpu_count(),
         "memory_sampling_interval_s": 2,

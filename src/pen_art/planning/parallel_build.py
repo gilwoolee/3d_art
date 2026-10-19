@@ -181,8 +181,6 @@ class ForwardSchedule:
                 "check": None,
                 "connect": None,
                 "attempts": 0,
-                "skip": [],
-                "cache_exhausted": False,
                 "cold": 0,
                 "history": [],
                 "unresolved": None,
@@ -301,7 +299,7 @@ class ForwardSchedule:
         if self.rows is None or index <= 0 or index >= len(self.actions):
             return False
         slot = self.slots[index]
-        if slot["unchained"] or slot["cache_exhausted"] or slot["unresolved"] is not None:
+        if slot["unchained"] or slot["unresolved"] is not None:
             return False
         previous = self.rows[index - 1]
         ends = set(previous["nodes"]) if previous["closed"] else {previous["end"]}
@@ -314,34 +312,10 @@ class ForwardSchedule:
         slot = self.slots[index]
         if slot["unresolved"] is not None or slot["candidate"] is not None:
             return None
-        chain = None
-        if self._may_chain(index):
-            previous = self.slots[index - 1]
-            if previous["candidate"] is None:
-                if previous["unresolved"] is None:
-                    return None  # Its starting joint position is not known yet.
-            elif previous["candidate"].get("end_node") in self._starts(index):
-                chain = {
-                    "node": previous["candidate"]["end_node"],
-                    "q": previous["candidate"]["q_draw_end"],
-                    "rotation": previous["candidate"]["tcp_rotation"],
-                    "table_index": previous["candidate"]["table_index"],
-                    "previous": previous["candidate"]["key"],
-                }
-        if not slot["cache_exhausted"]:
-            mode = {"mode": "cache", "skip": sorted(slot["skip"])}
-            if chain is not None:
-                mode["chain_from"] = chain
-            elif self.rows is not None and index + 1 < len(self.rows):
-                # A loop may start anywhere; start it where the next stroke begins.
-                row, following = self.rows[index], self.rows[index + 1]
-                if row["closed"] and not following["closed"] and following["start"] in row["nodes"]:
-                    mode["prefer_start"] = following["start"]
-        else:
-            chain = self.chain(index)
-            if chain is None:
-                return None  # A cold proposal screens against preceding material.
-            mode = {"mode": "cold", "ordinal": slot["cold"], "chain": chain}
+        chain = self.chain(index)
+        if chain is None:
+            return None  # A proposal screens against the preceding material.
+        mode = {"mode": "cold", "ordinal": slot["cold"], "chain": chain}
         return {
             "kind": "propose",
             "index": index,
@@ -379,9 +353,7 @@ class ForwardSchedule:
         ]
 
     def _exhaust(self, slot):
-        if slot["attempts"] >= self.maximum_attempts or (
-            slot["cache_exhausted"] and slot["cold"] >= self.cold_modes
-        ):
+        if slot["attempts"] >= self.maximum_attempts or slot["cold"] >= self.cold_modes:
             statuses = {row["status"] for row in slot["history"]}
             slot["unresolved"] = (
                 "UNRESOLVED_TIME_OR_WORKER" if statuses <= UNRESOLVED else "NO_VERIFIED_CANDIDATE"
@@ -408,12 +380,7 @@ class ForwardSchedule:
                 if later["candidate"] is None or not later["candidate"].get("chain_previous"):
                     break
                 later["candidate"] = later["check"] = later["connect"] = None
-            if candidate["mode"] == "cache" and candidate.get("parent"):
-                slot["skip"].append(candidate["parent"])
-            elif candidate["mode"] == "cold":
-                slot["cold"] += 1
-            else:
-                slot["cache_exhausted"] = True
+            slot["cold"] += 1
         slot["candidate"] = slot["check"] = slot["connect"] = None
         slot["attempts"] += 1
         self._exhaust(slot)
@@ -447,12 +414,7 @@ class ForwardSchedule:
                 slot["unchained"] = True
                 return True
             slot["attempts"] += 1
-            # A timeout while adapting says nothing about the other cached
-            # seeds, but repeating the identical request would not help either.
-            if spec["mode"] == "cache":
-                slot["cache_exhausted"] = True
-            else:
-                slot["cold"] += 1
+            slot["cold"] += 1
             self._exhaust(slot)
         elif kind == "check":
             if accepted:
@@ -597,81 +559,37 @@ def _journal(context, index, clock, table_index):
 
 
 def _propose(context, spec, seconds):
-    from .motion_runtime import ProposalBudget
-
     build, model, planner = context["build"], context["model"], context["build"].planner
     index = spec["index"]
     row, completed = context["order"][index], _completed(context, index)
     empty = MaterialScene()
     empty.table_index = model.table.home_index
     available = build.state(completed, build.initial, empty).ready_nodes()
-    if spec["mode"] == "cache":
-        if model.experience is None:
-            return {"status": "NO_CANDIDATE", "failure": {"reason": "no motion library"}}
-        if row.get("pen_tilt_candidates_deg"):
-            # The library holds upright drawings; a stroke that names its own
-            # tilts is sampled cold, with those tilts.
-            return {"status": "NO_CANDIDATE", "failure": {"reason": "stroke names its own tilts"}}
+    # The planner's own sampler, one table index per ordinal. It screens the
+    # nozzle against the predicted preceding material. A stroke may name the
+    # turntable position it was made for (detail drawn after the frame). It is
+    # drawn there or not at all: another position costs two quarter turns for
+    # one short stroke.
+    if "turntable_index" in row and spec["ordinal"] > 0:
+        return {"status": "NO_CANDIDATE", "failure": {"reason": "named turntable position"}}
+    first = row.get("turntable_index", model.table.home_index)
+    table_index = (first + spec["ordinal"]) % 4
 
-        chain = spec.get("chain_from")
-
-        def candidates():
-            budget = ProposalBudget(context["budget"])
-            for table_index in (
-                [chain["table_index"]]
-                if chain is not None
-                else model.experience.preferred_indices(row, model.table.home_index)
-            ):
-                scene = MaterialScene()
-                scene.table_index = table_index
-                for drawing in model.experience.candidates(
-                    row,
-                    available,
-                    table_index,
-                    scene,
-                    reference_q=build.initial if chain is None else np.asarray(chain["q"]),
-                    budget=budget,
-                    skip_parents=set(spec["skip"]),
-                    chain=chain,
-                    prefer_start=spec.get("prefer_start"),
-                ):
-                    yield table_index, drawing, model.retained_move(row, drawing, table_index)
-    else:
-        # The planner's own cold sampler, one table index per ordinal. It
-        # screens the nozzle against the predicted preceding material.
-        # A stroke may name the turntable position it was made for (detail
-        # drawn after the frame). It is drawn there or not at all: another
-        # position costs two quarter turns for one short stroke.
-        if "turntable_index" in row and spec["ordinal"] > 0:
-            return {"status": "NO_CANDIDATE", "failure": {"reason": "named turntable position"}}
-        first = row.get("turntable_index", model.table.home_index)
-        table_index = (first + spec["ordinal"]) % 4
-
-        def candidates():
-            scene = _prefix(context).scene_for(spec["chain"], final_index=table_index)
-            for drawing in model.drawings(row, available, build.initial, table_index, scene):
-                yield table_index, drawing, None
-
+    scene = _prefix(context).scene_for(spec["chain"], final_index=table_index)
     started = perf_counter()
-    for table_index, drawing, move in candidates():
+    for drawing in model.drawings(row, available, build.initial, table_index, scene):
         seconds["proposal"] += perf_counter() - started
         started = perf_counter()
         if not model.structure_admissible(row, drawing, completed):
             continue
-        local = None
-        if move is None:
-            local = planner.prepare_local_drawing(build.arm.identity, drawing)
-            seconds["local_drawing"] += perf_counter() - started
-            if local is None:
-                started = perf_counter()
-                continue
-            clock = local["draw_clock"]
-        else:
-            clock = move.payload
+        local = planner.prepare_local_drawing(build.arm.identity, drawing)
+        seconds["local_drawing"] += perf_counter() - started
+        if local is None:
+            started = perf_counter()
+            continue
         started = perf_counter()
-        operations = _journal(context, index, clock, table_index)
-        if local is not None:
-            local["deposits"] = [row for op in operations if op[0] == "add" for row in op[1]]
+        operations = _journal(context, index, local["draw_clock"], table_index)
+        local["deposits"] = [row for op in operations if op[0] == "add" for row in op[1]]
         operations = _merged(planner, operations)
         seconds["predicted_deposit"] += perf_counter() - started
         key = deposit_key(operations)
@@ -683,17 +601,15 @@ def _propose(context, spec, seconds):
         seconds["serialization"] += _store(
             context["root"],
             spec["key"],
-            {"drawing": drawing, "local": local, "move": move, "table_index": table_index},
+            {"drawing": drawing, "local": local, "move": None, "table_index": table_index},
         )
         return {
             "status": "OK",
             "deposit_key": key,
             "table_index": table_index,
             "capsules": sum(len(op[1]) for op in operations if op[0] == "add"),
-            "retained_clock": move is not None,
             "source": drawing.get("proposal_source", "planner"),
             "variant": drawing.get("variant"),
-            "parent": drawing.get("motion_library_parent"),
             # What a stroke chained after this one starts from.
             "end_node": drawing.get("end_anchor"),
             "q_draw_end": np.asarray(drawing["positions"][-1], float).tolist(),
@@ -997,12 +913,6 @@ def _time(context, spec, seconds):
     }
 
 
-def _survey_coverage():
-    experience = _CONTEXT["model"].experience
-    experience.cache_coverage()
-    return experience._coverage_snapshot
-
-
 def run_job(spec):
     """Execute one job in a worker; a failure is a result, never an exception."""
     from collections import Counter
@@ -1014,13 +924,10 @@ def run_job(spec):
     seconds = Counter()
     started = perf_counter()
     # Worker-side workload, reported as this job's own change.
-    reuse = context["model"].experience
     sources = {
         "collision": QUERY_STATS,
         "verification_counts": getattr(planner, "verification_stats", {}),
         "verification_seconds": getattr(planner, "verification_seconds", {}),
-        "reuse_counts": getattr(reuse, "stats", {}),
-        "reuse_seconds": getattr(reuse, "seconds", {}),
     }
     before = {name: Counter(values) for name, values in sources.items()}
     planner.deadline = min(context["deadline"], monotonic() + context["budget"])
@@ -1200,7 +1107,6 @@ class Coordinator:
 
 
 def build_binding(build, order, budget):
-    library = getattr(getattr(build, "motion_runtime", None), "library", None)
     return digest(
         {
             "policy": POLICY,
@@ -1208,16 +1114,8 @@ def build_binding(build, order, budget):
             "checkpoint": build.checkpoint_binding,
             "profile": build.planner.profile,
             "order": [row["id"] for row in order],
-            "library": None
-            if library is None
-            else sorted(library.record_key(record) for record in library.records),
             "action_budget_s": budget,
-            **({"geometry_first": True} if build.planner.geometry_first else {}),
-            **(
-                {"adaptation_waypoint_checks": True}
-                if getattr(build.planner, "adaptation_waypoint_checks", False)
-                else {}
-            ),
+            "geometry_first": True,
         }
     )
 
@@ -1256,11 +1154,7 @@ def _summarize(coordinator, schedule, workers, phases):
         "stale_results": schedule.stale,
         "lost_worker_jobs": coordinator.lost,
         "resumed_job_results": coordinator.resumed,
-        "selected": {
-            "cache": sum(row["mode"] == "cache" for row in selected),
-            "cold_fallback": sum(row["mode"] == "cold" for row in selected),
-            "retained_clock": sum(bool(row.get("retained_clock")) for row in selected),
-        },
+        "selected": len(selected),
         "worker_peak_memory": peak,
         "worker_peak_pss_total_mb": sum(row["pss_mb"] for row in peak.values()),
         "coordinator_memory": _memory(),
@@ -1314,8 +1208,6 @@ def prepare_context(build, action_budget=240.0, workers=1):
     from .regression import greedy_forward_order
 
     global _CONTEXT
-    if build.gpu is not None:
-        raise ValueError("Forked planning workers cannot share an initialized GPU backend")
     if workers > 1:
         _prescreen(build, workers)
     order = greedy_forward_order(
@@ -1351,8 +1243,6 @@ def prepare_context(build, action_budget=240.0, workers=1):
     model = IndexedMotions(build)
     model.round = max(model.round, 3)
     root = build.run / "parallel"
-    if model.experience is not None:
-        model.experience.freeze(root / "path_certificates")
     _CONTEXT = {
         "build": build,
         "model": model,
@@ -1436,20 +1326,6 @@ def run_parallel_forward(
         pool = ProcessPoolExecutor(max_workers=workers, mp_context=get_context("fork"))
         pools.append(pool)
         return lambda spec: pool.submit(run_job, spec)
-
-    # How well the library covers this object only informs the report. Survey it
-    # on a worker so neither start-up nor the coordinator waits for it.
-    experience = context["model"].experience
-    if experience is not None and getattr(experience, "_coverage_snapshot", None) is None:
-        experience._coverage_pending = {"status": "SURVEY_RUNNING"}
-        start_pool()
-
-        def surveyed(future):
-            if future.exception() is None:
-                experience._coverage_snapshot = future.result()
-                experience._coverage_pending = None
-
-        pools[-1].submit(_survey_coverage).add_done_callback(surveyed)
 
     def submit(spec):
         # Forked on first use, and again after the replay released the workers.
@@ -1593,8 +1469,6 @@ def run_parallel_forward(
             # Selected seeds remain available in the frozen originals.
             import gc
 
-            if context["model"].experience is not None:
-                context["model"].experience.library._selected_records.clear()
             _WORKER.clear()
             gc.collect()
             coordinator.submit = submit

@@ -6,8 +6,6 @@ local, explicit contact allowance at a stroke endpoint.
 Physical pen/mount geometry and contact/process calibration remain required.
 """
 
-import argparse
-from pathlib import Path
 from time import monotonic, perf_counter
 
 import numpy as np
@@ -254,26 +252,3 @@ def completed_prefix(operations, stroke_ids, allow_reordered=False):
         if not np.allclose(a["positions"][-1], b["positions"][0], atol=1e-9, rtol=0):
             raise ValueError("Saved sequence has a discontinuity")
     return prefix, len(prefix) // 4
-
-
-def plan_sequence(
-    run,
-    transit_config=Path("configs/transit.yaml"),
-    collision_config=Path("configs/collision.yaml"),
-    maximum_seconds=300,
-    resume=False,
-):
-    from .coupled import plan_sequence as run_search
-
-    return run_search(run, transit_config, collision_config, maximum_seconds, resume)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", type=Path, default=Path("runs/palace_15cm"))
-    parser.add_argument("--config", type=Path, default=Path("configs/transit.yaml"))
-    parser.add_argument("--collision-config", type=Path, default=Path("configs/collision.yaml"))
-    parser.add_argument("--maximum-seconds", type=float, default=300)
-    parser.add_argument("--resume", action="store_true")
-    args = parser.parse_args()
-    plan_sequence(args.run, args.config, args.collision_config, args.maximum_seconds, args.resume)
