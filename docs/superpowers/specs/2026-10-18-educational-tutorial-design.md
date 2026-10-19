@@ -47,6 +47,13 @@ Steps 2, 3 and 4 are three separate commands, `plan-geometry`,
 runs and inspects each stage on its own. Each reads the previous stage's
 output from the run folder and writes its own.
 
+**Input meshes.** The tutorial says plainly that the pipeline generally
+assumes a mesh made by a text- or image-to-3D generator such as Meshy
+(meshy.io), like the ghost: one object, a textured `.glb`, at whatever scale
+and up axis the generator chose (step 1 scales it to the build volume and
+takes the up axis as an option). Other meshes may work but are not the
+target.
+
 The ghost (`objs/cute_ghost/`) is the worked example in every step. A short
 "Concepts" section explains frame, stroke, pen orientation, geometry-first
 planning, timing and verification in plain words.
