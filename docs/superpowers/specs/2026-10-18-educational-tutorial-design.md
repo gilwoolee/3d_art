@@ -1,6 +1,6 @@
 # Pen Art as a tutorial: design
 
-Date: 2026-10-18. Status: for the user's approval.
+Date: 2026-10-18. Status: approved by the user on 2026-10-18.
 
 ## Intent
 
@@ -29,7 +29,12 @@ one command, the expected output for the ghost, and what to try changing.
    the frame stands.
 2. **Add detail** (decided by the user to come before planning): generate
    surface strokes that rest on the frame wire, about 2 m. Generation only;
-   no planning yet. Detail is drawn after the frame.
+   no planning yet. Detail is drawn after the frame. Detail is purely
+   geometric (creases of the mesh's shape), so it misses features that are
+   only painted in the texture, like the ghost's eyes and mouth. The
+   tutorial points out this step as the place to add an AI agent that picks
+   more artistic detail, for example from rendered views of the textured
+   mesh (decided by the user: mentioned, not built).
 3. **Plan the paths, geometry first**, on 24 workers, for frame and detail
    together. The build order comes from the frame, then the detail. Each
    stroke gets one pen orientation (tilt and lean direction) and a
