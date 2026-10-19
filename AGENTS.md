@@ -1,6 +1,7 @@
 # Agent instructions
 
-Start with [README.md](README.md): setup and the commands.
+Start with [README.md](README.md): setup, the commands and where each step's
+code lives.
 
 ## Rules from the user
 
@@ -21,6 +22,16 @@ Start with [README.md](README.md): setup and the commands.
   by their executable (`/proc/PID/exe`) and kill by PID.
 - **Unset `PYTHONPATH` first** if the shell sets it (for example for ROS).
 - **Headless Chrome over SSH needs `env -u DISPLAY`.**
+
+## Keeping the code small
+
+- A step's entry point calls one function per stage; keep functions short
+  enough to read on one screen.
+- No options the CLI never sets, no outputs nothing reads, no code kept for
+  several arms, a turntable or another planner. Delete dead code instead of
+  keeping it "just in case".
+- Keep runs reproducible: never let the order of a set or dict of names decide
+  what gets built.
 
 ## Checks
 

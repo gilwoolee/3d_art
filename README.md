@@ -65,7 +65,32 @@ robot against the cell and all the wire built so far. Only a plan that passes
 picture, the textured model, the frame (green) and detail (orange), and the
 robot drawing it.
 
+## Code
+
+Each step's entry point is short and calls one function per stage, so you can
+read a step top to bottom. All code is in `src/pen_art/`.
+
+| Step | Where |
+| --- | --- |
+| Commands, stage order | `cli.py`, `stages.py` |
+| `cell` | `cell.py`, `robot.py`, `planning/tool.py` |
+| `frame` | `frame.py`; loops and zigzags in `abstraction/wireprint.py`; one-stroke connector wire in `abstraction/connectors.py`; standing check in `structure.py` |
+| `detail` | `detail.py` |
+| `plan-geometry`, `plan-timing` | `planning/section_build.py` runs a round; `planning/parallel_build.py` farms the strokes out to workers; `planning/cell_planner.py` plans and checks one stroke |
+| `verify-full-robot` | `planning/cell_replay.py` |
+| `view` | `server.py`, `web/src/` |
+
+Collision checking is in `planning/collision.py` (the robot), `planning/scene.py`
+(the wire laid so far) and `planning/pen_spheres.py` (the pen). Inverse
+kinematics is in `kinematics.py`, and timing in `timing.py` and
+`planning/clock_path.py`.
+
 ## Development
+
+There are no tests. Check a change by running the ghost through every step and
+comparing the lines each step prints with those before the change. Runs are
+reproducible, so the saved plans can be compared too (timings, and a few
+verification counts that depend on which worker checked what, still vary).
 
 ```bash
 .venv/bin/ruff check src scripts

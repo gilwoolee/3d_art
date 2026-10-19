@@ -1,4 +1,4 @@
-"""Versioned, atomic artifacts shared by the pipeline and visual workbench."""
+"""Versioned, atomic JSON and file writes shared by every step and the viewer."""
 
 import hashlib
 import json
