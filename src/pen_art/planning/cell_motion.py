@@ -10,9 +10,8 @@ import fcl
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from ..curves import flatten_curve, transform_points
+from ..curves import flatten_curve, orient_stroke, transform_points
 from ..kinematics import inverse_candidates, pose_error
-from ..strokes import orient_stroke
 from .collision import placed
 
 DEFAULT_SETTINGS = {

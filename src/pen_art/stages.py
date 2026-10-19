@@ -26,9 +26,6 @@ import yaml
 
 from .curves import curve_length
 from .io import read_json, sha256, write_json
-from .planning.section_build import write_section_artifacts
-from .planning.sections import section_actions
-from .structure import analyze_structure
 
 STATE = "state.json"
 # The frame.yaml sections read when the paths are planned and timed. The
@@ -70,8 +67,8 @@ def _section_build(run, source, profile, workers, stage, log):
 
 
 def drop_strokes(source, target, tours):
-    """Copy a source run without the named detail strokes."""
-    from .detail import tilt_hints
+    """Copy a source run without the named detail strokes; True if it still stands."""
+    from .detail import write_detail_source
 
     graph = read_json(source / "stroke_graph.json")
     gone = {e["id"] for e in graph["edges"] if e.get("parent_curve") in tours}
@@ -81,23 +78,11 @@ def drop_strokes(source, target, tours):
     graph["fused_turns"] = [
         p for p in graph.get("fused_turns", []) if p[0] in used and p[1] in used
     ]
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(source, target)
-    construction = tilt_hints(section_actions(graph, group_sources=True), graph)
-    write_json(target / "stroke_graph.json", graph)
-    write_json(target / "construction_plan.json", construction)
-    write_section_artifacts(target, graph, construction)
-    screen = analyze_structure(graph, read_json(source / "fabrication_config.json")["structure"])
-    write_json(target / "structural_screen.json", screen)
-    run = read_json(target / "run.json")
-    run["id"] = target.name
-    write_json(target / "run.json", run)
-    return screen["modeled_pass"]
+    return write_detail_source(source, target, graph)["modeled_pass"]
 
 
 def _inputs(source, profile, cell):
-    from .cell_config import load_frame_config
+    from .cell import load_frame_config
 
     config = load_frame_config()
     sections = json.dumps({name: config[name] for name in PLANNING_SECTIONS}, sort_keys=True)
@@ -246,7 +231,7 @@ def _require(folder, stage, status):
 
 
 def detail_budget(run, source):
-    """(detail metres, minutes after the frame, per-stroke metres and seconds)."""
+    """(detail metres, minutes the detail adds after the frame) in a timed plan."""
     plan = read_json(Path(run) / "plan.json")
     actions = {a["id"]: a for a in read_json(Path(source) / "construction_plan.json")["actions"]}
     strokes, frame_end = {}, 0.0
@@ -255,17 +240,15 @@ def detail_budget(run, source):
         if action is None:
             continue
         if action.get("stage") == "artistic":
-            seconds = sum(e["end_s"] - e["start_s"] for e in row["trajectory"]["edges"])
-            rec = strokes.setdefault(action["parent_curve"], [0.0, 0.0])
-            rec[0] += curve_length(action)
-            rec[1] += seconds
+            strokes[action["parent_curve"]] = strokes.get(action["parent_curve"], 0.0) + (
+                curve_length(action)
+            )
         else:
             frame_end = max(frame_end, row["end_s"])
-    detail = sum(r[0] for r in strokes.values())
-    return detail, (plan["modeled_duration_s"] - frame_end) / 60, strokes
+    return sum(strokes.values()), (plan["modeled_duration_s"] - frame_end) / 60
 
 
-def plan_timing(folder, workers=24, detail_m=2.0, minutes=15.0):
+def plan_timing(folder, workers=24):
     """Time the planned paths once. Nothing is added or removed here."""
     folder = Path(folder)
     state = _require(folder, "geometry", "GEOMETRY_PLANNED")
@@ -273,15 +256,16 @@ def plan_timing(folder, workers=24, detail_m=2.0, minutes=15.0):
     run = folder / state["round"]
     report = _section_build(run, source, profile, workers, "timing", folder / "planning.log")
     plan = read_json(run / "plan.json") if (run / "plan.json").exists() else {}
-    detail = detail_budget(run, source)[:2] if plan and source.name != "frame_source" else None
+    detail = detail_budget(run, source) if plan and source.name != "frame_source" else None
     state.update(
         timing=report["status"],
         print_minutes=plan.get("modeled_duration_s", 0) / 60 or None,
         lift_offs=plan.get("lift_offs", state.get("lift_offs")),
         detail_m=None if detail is None else detail[0],
         detail_minutes=None if detail is None else detail[1],
-        # The detail step chose the strokes from estimates; this is measured.
-        over_budget=detail is not None and (detail[0] > detail_m + 1e-6 or detail[1] > minutes),
+        # The detail step chose the strokes from estimates; this is measured
+        # against the rules' 2 m and 15 minutes.
+        over_budget=detail is not None and (detail[0] > 2.0 + 1e-6 or detail[1] > 15.0),
     )
     state.pop("verification", None)
     return _save(folder, state)

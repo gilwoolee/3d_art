@@ -26,7 +26,9 @@ echo "== 2. Python environment"
 uv pip install --python .venv/bin/python -e '.[dev]' -c requirements.lock
 
 echo "== 3. Robot description and cell"
-flexiv=92ef7865d76585e6e08d291bdfe652d32f7740f4
+# The pinned commit is FLEXIV_REVISION in src/pen_art/robot.py.
+flexiv=$(sed -n 's/^FLEXIV_REVISION = "\(.*\)"$/\1/p' src/pen_art/robot.py)
+[ -n "$flexiv" ] || { echo "no FLEXIV_REVISION in src/pen_art/robot.py" >&2; exit 1; }
 if [ ! -d external/flexiv_description ]; then
   git clone https://github.com/flexivrobotics/flexiv_description.git external/flexiv_description
 fi
@@ -53,5 +55,4 @@ export PATH="$root/tools/node/bin:$PATH"
 (cd web && npm ci && npm run build)
 
 mkdir -p runs
-echo "Done. Next: .venv/bin/pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost"
-echo "Then follow the README: .venv/bin/pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost"
+echo "Done. Next, as in the README: .venv/bin/pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost"

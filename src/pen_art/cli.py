@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from .cell_config import CELL_CONFIG, CELL_DIR, load_frame_config, prepare_cell_model
+from .cell import CELL_CONFIG, CELL_DIR, load_frame_config, prepare_cell_model
 from .io import read_json
 
 RUNS = Path("runs")
@@ -69,7 +69,7 @@ def cell(args):
 
 
 def frame(args):
-    from .planning.section_build import prepare_framework, prepare_mesh_within_wire
+    from .frame import prepare_framework, prepare_mesh_within_wire
 
     profile = _cell()
     folder = RUNS / _name(args.name)
@@ -87,9 +87,10 @@ def frame(args):
     if args.coil_width is not None:
         wireprint["coil_maximum_width"] = args.coil_width
     extent = yaml.safe_load(profile.read_text())["build_volume_m"]
+    source = folder / "frame_source"
     try:
-        source = prepare_mesh_within_wire(args.mesh, folder / "frame", args.up, extent, config)
-        prepare_framework(source, folder / "frame", profile)
+        prepare_mesh_within_wire(args.mesh, source, args.up, extent, config)
+        prepare_framework(source)
     except ValueError as error:
         raise SystemExit(
             f"frame {args.name}: {error}. Is the mesh's up axis right (--up y or --up z)?"
@@ -124,7 +125,7 @@ def detail(args):
     shutil.rmtree(fresh, ignore_errors=True)
     command = [
         sys.executable, "-m", "pen_art.detail", str(folder / "frame_source"), str(fresh),
-        "--profile", str(_cell()), "--check-with-planner", "--detail", str(args.detail),
+        "--profile", str(_cell()), "--detail", str(args.detail),
         "--minutes", str(args.minutes),
     ]
     if args.crease_threshold:

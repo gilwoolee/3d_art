@@ -1,251 +1,22 @@
-"""Build source sections and save clocks for separate verification and playback."""
+"""Plan one round: untimed paths for every stroke (``--stage geometry``), then
+their timing (``--stage timing``). ``pen-art plan-geometry`` and ``plan-timing``
+run this."""
 
 import argparse
-import shutil
 from dataclasses import replace
 from pathlib import Path
 from time import monotonic
 
-import networkx as nx
 import numpy as np
 
-from ..assets import prepare_asset
-from ..cell import prepare_cell
-from ..cell_config import load_frame_config
-from ..curves import curve_length, flatten_curve, transform_points
-from ..graph import topology
-from ..io import artifact, now, read_json, sha256, stage_update, write_json
-from ..process import screen_graph
-from ..strokes import orient_stroke
-from ..structure import analyze_member_prefixes, analyze_structure
+from ..cell import load_frame_config, prepare_cell
+from ..curves import flatten_curve, transform_points
+from ..io import artifact, read_json, sha256, write_json
+from ..structure import analyze_structure
 from .cell_planner import CellPlanner
 from .clock_path import ClockPath, timed_path
 from .scene import MaterialScene
 from .schedule import ScheduleState
-from .sections import section_actions
-
-
-def write_section_artifacts(run, graph, construction, *, preserve_graph=False):
-    """Expose source sections and honest provisional screens to the workbench.
-
-    Existing certified runs may add these views without changing their bound
-    graph or construction inputs.
-    """
-    config = read_json(run / "fabrication_config.json")
-    method = graph.get("source_method", graph.get("method", "reference_fixture"))
-    label = "Reference fixture" if method == "reference_fixture" else "WirePrint framework"
-    if any(row["stage"] == "artistic" for row in construction["actions"]):
-        label += (
-            " + WIR3D detail" if method == "wireprint_with_imported_wir3d" else " + artistic detail"
-        )
-    strokes = artifact(
-        "pen_strokes",
-        units="m",
-        frame="build",
-        method=method,
-        label=label,
-        curves=construction["actions"],
-        total_length_m=sum(row["length_m"] for row in construction["actions"]),
-        inputs={"construction_plan.json": sha256(run / "construction_plan.json")},
-    )
-    if not preserve_graph:
-        graph["source_method"] = method
-        graph["metrics"] = {
-            "input_curves": len({row["parent_curve"] for row in construction["actions"]}),
-            "material_members": len(graph["edges"]),
-            "proposed_pen_strokes": len(construction["actions"]),
-            "material_components": nx.number_connected_components(topology(graph)),
-            "ground_contacts": sum(row["ground"] for row in graph["nodes"]),
-            "total_length_m": sum(curve_length(row) for row in graph["edges"]),
-            "added_length_m": sum(
-                curve_length(row)
-                for row in graph["edges"]
-                if row.get("origin")
-                in (
-                    "explicit_style_attachment",
-                    "explicit_component_connector",
-                    "explicit_bed_support",
-                )
-            ),
-        }
-        write_json(run / "stroke_graph.json", graph)
-    inputs = {name: sha256(run / name) for name in ("stroke_graph.json", "fabrication_config.json")}
-    write_json(run / "pen_strokes.json", strokes)
-    write_json(run / "geometric_candidates.json", {**strokes, "kind": "curve_candidates"})
-    structure = analyze_structure(graph, config["structure"])
-    write_json(run / "structural_screen.json", {**structure, "inputs": inputs})
-    process = screen_graph(graph, config["process"], strokes)
-    write_json(run / "process_screen.json", {**process, "inputs": inputs})
-    stage_update(run, "geometric", "complete", artifact="geometric_candidates.json")
-    stage_update(run, "graph", "complete", artifact="stroke_graph.json")
-
-
-def prepare_candidates(run):
-    write_json(
-        run / "cell_drawing_variants.json",
-        artifact(
-            "cell_drawing_variants",
-            inputs={
-                name: sha256(run / name)
-                for name in ("cell_manifest.json", "construction_plan.json", "stroke_graph.json")
-            },
-            variants=[],
-            status="LAZY_SECTION_CANDIDATES",
-        ),
-    )
-
-
-def _sag(screen):
-    return {
-        "modeled_pass": screen["modeled_pass"],
-        "maximum_displacement_m": screen.get("maximum_displacement_m"),
-    }
-
-
-def prepare_framework(source, run, profile):
-    from ..abstraction.wireprint import (
-        connect_framework_islands,
-        eulerize_frame,
-        generate,
-        reinforce_base,
-    )
-
-    if (run / "run.json").exists():
-        return
-    if not (source / "fabrication_config.json").exists():
-        write_json(
-            source / "fabrication_config.json",
-            load_frame_config(),
-        )
-    fabrication = read_json(source / "fabrication_config.json")
-    material = fabrication["structure"]
-
-    def framework(**settings):
-        graph = eulerize_frame(
-            connect_framework_islands(generate(source, **settings)),
-            fabrication.get("wireprint", {}).get("maximum_wire_m", float("inf")),
-            material,
-        )
-        screen = analyze_structure(graph, material)
-        if not screen["modeled_pass"] and "maximum_displacement_m" in screen:
-            graph = reinforce_base(
-                graph,
-                {
-                    "initial_maximum_displacement_m": screen["maximum_displacement_m"],
-                    "initial_maximum_stress_pa": screen["maximum_stress_pa"],
-                },
-            )
-            screen = analyze_structure(graph, material)
-        return graph, screen
-
-    graph, screen = framework()
-    # A frame that still fails is regenerated with each heavier strand the pen
-    # can lay, lightest first. The strand diameter is also the wire's collision
-    # size. Nothing passing leaves the original for the planner to reject.
-    tried = [{"strand_diameter_m": graph["generation"]["strand_diameter_m"], **_sag(screen)}]
-    for diameter in fabrication.get("wireprint", {}).get("heavier_strands_m", []):
-        if screen["modeled_pass"]:
-            break
-        heavier, screen = framework(diameter=diameter)
-        tried.append({"strand_diameter_m": diameter, **_sag(screen)})
-        if screen["modeled_pass"]:
-            graph = heavier
-    if len(tried) > 1:
-        if not screen["modeled_pass"]:
-            graph, _ = framework()
-        graph["strand_escalation"] = tried
-    write_json(source / "framework_graph.json", graph)
-    construction = section_actions(graph, group_sources=True)
-    write_json(source / "stroke_graph.json", graph)
-    write_json(source / "construction_plan.json", construction)
-    write_section_artifacts(source, graph, construction)
-    stage_update(
-        source,
-        "construction",
-        "partial",
-        artifact="construction_plan.json",
-        message="Generated source sections; order and motion pending",
-    )
-    prepare_cell(profile, run, source)
-    prepare_candidates(run)
-
-
-def prepare_mesh(mesh, run, source_up, max_extent_m):
-    source = run.with_name(run.name + "_source")
-    if (source / "asset_manifest.json").exists():
-        manifest = read_json(source / "asset_manifest.json")
-        if (
-            manifest["source"]["sha256"] != sha256(mesh)
-            or manifest["max_extent_m"] != max_extent_m
-            or manifest["source_up"] != source_up
-        ):
-            raise ValueError("Prepared mesh inputs changed; choose a fresh run")
-        return source
-    source.mkdir(parents=True, exist_ok=True)
-    write_json(
-        source / "run.json",
-        {
-            "id": source.name,
-            "name": mesh.stem + " WirePrint",
-            "created_at": now(),
-            "updated_at": now(),
-            "source_sha256": sha256(mesh),
-            "stages": {},
-        },
-    )
-    prepare_asset(
-        mesh,
-        source,
-        {"source_up": source_up, "max_extent_m": max_extent_m, "geometry_faces": 80000},
-    )
-    stage_update(source, "asset", "complete", artifact="asset_manifest.json")
-    return source
-
-
-def prepare_mesh_within_wire(mesh, run, source_up, max_extent_m, fabrication=None):
-    """Prepare a mesh, shrunk until its wireframe fits ``wireprint.maximum_wire_m``.
-
-    Wire grows with about the square of the size, so each try scales the
-    longest side by the square root of the overshoot. The size settled on and
-    the wire at each try are written to ``wire_budget.json``.
-    """
-    from ..abstraction.wireprint import connect_framework_islands, eulerize_frame, generate
-
-    source = run.with_name(run.name + "_source")
-    record = source / "wire_budget.json"
-    if record.exists():
-        saved = read_json(record)
-        if saved["requested_max_extent_m"] != max_extent_m:
-            raise ValueError("Prepared mesh inputs changed; choose a fresh run")
-        return prepare_mesh(mesh, run, source_up, saved["max_extent_m"])
-    if fabrication is None:
-        fabrication = load_frame_config()
-    budget = fabrication.get("wireprint", {}).get("maximum_wire_m")
-    extent, tries = max_extent_m, []
-    while True:
-        source = prepare_mesh(mesh, run, source_up, extent)
-        write_json(source / "fabrication_config.json", fabrication)
-        if budget is None:
-            break
-        # Measured with its connector wire, so the frame that fits keeps them.
-        graph = eulerize_frame(connect_framework_islands(generate(source)), float("inf"))
-        wire = sum(edge["length_m"] for edge in graph["edges"])
-        tries.append({"max_extent_m": extent, "wire_m": wire})
-        if wire <= budget or len(tries) == 6:
-            break
-        shutil.rmtree(source)
-        extent *= 0.99 * (budget / wire) ** 0.5
-    write_json(
-        record,
-        {
-            "requested_max_extent_m": max_extent_m,
-            "max_extent_m": extent,
-            "maximum_wire_m": budget,
-            "within_budget": budget is None or tries[-1]["wire_m"] <= budget,
-            "tries": tries,
-        },
-    )
-    return source
 
 
 class SectionBuild:
@@ -276,7 +47,6 @@ class SectionBuild:
             run, profile, settings, monotonic() + maximum_seconds, timing_override=timing
         )
         self.planner.geometry_first = True
-        self.planner.adaptation_waypoint_checks = False
         if len(self.planner.arms) != 1:
             raise ValueError("Section builds require exactly one arm")
         self.arm = next(iter(self.planner.arms.values()))
@@ -324,36 +94,6 @@ class SectionBuild:
                 else {key: value for key, value in screen.items() if key not in {"nodes", "edges"}}
             )
         return self.structure[ids]["modeled_pass"]
-
-    def progressive_structure(self, row, drawing, completed_ids):
-        """Screen material prefixes in the proposed traversal, without new supports.
-
-        A final stable loop cannot hide an unstable intermediate cantilever.
-        This is a sampled, cooled-elastic screen at each real member boundary;
-        it does not claim a calibrated thermal model or clamp the growing tip.
-        A newly visited node stays internal to this action: only the timing
-        policy can make it a cooled anchor for a later operation.
-        """
-        oriented = orient_stroke(
-            row,
-            reverse=drawing.get("reverse", False),
-            start_visit=drawing.get("start_visit", 0),
-        )
-        completed = {member for key in completed_ids for member in self.actions[key]["members"]}
-        key = (frozenset(completed), tuple(oriented["members"]))
-        cache = self.__dict__.setdefault("progressive_structures", {})
-        if key in cache:
-            return cache[key]
-        report = analyze_member_prefixes(
-            self.planner.graph,
-            self.material,
-            row,
-            completed,
-            reverse=drawing.get("reverse", False),
-            start_visit=drawing.get("start_visit", 0),
-        )
-        cache[key] = report
-        return report
 
     def scene(self, ids):
         scene = MaterialScene()
@@ -448,7 +188,7 @@ class SectionBuild:
             ),
         )
 
-    def run_build(self, workers, *, action_budget=240.0, stage="all"):
+    def run_build(self, workers, stage):
         if not self.stable(self.actions):
             self.report(
                 "GOAL_STRUCTURE_REJECTED", structure=self.structure[frozenset(self.actions)]
@@ -456,7 +196,7 @@ class SectionBuild:
             return
         from .parallel_build import run_parallel_forward
 
-        run_parallel_forward(self, workers, action_budget=action_budget, stage=stage)
+        run_parallel_forward(self, workers, stage=stage)
 
 
 def combine_clocks(*paths):
@@ -506,12 +246,9 @@ def main():
     parser.add_argument("--maximum-seconds", type=float, default=3600)
     parser.add_argument("--workers", type=int, default=24)
     parser.add_argument(
-        "--action-budget", type=float, default=240.0, help="Seconds per parallel planning job"
-    )
-    parser.add_argument(
         "--stage",
-        choices=("all", "geometry", "timing"),
-        default="all",
+        choices=("geometry", "timing"),
+        required=True,
         help="geometry: untimed paths only; timing: time the saved paths and export",
     )
     args = parser.parse_args()
@@ -519,10 +256,9 @@ def main():
         parser.error("--workers needs at least one worker")
     if not (args.run / "run.json").exists():
         prepare_cell(args.profile, args.run, args.cell_source_run)
-        prepare_candidates(args.run)
     build = SectionBuild(args.run, args.profile, args.maximum_seconds)
     try:
-        build.run_build(args.workers, action_budget=args.action_budget, stage=args.stage)
+        build.run_build(args.workers, args.stage)
     except Exception as error:
         build.report("ERROR", error={"type": type(error).__name__, "message": str(error)})
         raise

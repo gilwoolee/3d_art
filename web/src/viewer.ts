@@ -3,18 +3,16 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export interface Curve { id: string; segments: number[][][]; role?: string; stage?:string; color?:number; diameter_m?: number; length_m: number; closed?: boolean }
-export const curveColors:Record<string,number>={framework:0x52745a,artistic:0xb77a3f,connector:0x537b8a,brace:0x8c695d,base:0x52745a,support:0x52745a};
-export function displayRole(curve:Curve):string {
+const curveColors:Record<string,number>={framework:0x52745a,artistic:0xb77a3f,connector:0x537b8a,brace:0x8c695d,base:0x52745a,support:0x52745a};
+function displayRole(curve:Curve):string {
   if(curve.role&&['connector','brace','base','support'].includes(curve.role))return curve.role;
   return curve.stage==='framework'?'framework':'artistic';
 }
-export interface Junction { id: string; position: number[]; ground: boolean }
-export interface Deformation { id: string; positions_m: number[][]; displacements_m: number[][] }
-export interface ToolBody {
+interface ToolBody {
   name:string; origin:number[][]; type:'box'|'sphere'|'cylinder'|'mesh';
   size_m?:number[]; radius_m?:number; length_m?:number; vertices?:number[][]; faces?:number[][];
 }
-export interface ToolModel {configured:boolean; visual_bodies:ToolBody[]; tip_radius_m?:number; calibration_declared?:boolean}
+interface ToolModel {configured:boolean; visual_bodies:ToolBody[]}
 
 export interface RobotRig {
   kinematic_root:string; kinematic_tip:string;
@@ -27,6 +25,7 @@ export interface CellArmView {
   flange_to_tcp:number[][]; initial_positions:number[]; tool_model:ToolModel;
 }
 
+// One three.js view: a model, strokes, or the robot cell with its motion.
 export class Viewer {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
@@ -34,34 +33,19 @@ export class Viewer {
   controls: OrbitControls;
   model = new THREE.Group();
   curves = new THREE.Group();
-  junctions = new THREE.Group();
-  deformations = new THREE.Group();
   platform = new THREE.Group();
-  tool = new THREE.Group();
-  toolGeometry = new THREE.Group();
   deposited = new THREE.Group();
-  activePath = new THREE.Group();
-  contactRegion = new THREE.Group();
   cell = new THREE.Group();
   grid: THREE.GridHelper;
   private loader = new GLTFLoader();
-  private source: THREE.Object3D | null = null;
   private loadGeneration = 0;
   private cellGeneration = 0;
   private cellReference: THREE.Object3D | null = null;
   private cellArms = new Map<string,{view:CellArmView;source:THREE.Object3D;tool:THREE.Group;toolGeometry:THREE.Group;color:number}>();
-  private onSelect: (curve: Curve | null) => void;
-  private disposed = false;
-  private limit = 10000;
-  private curveData: Curve[] = [];
-  private hiddenRoles = new Set<string>();
-  private highlighted = new Set<string>();
   private extent = .15;
   private center = new THREE.Vector3(0, 0, .045);
-  compareSource = false;
 
-  constructor(container: HTMLElement, onSelect: (curve: Curve | null) => void) {
-    this.onSelect = onSelect;
+  constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor('#f8faf4');
@@ -85,7 +69,7 @@ export class Viewer {
     this.grid = new THREE.GridHelper(.28, 14, 0xcbd3c6, 0xe2e8dc);
     this.grid.rotation.x = Math.PI / 2;
     this.grid.position.z = -.0003;
-    this.scene.add(this.grid, this.model, this.curves, this.junctions, this.deformations, this.platform, this.tool, this.toolGeometry, this.deposited, this.activePath, this.contactRegion, this.cell);
+    this.scene.add(this.grid, this.model, this.curves, this.platform, this.deposited, this.cell);
     const observer = new ResizeObserver(() => {
       const { width, height } = container.getBoundingClientRect();
       this.renderer.setSize(width, height);
@@ -95,45 +79,26 @@ export class Viewer {
     observer.observe(container);
     let down = { x: 0, y: 0 };
     this.renderer.domElement.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; });
+    // A click on a stroke colours it.
     this.renderer.domElement.addEventListener('pointerup', e => {
       if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
       const rect = this.renderer.domElement.getBoundingClientRect();
       const ray = new THREE.Raycaster();
-      const paneWidth = rect.width / (this.compareSource ? 2 : 1);
-      const x = e.clientX - rect.left;
-      if(this.compareSource && x < paneWidth) { this.select(-1); return; }
-      ray.setFromCamera(new THREE.Vector2((x % paneWidth) / paneWidth * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1), this.camera);
+      ray.setFromCamera(new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1), this.camera);
       const hits = ray.intersectObjects(this.curves.children.filter(c => c.visible));
-      const index = hits.length ? hits[0].object.userData.index as number : -1;
-      this.select(index);
+      this.select(hits.length ? hits[0].object.userData.index as number : -1);
     });
-    this.view('perspective');
+    this.view();
     const draw = () => {
-      if (this.disposed) return;
       requestAnimationFrame(draw);
       this.controls.update();
       const width = container.clientWidth, height = container.clientHeight;
       if (width && height) {
-        this.camera.aspect = width / height / (this.compareSource ? 2 : 1);
+        this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
       }
-      if (this.compareSource) {
-        const sourceVisible = this.model.visible, curvesVisible = this.curves.visible, jointsVisible = this.junctions.visible;
-        this.renderer.setScissorTest(true);
-        this.renderer.setViewport(0, 0, width / 2, height);
-        this.renderer.setScissor(0, 0, width / 2, height);
-        this.model.visible = true; this.curves.visible = false; this.junctions.visible = false;
-        this.renderer.render(this.scene, this.camera);
-        this.renderer.setViewport(width / 2, 0, width / 2, height);
-        this.renderer.setScissor(width / 2, 0, width / 2, height);
-        this.model.visible = false; this.curves.visible = curvesVisible; this.junctions.visible = jointsVisible;
-        this.renderer.render(this.scene, this.camera);
-        this.model.visible = sourceVisible;
-        this.renderer.setScissorTest(false);
-      } else {
-        this.renderer.setViewport(0, 0, width, height);
-        this.renderer.render(this.scene, this.camera);
-      }
+      this.renderer.setViewport(0, 0, width, height);
+      this.renderer.render(this.scene, this.camera);
     };
     draw();
   }
@@ -143,9 +108,8 @@ export class Viewer {
     const gltf = await this.loader.loadAsync(url, event => onProgress(event.total ? event.loaded / event.total : 0));
     if (generation !== this.loadGeneration) { this.clear(gltf.scene); return; }
     this.clear(this.model);
-    this.source = gltf.scene;
-    this.model.add(this.source);
-    const box = new THREE.Box3().setFromObject(this.source);
+    this.model.add(gltf.scene);
+    const box = new THREE.Box3().setFromObject(gltf.scene);
     box.getCenter(this.center);
     const size = box.getSize(new THREE.Vector3());
     this.extent = Math.max(size.x, size.y, size.z);
@@ -153,7 +117,7 @@ export class Viewer {
     this.controls.maxDistance = this.extent * 10;
     this.grid.scale.setScalar(this.extent / .15);
     this.grid.position.set(0,0,-.0003);
-    this.view('perspective');
+    this.view();
   }
 
   clear(group: THREE.Group) {
@@ -170,9 +134,9 @@ export class Viewer {
     group.clear();
   }
 
-  setToolModel(tool?:ToolModel, target=this.toolGeometry) {
+  private setToolModel(tool:ToolModel, target:THREE.Group) {
     this.clear(target);
-    if (!tool?.configured) return;
+    if (!tool.configured) return;
     for (const body of tool.visual_bodies) {
       let geometry:THREE.BufferGeometry;
       if (body.type==='box') geometry=new THREE.BoxGeometry(...body.size_m as [number,number,number]);
@@ -193,13 +157,12 @@ export class Viewer {
     }
   }
 
-  setRobotPose(q:number[], rig:RobotRig, flangeToTcp:number[][], context?:{
+  private setRobotPose(q:number[], rig:RobotRig, flangeToTcp:number[][], context:{
     source:THREE.Object3D;tool:THREE.Group;toolGeometry:THREE.Group;world_from_base:number[][];color:number;
   }) {
     const matrix = (values:number[][]) => new THREE.Matrix4().fromArray(values.flat()).transpose();
-    const frames = new Map<string,THREE.Matrix4>([[rig.kinematic_root,context?matrix(context.world_from_base):new THREE.Matrix4()]]);
-    const source=context?.source??this.source, tool=context?.tool??this.tool;
-    const toolGeometry=context?.toolGeometry??this.toolGeometry, color=context?.color??0x327aa0;
+    const frames = new Map<string,THREE.Matrix4>([[rig.kinematic_root,matrix(context.world_from_base)]]);
+    const {source, tool, toolGeometry, color} = context;
     for (const joint of rig.kinematic_chain) {
       const frame = frames.get(joint.parent)!.clone().multiply(matrix(joint.origin));
       if (joint.index !== null && joint.axis) {
@@ -208,7 +171,7 @@ export class Viewer {
       frames.set(joint.child,frame);
     }
     for (const visual of rig.visual_nodes) {
-      const node = source?.getObjectByName(visual.name);
+      const node = source.getObjectByName(visual.name);
       if (!node) throw new Error(`Robot visual node is missing: ${visual.name}`);
       node.matrixAutoUpdate = false;
       node.matrix.copy(frames.get(visual.link)!).multiply(matrix(visual.origin));
@@ -265,17 +228,12 @@ export class Viewer {
     const size=box.getSize(new THREE.Vector3());this.extent=Math.max(size.x,size.y,size.z);
     this.grid.scale.setScalar(this.extent/.15);this.grid.position.x=this.center.x;this.grid.position.y=this.center.y;
     this.controls.minDistance=this.extent*.08;this.controls.maxDistance=this.extent*10;
-    this.view('perspective');
+    this.view();
   }
 
   setCellArmPose(identity:string,q:number[]) {
     const row=this.cellArms.get(identity);if(!row)throw new Error(`Missing cell arm ${identity}`);
     return this.setRobotPose(q,row.view.rig,row.view.flange_to_tcp,{...row,world_from_base:row.view.world_from_base});
-  }
-
-  setCellArmBase(identity:string,worldFromBase:number[][]) {
-    const row=this.cellArms.get(identity);if(!row)throw new Error(`Missing cell arm ${identity}`);
-    row.view={...row.view,world_from_base:worldFromBase};
   }
 
   setCellReferenceVisible(visible:boolean) {
@@ -296,38 +254,12 @@ export class Viewer {
     const size=box.getSize(new THREE.Vector3());
     this.extent=Math.max(.05,size.x,size.y,size.z);
     this.controls.minDistance=this.extent*.08;this.controls.maxDistance=this.extent*10;
-    this.view('perspective');
-  }
-
-  highlightCellLinks(identity:string,links:string[]) {
-    const arm=this.cellArms.get(identity);
-    if(arm)this.highlightRobotLinks(links,arm.view.rig,arm.source);
-  }
-
-  highlightRobotLinks(links:string[], rig:RobotRig, source=this.source) {
-    for (const visual of rig.visual_nodes) {
-      source?.getObjectByName(visual.name)?.traverse(object => {
-        if (!(object instanceof THREE.Mesh)) return;
-        if (!object.userData.collisionMaterials) {
-          object.material = Array.isArray(object.material) ? object.material.map(material => material.clone()) : object.material.clone();
-          object.userData.collisionMaterials = true;
-        }
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) {
-          if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-          material.userData.baseEmissive ??= material.emissive.getHex();
-          material.emissive.setHex(links.includes(visual.link) ? 0x9f1423 : material.userData.baseEmissive);
-        }
-      });
-    }
+    this.view();
   }
 
   // The build plate and its stand, one block from the table up to the plate top.
-  setPlatform(center?: number[], top = 0, table = 0, width = .256, depth = .256) {
+  setPlatform(center: number[], top: number, table: number, width: number, depth: number) {
     this.clear(this.platform);
-    this.clear(this.tool);
-    this.setToolModel();
-    if (!center) return;
     const height = Math.max(.006, top-table);
     const base = new THREE.Mesh(new THREE.BoxGeometry(width,depth,height),
       new THREE.MeshStandardMaterial({color:0xa6b5a3, roughness:.9, transparent:true, opacity:.65}));
@@ -335,15 +267,7 @@ export class Viewer {
     this.platform.add(base);
   }
 
-  clearSequence() { this.clear(this.deposited); this.depositedTubes=undefined; this.clear(this.activePath); this.clear(this.contactRegion); }
-
-  setContactRegion(center?:number[], radius?:number) {
-    this.clear(this.contactRegion);
-    if (!center || !radius) return;
-    const marker=new THREE.Mesh(new THREE.SphereGeometry(radius,16,12),new THREE.MeshBasicMaterial({color:0x9272b8,wireframe:true,transparent:true,opacity:.45}));
-    marker.position.set(...center as [number,number,number]);
-    this.contactRegion.add(marker);
-  }
+  clearSequence() { this.clear(this.deposited); this.depositedTubes=undefined; }
 
   // Deposited wire as 1 mm tubes, like the stroke view: one instanced
   // cylinder per segment, reused across frames as the wire grows and turns.
@@ -384,21 +308,8 @@ export class Viewer {
     tubes.instanceMatrix.needsUpdate=true;
   }
 
-  setActivePath(points:number[][], drawing:boolean) {
-    this.clear(this.activePath);
-    if (points.length < 2) return;
-    const vertices = points.map(p=>new THREE.Vector3(...p as [number,number,number]));
-    this.activePath.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(vertices),new THREE.LineBasicMaterial({color:drawing ? 0x295d48 : 0x367ca5})));
-  }
-
   setCurves(curves: Curve[]) {
     this.clear(this.curves);
-    this.clear(this.junctions);
-    this.clear(this.deformations);
-    this.hiddenRoles.clear();
-    this.highlighted.clear();
-    this.limit = curves.length;
-    this.curveData = curves;
     for (const [index, curve] of curves.entries()) {
       const path = new THREE.CurvePath<THREE.Vector3>();
       for (const segment of curve.segments) {
@@ -411,60 +322,31 @@ export class Viewer {
       mesh.userData = { index, baseColor: color };
       this.curves.add(mesh);
     }
-    this.setLimit(this.limit);
-    this.select(-1);
   }
 
-  selectById(id:string) { this.select(this.curveData.findIndex(curve => curve.id === id)); }
-
-  select(index: number) {
+  private select(index: number) {
     for (const mesh of this.curves.children as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[]) {
-      mesh.material.color.setHex(mesh.userData.index === index ? 0x295d48 : this.highlighted.has(this.curveData[mesh.userData.index].id) ? 0xbd4450 : mesh.userData.baseColor);
+      mesh.material.color.setHex(mesh.userData.index === index ? 0x295d48 : mesh.userData.baseColor);
     }
-    this.onSelect(this.curveData[index] ?? null);
   }
 
-  setLimit(count: number) { this.limit = count; this.curves.children.forEach((c, i) => c.visible = i < count && !this.hiddenRoles.has(displayRole(this.curveData[i]))); }
-  setRoleVisible(role: string, visible: boolean) { if (visible) this.hiddenRoles.delete(role); else this.hiddenRoles.add(role); this.setLimit(this.limit); }
-  highlight(ids: string[]) { this.highlighted = new Set(ids); this.select(-1); }
-  setJunctions(nodes: Junction[], visible: boolean) {
-    this.clear(this.junctions);
-    const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(.001, 8, 6), new THREE.MeshStandardMaterial(), nodes.length);
-    const matrix = new THREE.Matrix4();
-    nodes.forEach((node,index) => {
-      matrix.makeTranslation(...node.position as [number,number,number]);
-      mesh.setMatrixAt(index,matrix);
-      mesh.setColorAt(index,new THREE.Color(node.ground ? 0x2e7854 : 0x43596a));
-    });
-    this.junctions.add(mesh);
-    this.junctions.visible = visible;
-  }
-  setDeformation(edges: Deformation[], scale: number) {
-    this.clear(this.deformations);
-    if (scale <= 0) return;
-    for (const edge of edges) {
-      const points = edge.positions_m.map((p,i) => new THREE.Vector3(...p.map((v,j) => v + edge.displacements_m[i][j]*scale) as [number,number,number]));
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:0x6b61a8}));
-      this.deformations.add(line);
-    }
-  }
   setSource(visible: boolean, faded = false) {
     this.model.visible = visible;
     this.model.traverse(object => {
       if (object instanceof THREE.Mesh) {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
         for (const material of materials) {
-          material.transparent = faded && !this.compareSource;
-          material.opacity = faded && !this.compareSource ? .12 : 1;
-          material.depthWrite = !faded || this.compareSource;
+          material.transparent = faded;
+          material.opacity = faded ? .12 : 1;
+          material.depthWrite = !faded;
         }
       }
     });
   }
 
-  view(name: string) {
+  private view() {
     const distance = this.extent * 2.4;
-    const direction = name === 'top' ? new THREE.Vector3(0, -.0001, 1) : name === 'front' ? new THREE.Vector3(0, -1, .03) : name === 'side' ? new THREE.Vector3(1, 0, .03) : new THREE.Vector3(1, -1.4, .9).normalize();
+    const direction = new THREE.Vector3(1, -1.4, .9).normalize();
     this.camera.position.copy(this.center).addScaledVector(direction, distance);
     this.controls.target.copy(this.center);
     this.controls.update();

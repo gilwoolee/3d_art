@@ -169,13 +169,6 @@ arms:
         top_radius_m: 0.0008
         length_m: 0.027
       allowed_touch_links: []
-    mounting: straight_flange_centerline
-    assumptions:
-    - Provisional unmeasured straight flange-centered attachment.
-    - 'Estimated tapered nose: radius 12 mm at 30 mm behind TCP, 0.8 mm at 3 mm behind
-      TCP.'
-    - Adapter and barrel dimensions retained; contact tip is separate; product photographs
-      are not dimensional calibration.
   initial_positions:
   - -0.17378000112905412
   - -0.001349269953384689
@@ -185,13 +178,6 @@ arms:
   - 0.023255602906319558
   - -0.3803438248247924
 drawing_pen_tilt_deg: 0.0
-setup_description: One Flexiv arm with provisional straight centered pen, estimated
-  tapered nose, 20 mm object-footprint riser, build origin (0.45,-0.15,0.22)m. Upright
-  fixed tool orientation and maximum 27-degree descending zigzag slope from horizontal.
-  Tool, fixture, placement and process are unmeasured.
 drawing_orientation_policy: fixed
 drawing_pen_tilt_candidates_deg:
 - 0.0
-parking_assumptions:
-- Provisional collision-screened parked posture; TCP at world (0.45,-0.30,0.45)m.
-- Home relocation is a model setup assumption; no hardware motion is commanded.

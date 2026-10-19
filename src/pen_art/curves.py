@@ -1,5 +1,7 @@
 """Cubic Bézier geometry; numerical samples never imply physical anchors."""
 
+from copy import deepcopy
+
 import numpy as np
 
 
@@ -31,31 +33,6 @@ def sample_curve(curve, count_per_segment=24):
 
 def curve_length(curve):
     return float(np.linalg.norm(np.diff(sample_curve(curve, 48), axis=0), axis=1).sum())
-
-
-def bezier_at(control, t):
-    p = np.asarray(control, dtype=float)
-    return (
-        (1 - t) ** 3 * p[0] + 3 * (1 - t) ** 2 * t * p[1] + 3 * (1 - t) * t * t * p[2] + t**3 * p[3]
-    )
-
-
-def curve_coordinate_bounds(curve):
-    """Exact axis bounds of cubic pieces, including interior derivative roots."""
-    values = []
-    for segment in curve["segments"]:
-        p = np.asarray(segment, dtype=float)
-        parameters = {0.0, 1.0}
-        cubic = -p[0] + 3 * p[1] - 3 * p[2] + p[3]
-        quadratic = 3 * p[0] - 6 * p[1] + 3 * p[2]
-        linear = -3 * p[0] + 3 * p[1]
-        for axis in range(3):
-            polynomial = np.trim_zeros([3 * cubic[axis], 2 * quadratic[axis], linear[axis]], "f")
-            for root in np.roots(polynomial) if len(polynomial) > 1 else []:
-                if abs(root.imag) < 1e-12 and 0 < root.real < 1:
-                    parameters.add(float(root.real))
-        values.extend(bezier_at(p, t) for t in parameters)
-    return np.array([np.min(values, axis=0), np.max(values, axis=0)])
 
 
 def split_bezier(control, t):
@@ -114,64 +91,46 @@ def flatten_curve(curve, tolerance=0.00005, max_chord=0.003):
     return np.array(points), np.array(parameters)
 
 
-def fit_polyline(points, tolerance, max_depth=16):
-    """Fit cubics with a continuous bound to the chord-parameterized source polyline."""
-    points = np.asarray(points, dtype=float)
-    if tolerance <= 0 or not np.isfinite(tolerance):
-        raise ValueError("Fit tolerance must be finite and positive")
-    keep = np.r_[True, np.linalg.norm(np.diff(points, axis=0), axis=1) > 1e-10]
-    points = points[keep]
-    if len(points) < 2:
-        return []
-
-    def fit(p, depth):
-        if len(p) == 2:
-            delta = p[-1] - p[0]
-            return [
-                [
-                    p[0].tolist(),
-                    (p[0] + delta / 3).tolist(),
-                    (p[0] + 2 * delta / 3).tolist(),
-                    p[-1].tolist(),
-                ]
-            ]
-        if len(p) == 3:
-            return fit(p[:2], depth + 1) + fit(p[1:], depth + 1)
-        lengths = np.r_[0, np.cumsum(np.linalg.norm(np.diff(p, axis=0), axis=1))]
-        t = lengths / lengths[-1]
-        a = np.column_stack([3 * (1 - t) ** 2 * t, 3 * (1 - t) * t**2])
-        b = p - (1 - t[:, None]) ** 3 * p[0] - t[:, None] ** 3 * p[-1]
-        middle = np.linalg.lstsq(a, b, rcond=None)[0]
-        control = np.vstack([p[0], middle, p[-1]])
-        predicted = a @ middle + (1 - t[:, None]) ** 3 * p[0] + t[:, None] ** 3 * p[-1]
-        error = np.linalg.norm(predicted - p, axis=1)
-        # Endpoint samples alone miss arbitrarily large overshoot in unevenly
-        # sampled gaps. On every source segment, bound the cubic-minus-line by
-        # the convex hull of its four Bezier difference control points.
-        derivative = (
-            3 * (1 - t[:, None]) ** 2 * (control[1] - control[0])
-            + 6 * (1 - t[:, None]) * t[:, None] * (control[2] - control[1])
-            + 3 * t[:, None] ** 2 * (control[3] - control[2])
+def orient_stroke(stroke, reverse=False, start_visit=0):
+    """Re-root a closed contour at a real junction, preserving its material exactly."""
+    result = deepcopy(stroke)
+    if start_visit:
+        if not stroke["closed"] or not 0 <= start_visit < len(stroke["members"]):
+            raise ValueError("Only closed strokes can start at another junction")
+        boundary = stroke["junction_visits"][start_visit]["segment_boundary"]
+        offset = stroke["junction_visits"][start_visit]["distance_m"]
+        result["segments"] = result["segments"][boundary:] + result["segments"][:boundary]
+        result["members"] = result["members"][start_visit:] + result["members"][:start_visit]
+        visits = stroke["junction_visits"][:-1]
+        result["junction_visits"] = []
+        for i in list(range(start_visit, len(visits))) + list(range(start_visit)):
+            visit = deepcopy(visits[i])
+            visit["distance_m"] = (visit["distance_m"] - offset) % stroke["length_m"]
+            visit["segment_boundary"] = (visit["segment_boundary"] - boundary) % len(
+                stroke["segments"]
+            )
+            result["junction_visits"].append(visit)
+        first = result["junction_visits"][0]
+        result["junction_visits"].append(
+            {
+                "node": first["node"],
+                "distance_m": stroke["length_m"],
+                "segment_boundary": len(stroke["segments"]),
+            }
         )
-        dt = np.diff(t)[:, None]
-        line_delta = np.diff(p, axis=0)
-        interior_one = predicted[:-1] + dt * derivative[:-1] / 3 - (p[:-1] + line_delta / 3)
-        interior_two = predicted[1:] - dt * derivative[1:] / 3 - (p[1:] - line_delta / 3)
-        interval_error = np.maximum.reduce(
-            [
-                error[:-1],
-                error[1:],
-                np.linalg.norm(interior_one, axis=1),
-                np.linalg.norm(interior_two, axis=1),
-            ]
-        )
-        split = int(interval_error.argmax()) + 1
-        if interval_error.max() <= tolerance:
-            return [control.tolist()]
-        if depth >= max_depth:
-            # Preserve the bound when recursion runs out: use exact polyline edges.
-            return [segment for i in range(len(p) - 1) for segment in fit(p[i : i + 2], depth + 1)]
-        split = max(1, min(len(p) - 2, split))
-        return fit(p[: split + 1], depth + 1) + fit(p[split:], depth + 1)
-
-    return fit(points, 0)
+        result["start"] = result["end"] = first["node"]
+    if reverse:
+        result["segments"] = [segment[::-1] for segment in result["segments"][::-1]]
+        result["members"].reverse()
+        result["start"], result["end"] = result["end"], result["start"]
+        result["junction_visits"] = [
+            {
+                "node": visit["node"],
+                "distance_m": result["length_m"] - visit["distance_m"],
+                "segment_boundary": len(result["segments"]) - visit["segment_boundary"],
+            }
+            for visit in result["junction_visits"][::-1]
+        ]
+    result["reverse"] = reverse
+    result["start_visit"] = start_visit
+    return result

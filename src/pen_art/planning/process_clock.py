@@ -2,8 +2,7 @@
 
 import numpy as np
 
-from ..curves import transform_points
-from ..strokes import orient_stroke
+from ..curves import orient_stroke, transform_points
 
 PROCESS_CLOCK_POLICY = "whole-connected-action-v1"
 

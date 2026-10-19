@@ -13,12 +13,10 @@ from time import monotonic, perf_counter
 import fcl
 import numpy as np
 
-from ..cell import load_cell
-from ..cell_config import load_frame_config
-from ..curves import transform_points
+from ..cell import load_cell, load_frame_config
+from ..curves import orient_stroke, transform_points
 from ..io import read_json, sha256
 from ..kinematics import inverse_candidates
-from ..strokes import orient_stroke
 from ..timing import make_path, refine_samples
 from .clock_path import timed_path
 from .collision import QUERY_STATS, Body, RobotCollisionModel, placed

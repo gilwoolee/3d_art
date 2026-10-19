@@ -10,7 +10,7 @@ from ..curves import curve_length
 from ..io import artifact
 
 
-def section_actions(graph, *, group_sources=True):
+def section_actions(graph):
     """Keep a connected source curve together without inventing anchors.
 
     Material junctions, original zigzag vertices and cubic subdivision points
@@ -18,30 +18,28 @@ def section_actions(graph, *, group_sources=True):
     splits the ordinary source grouping.
     """
     nodes = {node["id"]: node for node in graph["nodes"]}
-    groups = [[edge] for edge in graph["edges"]]
-    if group_sources:
-        by_source = {}
-        for edge in graph["edges"]:
-            by_source.setdefault(edge.get("parent_curve", edge["id"]), []).append(edge)
-        groups = []
-        for source_edges in by_source.values():
-            current = []
-            for edge in sorted(source_edges, key=lambda row: row.get("source_interval", [0])[0]):
-                if current and (
-                    current[-1]["end"] != edge["start"]
-                    or not np.allclose(
-                        current[-1]["segments"][-1][-1],
-                        edge["segments"][0][0],
-                        atol=1e-10,
-                        rtol=0,
-                    )
-                    or current[-1].get("stage") != edge.get("stage")
-                    or current[-1]["diameter_m"] != edge["diameter_m"]
-                ):
-                    groups.append(current)
-                    current = []
-                current.append(edge)
-            groups.append(current)
+    by_source = {}
+    for edge in graph["edges"]:
+        by_source.setdefault(edge.get("parent_curve", edge["id"]), []).append(edge)
+    groups = []
+    for source_edges in by_source.values():
+        current = []
+        for edge in sorted(source_edges, key=lambda row: row.get("source_interval", [0])[0]):
+            if current and (
+                current[-1]["end"] != edge["start"]
+                or not np.allclose(
+                    current[-1]["segments"][-1][-1],
+                    edge["segments"][0][0],
+                    atol=1e-10,
+                    rtol=0,
+                )
+                or current[-1].get("stage") != edge.get("stage")
+                or current[-1]["diameter_m"] != edge["diameter_m"]
+            ):
+                groups.append(current)
+                current = []
+            current.append(edge)
+        groups.append(current)
     actions = []
     for index, group in enumerate(groups):
         edge = group[0]
@@ -86,7 +84,7 @@ def section_actions(graph, *, group_sources=True):
     return artifact(
         "construction_plan",
         actions=actions,
-        method="connected_source_sections" if group_sources else "independent_source_sections",
+        method="connected_source_sections",
         status="UNPLANNED",
         simulation_only=True,
     )

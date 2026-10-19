@@ -59,7 +59,7 @@ def _layer_heights(
     """
     low, high = mesh.bounds[:, 2]
     uniform = np.linspace(low, high, int(np.ceil((high - low) / layer_height)) + 1)
-    if descent_deg is None or not connectors:
+    if not connectors:
         return uniform
     slope = np.tan(np.radians(descent_deg - 1))
     margin = min(0.000001, (high - low) / 1000)
@@ -99,11 +99,9 @@ def _mesh_framework_at_height(
     layer_height=0.01,
     zigzag_spacing=0.025,
     diameter=0.001,
-    minimum_anchor_spacing=0.0,
-    omit_closing_diagonal=False,
     slice_simplification=0.00002,
     minimum_contour=0.0,
-    maximum_branch_descent_deg=None,
+    maximum_branch_descent_deg,
     base_line_spacing=None,
     coil_maximum_width=None,
     coil_pitch=0.001,
@@ -113,8 +111,6 @@ def _mesh_framework_at_height(
         raise ValueError("Positive layer, zigzag, diameter and simplification are required")
     if not np.isfinite(minimum_contour) or minimum_contour < 0:
         raise ValueError("Minimum contour size must be finite and nonnegative")
-    if not np.isfinite(minimum_anchor_spacing) or minimum_anchor_spacing < 0:
-        raise ValueError("Minimum anchor spacing must be finite and nonnegative")
     low, high = mesh.bounds[:, 2]
     if high <= low:
         raise ValueError("Mesh must have positive height")
@@ -215,7 +211,7 @@ def _mesh_framework_at_height(
     # diagonals carries the object on a base that grips along its whole length.
     base_ring = None
     first = next((index for index, loops in enumerate(layers) if loops), None)
-    if maximum_branch_descent_deg is not None and first:
+    if first:
         base = []
         for loop in layers[first]:
             points = loop["points"].copy()
@@ -247,7 +243,7 @@ def _mesh_framework_at_height(
             if up["depth"] and not carried:
                 omitted_cavities += 1
                 continue
-            if started and not carried and maximum_branch_descent_deg is not None:
+            if started and not carried:
                 omitted_floating += 1
                 continue
             kept.append(up)
@@ -316,7 +312,7 @@ def _mesh_framework_at_height(
                 wound.update(id(member) for member in chain)
         layers = [[loop for loop in loops if id(loop) not in wound] for loops in layers]
 
-    relations, bridges, spacing_adjustments, omitted_steep, nearest_pairs = [], [], [], 0, 0
+    relations, bridges, omitted_steep, nearest_pairs = [], [], 0, 0
     stretched = 0
     for index in range(1, len(layers)):
         lower, upper = layers[index - 1], layers[index]
@@ -343,11 +339,7 @@ def _mesh_framework_at_height(
             # points. Stand each upper contour on the nearest part of the
             # contour beneath it instead.
             co_parents = [parent for parent, u in pairs if u == ui]
-            branching = (
-                maximum_branch_descent_deg is not None
-                and not minimum_anchor_spacing
-                and (len(co_parents) > 1 or sum(parent == li for parent, _ in pairs) > 1)
-            )
+            branching = len(co_parents) > 1 or sum(parent == li for parent, _ in pairs) > 1
             beneath = LineString(down["points"][:, :2])
             overhead = LineString(up["points"][:, :2])
 
@@ -416,9 +408,7 @@ def _mesh_framework_at_height(
             # the diagonals within the limit; like outlines keep equal fractions.
             # A degree of margin covers the later 20 micron junction merge.
             nearest = branching or (
-                maximum_branch_descent_deg is not None
-                and not minimum_anchor_spacing
-                and steepest(count, False) > maximum_branch_descent_deg
+                steepest(count, False) > maximum_branch_descent_deg
                 and steepest(above, True) <= maximum_branch_descent_deg - 1
             )
             if nearest:
@@ -431,51 +421,10 @@ def _mesh_framework_at_height(
                 narrowest = min(LineString(lower[k]["points"]).length for k in co_parents)
                 length = LineString(up["points"]).length
                 count = max(count, int(np.ceil(length * fewest / narrowest)))
-            original_count = count
-            if minimum_anchor_spacing:
-                # Equal fractions on a large upper contour can crowd anchors
-                # onto a much smaller lower contour. Reduce the connector count
-                # until distinct anchors on both contours have room. This is a
-                # layout screen, not a certificate for the entire pen/robot.
-                while count > 1:
-                    samples = [
-                        np.asarray(
-                            [
-                                sample_loop(loop["points"], (i + offset) / count)
-                                for i in range(count)
-                            ]
-                        )
-                        for loop, offset in ((down, 0.0), (up, 0.0))
-                    ]
-                    if all(
-                        min(
-                            np.linalg.norm(points[i] - points[j])
-                            for i in range(count)
-                            for j in range(i)
-                        )
-                        >= minimum_anchor_spacing
-                        for points in samples
-                    ):
-                        break
-                    count -= 1
-                spacing_adjustments.append(
-                    {
-                        "layer": index,
-                        "lower": li,
-                        "upper": ui,
-                        "original_connector_pairs": original_count,
-                        "connector_pairs": count,
-                        "closing_diagonal_omitted": True,
-                    }
-                )
             # Where equal spacing would make a diagonal too steep, its foot and
             # the riser that follows stand further round the loop, far enough
             # for the diagonal to come down within the limit.
-            stretch = (
-                maximum_branch_descent_deg is not None
-                and not branching
-                and not minimum_anchor_spacing
-            )
+            stretch = not branching
             step, i, shift = 0, 0, 0.0
             while i / count + shift < 1 - 1e-9:
                 u, v = i / count + shift, (i + 1) / count + shift
@@ -514,7 +463,7 @@ def _mesh_framework_at_height(
                         continue
                 # WirePrint omits the closing diagonal to leave print-head
                 # access. With one anchor this also avoids retracing the riser.
-                if last and (minimum_anchor_spacing or omit_closing_diagonal or v < 1 - 1e-9):
+                if last:
                     c = None
                 # A diagonal that still comes out too steep is left out rather
                 # than thinning every layer; its riser still stands.
@@ -792,7 +741,6 @@ def _mesh_framework_at_height(
         omitted_steep_branch_diagonals=omitted_steep,
         nearest_point_zigzags=nearest_pairs,
         stretched_diagonals=stretched,
-        anchor_spacing_adjustments=spacing_adjustments,
         generation={
             "layer_height_m": layer_height,
             "zigzag_spacing_m": zigzag_spacing,
@@ -802,7 +750,6 @@ def _mesh_framework_at_height(
             "slice_simplification_m": slice_simplification,
             "minimum_contour_m": minimum_contour,
             "junction_merge_m": 0.00002,
-            "minimum_anchor_spacing_m": minimum_anchor_spacing,
             "base_line_spacing_m": base_line_spacing,
             "coil_maximum_width_m": coil_maximum_width,
             "coil_pitch_m": coil_pitch,
@@ -834,8 +781,7 @@ def mesh_framework(
     layer_height=0.01,
     zigzag_spacing=0.025,
     diameter=0.001,
-    minimum_anchor_spacing=0.0,
-    maximum_descent_angle_deg=None,
+    maximum_descent_angle_deg,
     slice_simplification=0.00002,
     minimum_contour=0.0,
     base_line_spacing=None,
@@ -847,11 +793,8 @@ def mesh_framework(
 
     The angle is measured down from horizontal. The connector spacing remains
     the requested spacing; excessive actual chord slopes reduce slice height.
-    ``None`` retains the explicit legacy geometry API for historical fixtures.
     """
-    if maximum_descent_angle_deg is not None and (
-        not np.isfinite(maximum_descent_angle_deg) or not 0 < maximum_descent_angle_deg < 90
-    ):
+    if not np.isfinite(maximum_descent_angle_deg) or not 0 < maximum_descent_angle_deg < 90:
         raise ValueError("Maximum descent angle must be finite and between 0 and 90 degrees")
     if not np.isfinite(layer_height) or layer_height <= 0:
         raise ValueError("Layer height must be finite and positive")
@@ -860,9 +803,7 @@ def mesh_framework(
     refinements = []
     for iteration in range(13):
         intervals = int(np.ceil((high - low) / candidate_height))
-        if maximum_descent_angle_deg is not None and (
-            intervals < 1 or (high - low) / intervals <= 0.00002
-        ):
+        if intervals < 1 or (high - low) / intervals <= 0.00002:
             raise ValueError(
                 "Cannot satisfy maximum descent angle at the 20 micron junction resolution"
             )
@@ -876,8 +817,6 @@ def mesh_framework(
             layer_height=candidate_height,
             zigzag_spacing=zigzag_spacing,
             diameter=diameter,
-            minimum_anchor_spacing=minimum_anchor_spacing,
-            omit_closing_diagonal=maximum_descent_angle_deg is not None,
             slice_simplification=slice_simplification,
             minimum_contour=minimum_contour,
             maximum_branch_descent_deg=maximum_descent_angle_deg,
@@ -890,13 +829,9 @@ def mesh_framework(
         effective_height = max(np.diff(layer_z), default=0.0)
         angles = _descending_angles(graph)
         maximum = max(angles, default=0.0)
-        omitted = (
-            sum(
-                event.get("event") in {"continue", "split", "merge"}
-                for event in graph["contour_events"]
-            )
-            if maximum_descent_angle_deg is not None or minimum_anchor_spacing
-            else 0
+        omitted = sum(
+            event.get("event") in {"continue", "split", "merge"}
+            for event in graph["contour_events"]
         )
         graph["generation"].update(
             layer_height_m=float(layer_height),
@@ -909,7 +844,7 @@ def mesh_framework(
             omitted_closing_diagonals=omitted,
             descent_angle_refinements=refinements,
         )
-        if maximum_descent_angle_deg is None or maximum <= maximum_descent_angle_deg + 1e-8:
+        if maximum <= maximum_descent_angle_deg + 1e-8:
             return graph
         if iteration == 12:
             break
@@ -953,7 +888,6 @@ def generate(run, **settings):
         "layer_height",
         "zigzag_spacing",
         "diameter",
-        "minimum_anchor_spacing",
         "maximum_descent_angle_deg",
         "slice_simplification",
         "minimum_contour",

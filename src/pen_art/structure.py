@@ -8,7 +8,6 @@ Rigid welds and small deflections are explicit modeling assumptions, not calibra
 import hashlib
 import json
 import warnings
-from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 
@@ -20,68 +19,11 @@ from scipy.sparse.linalg import MatrixRankWarning, splu
 from scipy.spatial import ConvexHull, QhullError
 
 from .curves import flatten_curve
-from .graph import straight_edge, topology
+from .graph import topology
 from .io import artifact
-from .strokes import orient_stroke
 
 # A change to this file changes what a saved screen means.
 SCREEN_IMPLEMENTATION = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-
-
-def analyze_member_prefixes(
-    graph, material, action, deposited_members=(), *, reverse=False, start_visit=0
-):
-    """Screen each real material prefix in the requested connected traversal.
-
-    New junctions are not independent anchors. The elastic solve uses only bed
-    constraints and actual deposited material, with no hypothetical tip clamp.
-    These member-boundary samples use cooled properties; they do not qualify
-    continuous thermal behavior or replace timestamp-based anchor readiness.
-    """
-    oriented = orient_stroke(action, reverse=reverse, start_visit=start_visit)
-    deposited = set(deposited_members)
-    available = {node["id"] for node in graph["nodes"] if node["ground"]}
-    available.update(
-        edge[end] for edge in graph["edges"] if edge["id"] in deposited for end in ("start", "end")
-    )
-    report = {
-        "status": "MEMBER_PREFIXES_MODELED_PASS",
-        "modeled_pass": True,
-        "section": action["id"],
-        "member_order": list(oriented["members"]),
-        "checked_prefixes": 0,
-        "support_model": "released_cooled_elastic_member_prefixes",
-        "growing_tip_constraint": False,
-        "limitations": [
-            "Samples real member boundaries, not continuous material growth",
-            "Cooled elastic properties; hot-material behavior remains uncalibrated",
-            "New internal junctions do not become pre-existing cooled anchors",
-        ],
-    }
-    if oriented["start"] not in available or deposited.intersection(oriented["members"]):
-        return {
-            **report,
-            "status": "MEMBER_PREFIX_STRUCTURE_REJECTED",
-            "modeled_pass": False,
-            "failure": "NO_EXISTING_START_ANCHOR"
-            if oriented["start"] not in available
-            else "DUPLICATE_MATERIAL",
-        }
-    for member in oriented["members"]:
-        deposited.add(member)
-        screen = analyze_structure(graph, material, edge_ids=deposited)
-        report["checked_prefixes"] += 1
-        if not screen["modeled_pass"]:
-            return {
-                **report,
-                "status": "MEMBER_PREFIX_STRUCTURE_REJECTED",
-                "modeled_pass": False,
-                "rejected_member": member,
-                "screen": {
-                    key: value for key, value in screen.items() if key not in {"nodes", "edges"}
-                },
-            }
-    return report
 
 
 def beam_element(a, b, diameter, material):
@@ -145,7 +87,7 @@ def _cached_beam_element(a, b, diameter, young_modulus, poisson_ratio, density):
     return result
 
 
-def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_translations=None):
+def analyze_structure(graph, material, edge_ids=None):
     if material["young_modulus_pa"] <= 0 or not -1 < material["poisson_ratio"] < 0.5:
         raise ValueError("Invalid isotropic elastic material parameters")
     if material["density_kg_m3"] < 0 or material["element_length_m"] <= 0:
@@ -175,7 +117,6 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
             "Linear small deflections",
         ],
         settings=material,
-        point_translation_constraints=sorted(fixed_translations or []),
         solver="equilibrated_lu_with_extended_precision_residual_refinement",
     )
     if not edges:
@@ -246,19 +187,10 @@ def analyze_structure(graph, material, edge_ids=None, nodal_loads=None, fixed_tr
         mass = 0.0 if edge.get("fused") else material["density_kg_m3"] * area * length
         total_mass += mass
         mass_center += mass * (positions[a] + positions[b]) / 2
-    if nodal_loads:
-        for key, load in nodal_loads.items():
-            force[6 * indices[key] : 6 * indices[key] + 6] += np.asarray(load)
     stiffness = coo_matrix((data, (rows, cols)), shape=(count, count)).tocsc()
     free = np.ones(count, dtype=bool)
     for index in fixed:
         free[6 * index : 6 * index + 6] = False
-    for key in fixed_translations or []:
-        if key not in indices:
-            raise ValueError(f"Translation constraint refers to absent material node: {key}")
-        # Ideal point contact holds position; it does not clamp rotation or create a weld.
-        index = indices[key]
-        free[6 * index : 6 * index + 3] = False
     displacement = np.zeros(count, dtype=np.longdouble)
     try:
         with warnings.catch_warnings():
@@ -382,60 +314,3 @@ def screen_key(graph_sha256, material, edge_ids):
             [SCREEN_IMPLEMENTATION, graph_sha256, material, sorted(edge_ids)], sort_keys=True
         ).encode()
     ).hexdigest()
-
-
-def repair_structure(graph, settings, material):
-    """Try real diagonal members and retain only improvements in modeled stiffness."""
-    graph = deepcopy(graph)
-    report = analyze_structure(graph, material)
-    history = []
-    nodes = {node["id"]: node for node in graph["nodes"]}
-    for _ in range(settings["maximum_braces"]):
-        if report["modeled_pass"] or not report.get("nodes"):
-            break
-        deformation = {n["id"]: np.linalg.norm(n["displacement_m"]) for n in report["nodes"]}
-        high = sorted(deformation, key=deformation.get, reverse=True)[:8]
-        connected = topology(graph)
-        options = []
-        for a in high:
-            for b in nodes:
-                if a == b or connected.has_edge(a, b):
-                    continue
-                length = np.linalg.norm(np.array(nodes[a]["position"]) - nodes[b]["position"])
-                if 3 * settings["strand_diameter_m"] < length <= settings["maximum_brace_m"]:
-                    score = (deformation[a] - deformation.get(b, 0)) / length
-                    if score > 0:
-                        options.append((float(score), a, b))
-        best = None
-        for _, a, b in sorted(options, reverse=True)[:8]:
-            next_index = sum(e["role"] == "brace" for e in graph["edges"])
-            brace = straight_edge(
-                a, b, nodes, f"brace-{next_index:04}", "brace", settings["strand_diameter_m"]
-            )
-            trial = {**graph, "edges": [*graph["edges"], brace]}
-            result = analyze_structure(trial, material)
-            if (
-                result.get("maximum_displacement_m", np.inf)
-                < report["maximum_displacement_m"] * 0.98
-            ):
-                if (
-                    best is None
-                    or result["maximum_displacement_m"] < best[1]["maximum_displacement_m"]
-                ):
-                    best = trial, result, brace
-        if best is None:
-            break
-        graph, report, brace = best
-        history.append(
-            {"added": brace["id"], "maximum_displacement_m": report["maximum_displacement_m"]}
-        )
-    graph["checks"]["structure_feasible"] = (
-        report["modeled_pass"] if material["calibrated"] else None
-    )
-    graph["metrics"]["material_members"] = len(graph["edges"])
-    graph["metrics"]["total_length_m"] = sum(e["length_m"] for e in graph["edges"])
-    graph["metrics"]["added_length_m"] = sum(
-        e["length_m"] for e in graph["edges"] if e["role"] != "artistic"
-    )
-    report["repair_history"] = history
-    return graph, report

@@ -1,23 +1,102 @@
-"""Explicit shared-world model for independently configured seven-axis arms."""
+"""The two configuration files, and the robot cell built from ``configs/cell.yaml``.
+
+``configs/cell.yaml`` holds what a learner changes: the build volume, the
+plate and the pen. Everything else about the cell (the robot's posture and the
+collision model of the pen mount) is fixed in ``cell_template.yaml`` next to
+this module. ``configs/frame.yaml`` holds the frame generator and the process,
+timing and motion settings. A planning round gets its own copy of the cell
+(``prepare_cell``), which the planner checks has not changed.
+"""
 
 import re
 import shutil
-from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import yaml
 
-from .io import artifact, now, read_json, sha256, stage_update, write_json
+from .io import artifact, now, read_json, sha256, write_json
 from .kinematics import rigid_transform
 from .planning.collision import RobotCollisionModel, work_surfaces
 from .planning.tool import load_tool
 from .robot import SerialArm
 
+TEMPLATE = Path(__file__).with_name("cell_template.yaml")
+FRAME_CONFIG = Path("configs/frame.yaml")
+CELL_CONFIG = Path("configs/cell.yaml")
+CELL_DIR = Path("runs/cell")
+# The pen mount between the flange and the pen body, and the gap from the end
+# of the tapered nose to the tip; fixed parts of the modelled pen.
+ADAPTER_M, TIP_GAP_M = 0.015, 0.003
+
+
+def load_frame_config(path=FRAME_CONFIG):
+    return yaml.safe_load(Path(path).read_text())
+
+
+def expand_cell(cell, robot_dir="."):
+    """The full cell profile for ``cell`` (the contents of ``configs/cell.yaml``).
+
+    ``robot_dir`` is where the robot files are, relative to the profile.
+    """
+    profile = deepcopy(yaml.safe_load(TEMPLATE.read_text()))
+    plate, pen = cell["plate"], cell["pen"]
+    profile["build_volume_m"] = float(cell["build_volume_m"])
+    profile["robot_model"] = cell["robot"]["model"]
+    origin = (*plate["center_m"], plate["top_z_m"])
+    for row, value in zip(profile["world_from_build"][:3], origin, strict=True):
+        row[3] = float(value)
+    profile["environment"]["plate_size_m"] = [float(v) for v in plate["size_m"]]
+    profile["environment"]["plate_top_z_m"] = float(plate["top_z_m"])
+    arm = profile["arms"][0]
+    robot_dir = Path(robot_dir)
+    arm.update(
+        robot_urdf=str(robot_dir / "robot.urdf"),
+        robot_manifest=str(robot_dir / "robot_manifest.json"),
+        robot_visual=str(robot_dir / "robot_reference.glb"),
+    )
+    length, nose = float(pen["length_m"]), float(pen["nose_length_m"])
+    body = length - ADAPTER_M - nose - TIP_GAP_M
+    if body <= 0:
+        raise ValueError("The pen is too short for its mount and nose")
+    tool = arm["tool_geometry"]
+    for transform in (arm["flange_to_tcp"], tool["flange_to_tcp"]):
+        if isinstance(transform[0], list):
+            transform[2][3] = length
+        else:
+            transform[11] = length
+    tool["tip_radius_m"] = float(pen["tip_radius_m"])
+    bodies = {b["name"]: b for b in tool["bodies"]}
+    bodies["pen_body"]["shape"].update(radius_m=float(pen["body_radius_m"]), length_m=body)
+    bodies["pen_body"]["origin"][2][3] = ADAPTER_M + body / 2
+    bodies["tapered_nose"]["shape"].update(
+        bottom_radius_m=float(pen["body_radius_m"]), length_m=nose
+    )
+    bodies["tapered_nose"]["origin"][2][3] = ADAPTER_M + body + nose / 2
+    return profile
+
+
+def prepare_cell_model(
+    cell_path=CELL_CONFIG, output=CELL_DIR, repository="external/flexiv_description"
+):
+    """Build the robot model and write ``output/cell.yaml``, the profile planning uses."""
+    from .robot import prepare_flexiv
+
+    cell = yaml.safe_load(Path(cell_path).read_text())
+    output = Path(output)
+    prepare_flexiv(repository, output, variant=cell["robot"]["model"])
+    target = output / "cell.yaml"
+    target.write_text(yaml.safe_dump(expand_cell(cell), sort_keys=False))
+    _, arms, _ = load_cell(target)
+    if len(arms) != 1 or len(next(iter(arms.values())).robot.names) != 7:
+        raise ValueError("Expected one seven-joint arm")
+    return target
+
 
 class WorldArm:
-    """Reuse serial kinematics with a rigid base placement in the shared world."""
+    """Reuse serial kinematics with a rigid base placement in the world."""
 
     def __init__(self, robot, world_from_base):
         self.local = robot
@@ -66,8 +145,8 @@ def load_cell(path):
     ):
         raise ValueError("Drawing pen tilt must be finite and in [0, 90) degrees")
     specs = profile.get("arms")
-    if not isinstance(specs, list) or len(specs) not in (1, 2):
-        raise ValueError("Cell requires one or two arms")
+    if not isinstance(specs, list) or len(specs) != 1:
+        raise ValueError("Cell requires one arm")
     arms = {}
     for spec in specs:
         identity = spec.get("id")
@@ -87,7 +166,7 @@ def load_cell(path):
         offset = rigid_transform(spec["flange_to_tcp"], "flange-to-TCP")
         initial = np.asarray(spec.get("initial_positions", manifest["initial_positions"]), float)
         robot.frames(initial)
-        tool = load_tool(spec.get("tool_geometry"), path.parent, robot, offset)
+        tool = load_tool(spec["tool_geometry"], robot, offset)
         arms[identity] = ArmInstance(
             identity,
             robot,
@@ -128,193 +207,34 @@ def load_cell(path):
     return profile, arms, obstacles
 
 
+# What a planning round reads from the frame or detail it plans.
+SOURCE_FILES = (
+    "asset_manifest.json", "normalized.glb", "geometry.glb",
+    "stroke_graph.json", "construction_plan.json", "fabrication_config.json",
+)
 
 
-def sync_source_visuals(output, source_run, include_graph=True):
-    """Carry upstream visual results into a cell run without replacing inputs.
-
-    Preserve the source stage's status and provenance. Robot motion and timing
-    are deliberately excluded: single-arm results are not two-arm validation.
-    """
-    output, source_run = Path(output), Path(source_run)
-    pending = [
-        "geometric_candidates.json",
-        "surface_contours.json",
-        "selected_candidates.json",
-        "abstraction_review.json",
-        "candidate_comparison.json",
-        "stroke_graph.json",
-        "pen_strokes.json",
-        "construction_plan.json",
-        "structural_screen.json",
-        "process_screen.json",
-        "fabrication_config.json",
-        "style_selection.json",
-        "style_attachments.json",
-        "framework_graph.json",
-    ]
-    graph_files = {
-        "stroke_graph.json",
-        "pen_strokes.json",
-        "construction_plan.json",
-        "structural_screen.json",
-        "process_screen.json",
-    }
-    if not include_graph:
-        pending = [name for name in pending if name not in graph_files]
-    pending.extend(
-        path.name for path in source_run.glob("wir3d_*") if path.suffix in {".json", ".png"}
-    )
-    copied = set()
-
-    def references(value):
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key == "inputs" and isinstance(item, dict):
-                    yield from item
-                yield from references(item)
-        elif isinstance(value, list):
-            for item in value:
-                yield from references(item)
-        elif isinstance(value, str) and Path(value).name == value:
-            if Path(value).suffix in {".json", ".png"}:
-                yield value
-
-    while pending:
-        name = pending.pop()
-        if name in copied or Path(name).name != name:
-            continue
-        source = source_run / name
-        if not source.is_file():
-            continue
-        destination = output / name
-        if destination.exists() and sha256(destination) != sha256(source):
-            raise ValueError(f"Cell input differs from source; refusing to replace {name}")
-        if not destination.exists():
-            shutil.copy2(source, destination)
-        copied.add(name)
-        if source.suffix == ".json":
-            pending.extend(references(read_json(source)))
-    source = read_json(source_run / "run.json")
-    for key in ("geometric", "wir3d", "selection", "comparison", "graph", "construction"):
-        stage = source["stages"].get(key)
-        frozen_wir3d = key == "wir3d" and any(
-            name.startswith("wir3d_") and name.endswith(".json") for name in copied
-        )
-        if stage and (stage.get("artifact") in copied or frozen_wir3d):
-            values = {k: v for k, v in stage.items() if k not in {"status", "updated_at"}}
-            values["source_run"] = source["id"]
-            stage_update(output, key, stage["status"], **values)
-    return sorted(copied)
-
-
-def snapshot_backbone(output, source_run):
-    """Export one internally consistent supported graph/order for robot planning."""
-    mapping = {
-        "stroke_graph.json": "backbone_graph.json",
-        "pen_strokes.json": "backbone_pen_strokes.json",
-        "construction_plan.json": "backbone_construction.json",
-        "structural_screen.json": "backbone_structure.json",
-        "process_screen.json": "backbone_process.json",
-    }
-    source_hashes = {name: sha256(source_run / name) for name in mapping.values()}
-    graph = read_json(source_run / mapping["stroke_graph.json"])
-    construction = read_json(source_run / mapping["construction_plan.json"])
-    members = Counter(member for action in construction["actions"] for member in action["members"])
-    if members != Counter(edge["id"] for edge in graph["edges"]):
-        raise ValueError("Supported construction must cover its exact graph members once")
-    for target, source in mapping.items():
-        document = read_json(source_run / source)
-        if target == "construction_plan.json":
-            # The canonical graph has identical bytes; only rename this local input binding.
-            document["inputs"] = {"stroke_graph.json": sha256(output / "stroke_graph.json")}
-        destination = output / target
-        if destination.exists() and read_json(destination) != document:
-            raise ValueError(f"Cell supported input changed: {target}; use a new run")
-        write_json(destination, document)
-    write_json(
-        output / "cell_source_bundle.json",
-        artifact(
-            "cell_source_bundle",
-            variant="backbone",
-            source_run=str(source_run.resolve()),
-            source_sha256=source_hashes,
-            inputs={name: sha256(output / name) for name in mapping},
-        ),
-    )
-    stage_update(
-        output,
-        "graph",
-        "complete",
-        artifact="stroke_graph.json",
-        source="selected",
-        message="Supported graph with intact source contours",
-    )
-    stage_update(
-        output,
-        "construction",
-        "partial",
-        artifact="construction_plan.json",
-        message="Supported whole-contour order; physical validation pending",
-    )
-
-
-def prepare_cell(profile_path, output, source_run, source_variant="original"):
-    """Write a separate setup preview; no paths or concurrency are asserted."""
+def prepare_cell(profile_path, output, source_run):
+    """A planning round in ``output``: the strokes of ``source_run`` and a copy of the cell."""
     profile_path, output, source_run = Path(profile_path), Path(output), Path(source_run)
-    if source_variant not in {"original", "backbone"}:
-        raise ValueError("Source variant must be original or backbone")
-    if output.resolve() == source_run.resolve():
-        raise ValueError("Create a separate run for the two-arm experiment")
     profile, arms, obstacles = load_cell(profile_path)
     output.mkdir(parents=True, exist_ok=True)
-    source = read_json(source_run / "run.json")
-    if (output / "run.json").exists():
-        previous = read_json(output / "run.json")
-        if previous.get("cell_source_run") != str(source_run.resolve()):
-            raise ValueError("Output belongs to a different experiment; choose a new run directory")
-        if previous.get("source_sha256") != source["source_sha256"]:
-            raise ValueError("Source asset changed; choose a new run directory")
-        if previous.get("cell_source_variant", "original") != source_variant:
-            raise ValueError("Source variant changed; choose a new run directory")
-    if not (output / "run.json").exists():
-        write_json(
-            output / "run.json",
-            {
-                "id": output.name,
-                "name": f"{source['name']} · {'one-arm' if len(arms) == 1 else 'two-arm'}",
-                "created_at": now(),
-                "updated_at": now(),
-                "source_sha256": source["source_sha256"],
-                "cell_source_run": str(source_run.resolve()),
-                "cell_source_variant": source_variant,
-                "stages": {
-                    name: {"status": "pending"}
-                    for name in (
-                        "asset",
-                        "geometric",
-                        "wir3d",
-                        "graph",
-                        "construction",
-                        "motion",
-                        "timing",
-                        "validation",
-                        "cell",
-                    )
-                },
-            },
-        )
-    files = ("asset_manifest.json", "normalized.glb", "geometry.glb")
-    for name in files:
+    write_json(
+        output / "run.json",
+        {
+            "id": output.name,
+            "name": output.name,
+            "created_at": now(),
+            "updated_at": now(),
+            "cell_source_run": str(source_run.resolve()),
+            "stages": {},
+        },
+    )
+    for name in SOURCE_FILES:
         shutil.copy2(source_run / name, output / name)
-    stage_update(output, "asset", "complete", artifact="asset_manifest.json")
-    sync_source_visuals(output, source_run, include_graph=source_variant == "original")
-    if source_variant == "backbone":
-        snapshot_backbone(output, source_run)
     write_json(output / "cell_config.json", profile)
-    inputs = {name: sha256(output / name) for name in (*files, "cell_config.json")}
-    if source_variant == "backbone":
-        inputs["cell_source_bundle.json"] = sha256(output / "cell_source_bundle.json")
+    files = ("asset_manifest.json", "normalized.glb", "geometry.glb", "cell_config.json")
+    inputs = {name: sha256(output / name) for name in files}
     arm_rows = []
     for identity, arm in arms.items():
         resources = {}
@@ -360,15 +280,18 @@ def prepare_cell(profile_path, output, source_run, source_variant="original"):
         limitations=[
             "Base placement, robot variants and pen offsets are provisional",
             "This is a setup view, not a coordinated trajectory or fabrication schedule",
-            "Pen/mount geometry is absent unless explicitly supplied",
         ],
     )
     write_json(output / "cell_manifest.json", result)
-    stage_update(
-        output,
-        "cell",
-        "partial",
-        artifact="cell_manifest.json",
-        message=f"{len(arms)}-arm world setup; motion planning pending",
+    # The planner checks that none of these changed since.
+    names = ("cell_manifest.json", "construction_plan.json", "stroke_graph.json")
+    write_json(
+        output / "cell_drawing_variants.json",
+        artifact(
+            "cell_drawing_variants",
+            inputs={name: sha256(output / name) for name in names},
+            variants=[],
+            status="LAZY_SECTION_CANDIDATES",
+        ),
     )
     return result

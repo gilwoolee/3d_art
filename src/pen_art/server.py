@@ -6,7 +6,6 @@ name and shows its current planning round. No route can move a robot.
 
 import hashlib
 import json
-import math
 import re
 from pathlib import Path
 
@@ -41,24 +40,9 @@ def create_app(root: Path):
         if not path.is_relative_to(runs.resolve()):
             raise HTTPException(404, "Run not found")
         planned = current_round(path)
-        if planned is not None:
-            return planned
-        if not (path / "run.json").is_file():
+        if planned is None:
             raise HTTPException(404, "Run not found")
-        return path
-
-    def run_metadata(path):
-        data = read_json(path / "run.json")
-        config = path / "cell_config.json"
-        if config.is_file() and config.resolve().is_relative_to(path.resolve()):
-            tilt = read_json(config).get("drawing_pen_tilt_deg", 0)
-            if (
-                isinstance(tilt, (int, float))
-                and not isinstance(tilt, bool)
-                and math.isfinite(tilt)
-            ):
-                data["drawing_pen_tilt_deg"] = tilt
-        return data
+        return planned
 
     @app.get("/api/runs")
     def list_runs():
@@ -72,7 +56,7 @@ def create_app(root: Path):
             saved = read_json(state)
             verdict = saved.get("verification") or saved.get("timing") or saved.get("geometry")
             minutes = saved.get("print_minutes")
-            row = run_metadata(planned)
+            row = read_json(planned / "run.json")
             row.update(
                 id=folder.name,
                 name=f"{folder.name}: {verdict}"
@@ -84,7 +68,7 @@ def create_app(root: Path):
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str):
         path = run_path(run_id)
-        data = run_metadata(path)
+        data = read_json(path / "run.json")
         data["artifacts"] = sorted(
             p.name for p in path.iterdir() if p.is_file() and p.suffix in {".json", ".png"}
         )
@@ -138,7 +122,6 @@ def create_app(root: Path):
                 if any(stem in word or word in stem for word in words):
                     return FileResponse(picture, headers={"Cache-Control": "no-cache"})
         raise HTTPException(404, "No picture")
-
 
     dist = root / "web/dist"
     if dist.is_dir():

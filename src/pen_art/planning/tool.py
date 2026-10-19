@@ -1,10 +1,8 @@
-"""Load explicit flange-frame pen/mount geometry; never infer product dimensions."""
+"""The pen and its mount as collision bodies in the flange frame, from the cell profile."""
 
 import hashlib
-import io
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from xml.etree.ElementTree import Element, SubElement
 
 import fcl
@@ -51,11 +49,9 @@ def positive(value, shape, label):
     return values
 
 
-def load_tool(profile, config_directory, robot, flange_to_tcp):
-    if profile is None:
-        return ToolModel([], None, {"configured": False, "visual_bodies": []})
+def load_tool(profile, robot, flange_to_tcp):
     if not isinstance(profile, dict):
-        raise ValueError("Tool profile must be a mapping or null")
+        raise ValueError("Tool profile must be a mapping")
     if profile.get("schema_version") != 1 or profile.get("units") != "m":
         raise ValueError("Tool profile requires schema_version 1 and explicit meter units")
     tcp = rigid_transform(profile["flange_to_tcp"], "tool flange-to-TCP")
@@ -64,7 +60,7 @@ def load_tool(profile, config_directory, robot, flange_to_tcp):
     tip_radius = float(positive(profile["tip_radius_m"], (), "Tip radius"))
     if not isinstance(profile.get("bodies"), list) or not profile["bodies"]:
         raise ValueError("A configured tool needs non-contact pen/mount geometry")
-    names, bodies, visuals, mesh_hashes = set(), [], [], {}
+    names, bodies, visuals = set(), [], []
     links = {robot.root, *(j["child"] for j in robot.joint_data)}
     for spec in profile["bodies"]:
         name = spec["name"]
@@ -95,42 +91,26 @@ def load_tool(profile, config_directory, robot, flange_to_tcp):
                 attributes["length"] = str(length)
                 visual["length_m"] = length
             SubElement(element, kind, **attributes)
-        elif kind in {"mesh", "frustum"}:
-            if kind == "frustum":
-                bottom = float(positive(shape["bottom_radius_m"], (), "Frustum base radius"))
-                top = float(positive(shape["top_radius_m"], (), "Frustum tip radius"))
-                length = float(positive(shape["length_m"], (), "Frustum length"))
-                # Circumscribed polygon conservatively encloses the round tapered nose.
-                angles = np.arange(32) * 2 * np.pi / 32
-                vertices = np.concatenate(
-                    [
-                        np.column_stack(
-                            [
-                                radius / np.cos(np.pi / 32) * np.cos(angles),
-                                radius / np.cos(np.pi / 32) * np.sin(angles),
-                                np.full(32, z),
-                            ]
-                        )
-                        for radius, z in ((bottom, -length / 2), (top, length / 2))
-                    ]
-                )
-                hull = trimesh.convex.convex_hull(vertices)
-                visual["type"] = "mesh"
-            else:
-                path = (Path(config_directory) / shape["path"]).resolve()
-                scale = positive(shape.get("scale", [1, 1, 1]), (3,), "Mesh scale")
-                raw = path.read_bytes()
-                mesh = trimesh.load_mesh(
-                    io.BytesIO(raw), file_type=path.suffix.lstrip("."), process=False
-                )
-                if (
-                    not isinstance(mesh, trimesh.Trimesh)
-                    or len(mesh.vertices) < 4
-                    or not np.isfinite(mesh.vertices).all()
-                ):
-                    raise ValueError("Tool mesh must be a finite triangle mesh")
-                hull = trimesh.convex.convex_hull(mesh.vertices * scale)
-                mesh_hashes[name] = hashlib.sha256(raw).hexdigest()
+        elif kind == "frustum":
+            bottom = float(positive(shape["bottom_radius_m"], (), "Frustum base radius"))
+            top = float(positive(shape["top_radius_m"], (), "Frustum tip radius"))
+            length = float(positive(shape["length_m"], (), "Frustum length"))
+            # Circumscribed polygon conservatively encloses the round tapered nose.
+            angles = np.arange(32) * 2 * np.pi / 32
+            vertices = np.concatenate(
+                [
+                    np.column_stack(
+                        [
+                            radius / np.cos(np.pi / 32) * np.cos(angles),
+                            radius / np.cos(np.pi / 32) * np.sin(angles),
+                            np.full(32, z),
+                        ]
+                    )
+                    for radius, z in ((bottom, -length / 2), (top, length / 2))
+                ]
+            )
+            hull = trimesh.convex.convex_hull(vertices)
+            visual["type"] = "mesh"
             # Render the same filled convex hull used by the collision checker.
             visual["vertices"] = hull.vertices.tolist()
             visual["faces"] = hull.faces.tolist()
@@ -141,16 +121,12 @@ def load_tool(profile, config_directory, robot, flange_to_tcp):
             radius = float(np.max(np.linalg.norm(hull.vertices, axis=1)))
         else:
             raise ValueError(f"Unsupported tool geometry: {kind}")
-        if kind not in {"mesh", "frustum"}:
+        if kind != "frustum":
             geometry, radius = collision_geometry(element)
         bodies.append(Body(f"tool/{name}", robot.tip, origin, geometry, radius, touch))
         visuals.append(visual)
     fingerprint = hashlib.sha256(
-        json.dumps(
-            {"profile": profile, "mesh_hashes": mesh_hashes},
-            sort_keys=True,
-            allow_nan=False,
-        ).encode()
+        json.dumps(profile, sort_keys=True, allow_nan=False).encode()
     ).hexdigest()
     return ToolModel(
         bodies,
@@ -163,19 +139,9 @@ def load_tool(profile, config_directory, robot, flange_to_tcp):
             "flange_to_tcp": tcp.tolist(),
             "tip_radius_m": tip_radius,
             "visual_bodies": visuals,
-            "mesh_hashes": mesh_hashes,
             "limitations": [
                 "Contact tip is modeled separately; drawing contact is not yet validated",
                 "Cable/filament geometry must be included explicitly if relevant",
             ],
         },
     )
-
-
-def require_matching_tool(tool, result):
-    """Reject caches/audits created for different tool geometry, including meshes."""
-    stored = result.get("tool_model", {"configured": False})
-    if stored.get("configured") != tool.metadata["configured"] or stored.get(
-        "profile_sha256"
-    ) != tool.metadata.get("profile_sha256"):
-        raise ValueError("Tool geometry changed; rerun the drawing audit and sequence")

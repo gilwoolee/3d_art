@@ -2,7 +2,6 @@
 // motion, side by side. It only reads saved files; nothing here plans or checks.
 import './style.css';
 import { Viewer, type CellArmView, type Curve, type RobotRig } from './viewer';
-import { coordinatedPose, type CoordinatedPlan } from './timing';
 
 interface RunRow { id: string; name: string; updated_at: string }
 interface RunDetail extends RunRow { artifacts: string[] }
@@ -12,6 +11,27 @@ interface CellManifest {
   environment: { plate_top_z_m: number; table_z_m: number; plate_size_m: number[] };
 }
 interface Validation { status: string; source_plan_sha256?: string; collision_scope?: string }
+// The saved plan (plan.json): per action, joint-space pieces on the build clock.
+interface PlanEdge { start_s: number; end_s: number; q0: number[]; q1: number[]; kind: string; tcp0_m?: number[]; tcp1_m?: number[]; coefficients?: number[][] }
+interface PlanAction { arm: string; stroke_id: string; start_s: number; end_s: number; auxiliary?: boolean; trajectory: { duration_s: number; edges: PlanEdge[] } }
+interface Plan {
+  actions: PlanAction[]; modeled_duration_s: number; requested_strokes: number;
+  lift_offs?: { before: string; reason: string }[]; minimum_trails?: number | null;
+  initial_positions?: Record<string, number[]>;
+}
+
+// The arm's joints at ``time``: a piece's polynomial, or a smooth blend between its ends.
+function pose(action: PlanAction, time: number): number[] {
+  const relative = Math.max(0, Math.min(action.trajectory.duration_s, time - action.start_s));
+  const edges = action.trajectory.edges;
+  let low = 0, high = edges.length - 1;
+  while (low < high) { const mid = Math.floor((low + high) / 2); if (edges[mid].end_s <= relative) low = mid + 1; else high = mid; }
+  const edge = edges[low];
+  const u = Math.max(0, Math.min(1, (relative - edge.start_s) / (edge.end_s - edge.start_s)));
+  if (edge.coefficients) return edge.coefficients.map(c => c.reduceRight((sum, value) => sum * u + value, 0));
+  const h = u * u * u * (10 + u * (-15 + 6 * u));
+  return edge.q0.map((value, i) => value + (edge.q1[i] - value) * h);
+}
 
 const escape = (s: unknown) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 async function json<T>(url: string): Promise<T> {
@@ -44,9 +64,9 @@ app.innerHTML = `<div class="simple">
 </div>`;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
 const views = {
-  model: new Viewer($('#simple-model'), () => {}),
-  strokes: new Viewer($('#simple-strokes'), () => {}),
-  robot: new Viewer($('#simple-robot'), () => {}),
+  model: new Viewer($('#simple-model')),
+  strokes: new Viewer($('#simple-strokes')),
+  robot: new Viewer($('#simple-robot')),
 };
 let request = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -124,7 +144,7 @@ async function show(runId: string) {
     $('#simple-robot-note').textContent = 'Loading the saved motion…';
     const bytes = await (await fetch(url(planFile))).arrayBuffer();
     if (current !== request) return;
-    const plan = JSON.parse(new TextDecoder().decode(bytes)) as CoordinatedPlan;
+    const plan = JSON.parse(new TextDecoder().decode(bytes)) as Plan;
     // Say whether this exact file is the one the separate verification passed.
     const validationFile = 'verification.json';
     let verified = false;
@@ -158,15 +178,15 @@ async function show(runId: string) {
         const moves = plan.actions.filter(a => a.arm === arm.id);
         const motion = moves.find(a => a.start_s <= time && time < a.end_s);
         const past = moves.filter(a => a.end_s <= time).at(-1);
-        views.robot.setCellArmPose(arm.id, motion ? coordinatedPose(motion, time)
-          : past ? coordinatedPose(past, past.end_s) : (plan.initial_positions?.[arm.id] ?? arm.initial_positions));
+        views.robot.setCellArmPose(arm.id, motion ? pose(motion, time)
+          : past ? pose(past, past.end_s) : (plan.initial_positions?.[arm.id] ?? arm.initial_positions));
       }
       const paths: number[][][] = [];
       for (const row of rows) {
         if (row.start > time) break;
         paths.push([row.edge.tcp0_m!, row.end <= time
           ? row.edge.tcp1_m!
-          : views.robot.setCellArmPose(row.action.arm, coordinatedPose(row.action, time))]);
+          : views.robot.setCellArmPose(row.action.arm, pose(row.action, time))]);
       }
       views.robot.setDepositedPaths(paths);
       $('#simple-clock').textContent = `${minutes(time)} / ${minutes(total)}`;

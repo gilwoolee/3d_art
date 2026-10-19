@@ -140,7 +140,6 @@ class RobotCollisionModel:
                 self._self_pairs[index].append((other_index, radii > 0))
                 self._pair_radii[body.name, other.name] = radii
         self._self_cache = OrderedDict()
-        self.self_cache_hits = self.self_cache_misses = 0
         self._material_poses = OrderedDict()
         self.material_cache_stats = Counter()
 
@@ -238,13 +237,11 @@ class RobotCollisionModel:
                 key = (index, other_index, q[relative].tobytes())
                 cached = self._self_cache.get(key)
                 if cached is None:
-                    self.self_cache_misses += 1
                     cached = measure(object_at(index), object_at(other_index))
                     self._self_cache[key] = cached
                     if len(self._self_cache) > 8192:
                         self._self_cache.popitem(last=False)
                 else:
-                    self.self_cache_hits += 1
                     self._self_cache.move_to_end(key)
                 yield body.name, self.bodies[other_index].name, *cached
             for name, obstacle in (obstacles or {}).items():

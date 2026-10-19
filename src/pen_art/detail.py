@@ -4,10 +4,10 @@
 
 (``pen-art detail NAME`` runs this for an object.)
 
-FRAME_SOURCE is a source run whose ``framework_graph.json`` is the frame (for
-example one written by ``prepare_framework``). TARGET is written as a new
-source run: the frame plus detail tours, with ``stroke_graph.json``,
-``construction_plan.json``, ``structural_screen.json`` and ``detail_tours.json``.
+FRAME_SOURCE is the folder ``pen-art frame`` wrote; its ``framework_graph.json``
+is the frame. TARGET is written as a copy of it with the detail tours added to
+``stroke_graph.json``, ``construction_plan.json`` and ``structural_screen.json``,
+and listed in ``detail_tours.json``.
 
 Rules the detail follows:
 
@@ -16,7 +16,7 @@ Rules the detail follows:
   where they touch are recorded in ``fused_turns``; there are no struts.
 * It is drawn after the frame. The planner lets the pen tip run along existing
   wire; only the nose behind the tip (estimated tapered nose, 3 mm and up)
-  must keep ``--margin`` from it, and must stay above the bed.
+  must keep MARGIN from it, and must stay above the bed.
 * One stroke keeps one side of the object (one of four), and the pen body
   leans toward that side: toward the robot for the side facing it, away from
   it for the far side. The planner draws a stroke at one tilt (0-60 degrees);
@@ -24,8 +24,8 @@ Rules the detail follows:
 * Print time is dominated by strokes, so lines on one face are joined end to
   end through short connecting runs on the surface into long tours.
 
-Detail lines come from slice creases (ridges and valleys found by slicing the
-mesh along x, y and z) and an optional finer pass inside ``--fine-region``.
+Detail lines come from slice creases: ridges and valleys found by slicing the
+mesh along x, y and z.
 """
 
 import argparse
@@ -39,10 +39,9 @@ import yaml
 from scipy.spatial import cKDTree
 
 from pen_art.curves import curve_interval, curve_length
+from pen_art.frame import write_strokes
 from pen_art.io import read_json, write_json
-from pen_art.planning.section_build import write_section_artifacts
 from pen_art.planning.sections import section_actions
-from pen_art.structure import analyze_structure
 
 WIRE_R = 0.0005
 TILTS = (0, 15, 30, 45, 60)
@@ -53,6 +52,14 @@ TILTS = (0, 15, 30, 45, 60)
 SECONDS_PER_STROKE, DRAW_SPEED = 20.0, 0.010
 # Exit status when no drawable detail was found; nothing is written.
 NO_DETAIL = 3
+# Lines sit OFFSET (one wire) outside the surface; crease lines shorter than
+# MIN_LINE are ignored; line is collected until COLLECT times the detail wanted
+# is reachable; a line bends onto frame wire within DIP; pieces of one face are
+# joined by connecting runs up to BRIDGE long into at most MAX_STROKES tours;
+# the nose keeps MARGIN (the planner's clearance) from wire. All in metres.
+OFFSET, MIN_LINE, COLLECT, DIP, BRIDGE, MAX_STROKES, MARGIN = (
+    0.001, 0.008, 1.6, 0.0035, 0.022, 80, 0.001,
+)
 
 
 def estimated_minutes(length_m, strokes):
@@ -137,13 +144,12 @@ class Surface:
         q[:, 2] = np.maximum(q[:, 2], 0.0)
         return q
 
-    def lay(self, p, push=True):
+    def lay(self, p):
         """1 mm samples resting on the surface, and the azimuth each sample faces."""
         p = resample(p, 0.001)
-        if push:
-            for passes in (2, 1, 1):
-                p = smooth(self.push_out(p), passes)
-            p = resample(self.push_out(p), 0.001)
+        for passes in (2, 1, 1):
+            p = smooth(self.push_out(p), passes)
+        p = resample(self.push_out(p), 0.001)
         closest, _, tri = trimesh.proximity.closest_point(self.mesh, p)
         out = p - closest
         flat = np.linalg.norm(out[:, :2], axis=1) < 1e-5
@@ -247,35 +253,18 @@ def dip(p, frame, tree, reach, spacing=0.006, width=0.002):
     return q
 
 
-def candidate_lines(mesh, args):
-    """(name, points m, importance, lay on surface) for every candidate detail line."""
-    out = []
+def candidate_lines(mesh, thresholds):
+    """(name, points m, importance) for every candidate detail line."""
     # Shallower creases come later in importance; they fill in smooth objects.
-    found = [line for th in args.crease_threshold for line in slice_creases(mesh, th)]
-    for axis, t in found:
-        out.append(
-            (
-                f"crease-{'xyz'[axis]}",
-                smooth(t[:, :3], 3) / 1000,
-                length(t[:, :3]) * np.abs(t[:, 3]).mean(),
-                True,
-            )
+    found = [line for th in thresholds for line in slice_creases(mesh, th)]
+    return [
+        (
+            f"crease-{'xyz'[axis]}",
+            smooth(t[:, :3], 3) / 1000,
+            length(t[:, :3]) * np.abs(t[:, 3]).mean(),
         )
-    if args.fine_region:
-        box = np.asarray(args.fine_region, float).reshape(3, 2)
-        for axis, t in slice_creases(
-            mesh, 0.12, arc=0.7, sample=0.12, step=0.35, reach=1.0, min_len=2.5
-        ):
-            if np.all((t[:, :3] >= box[:, 0]) & (t[:, :3] <= box[:, 1]), axis=1).mean() > 0.8:
-                out.append(
-                    (
-                        f"fine-{'xyz'[axis]}",
-                        t[:, :3] / 1000,
-                        4 * length(t[:, :3]) * np.abs(t[:, 3]).mean(),
-                        True,
-                    )
-                )
-    return out
+        for axis, t in found
+    ]
 
 
 def detail_profile(base, path, nose_clearance=0.0003):
@@ -287,11 +276,6 @@ def detail_profile(base, path, nose_clearance=0.0003):
     profile["planning_checks_robot"] = True
     # Detail lies on the outside; back away 15 mm rather than 30 mm.
     profile["transit"] = {"withdraw_distance_m": 0.015}
-    profile["setup_description"] = (
-        profile.get("setup_description", "")
-        + " Detail strokes after the frame may tilt the pen toward the side they draw; the nose"
-        + f" keeps {nose_clearance * 1000:g} mm from wire."
-    )
     Path(path).write_text(yaml.safe_dump(profile, sort_keys=False))
     return Path(path)
 
@@ -329,16 +313,13 @@ class PlannerCheck:
     """
 
     def __init__(self, frame_source, framework, profile_path, cell_dir, faces, seconds=5.0):
-        from pen_art.cell import prepare_cell
-        from pen_art.cell_config import load_frame_config
+        from pen_art.cell import load_frame_config, prepare_cell
         from pen_art.planning.cell_planner import CellPlanner
         from pen_art.planning.scene import FixedPlate
-        from pen_art.planning.section_build import prepare_candidates
 
         settings = dict(load_frame_config()["planning"])
         shutil.rmtree(cell_dir, ignore_errors=True)
         prepare_cell(profile_path, cell_dir, frame_source)
-        prepare_candidates(cell_dir)
         self.planner = CellPlanner(cell_dir, profile_path, settings, float("inf"))
         self.identity = next(iter(self.planner.arms))
         # The whole arm, not only the pen: planning screens the pen, and the
@@ -507,7 +488,6 @@ def main():
         required=True,
         help="cell profile: build plate, robot base and pen",
     )
-    parser.add_argument("--max-strokes", type=int, default=80)
     parser.add_argument(
         "--crease-threshold",
         type=float,
@@ -515,43 +495,15 @@ def main():
         default=[0.12, 0.08, 0.05],
         help="mm a crease bulges or dents; several values add shallower creases",
     )
-    parser.add_argument(
-        "--min-line", type=float, default=0.008, help="m; shorter crease lines are ignored"
-    )
-    parser.add_argument(
-        "--offset", type=float, default=0.001, help="m outside the surface (one wire)"
-    )
-    parser.add_argument("--bridge", type=float, default=0.022, help="m; longest connecting run")
-    parser.add_argument(
-        "--margin", type=float, default=0.001, help="m nose clearance (planner clearance_m)"
-    )
-    parser.add_argument(
-        "--check-with-planner",
-        action="store_true",
-        help="keep only tours the planner's sampler can draw, with the tilts it can use",
-    )
     parser.add_argument("--detail", type=float, default=2.0, help="m of detail at most")
     parser.add_argument(
         "--minutes", type=float, default=15.0, help="added print minutes at most (estimated)"
-    )
-    parser.add_argument(
-        "--collect", type=float, default=1.6, help="collect this x --detail of reachable line"
-    )
-    parser.add_argument(
-        "--dip", type=float, default=0.0035, help="m; bend lines onto frame wire this near"
-    )
-    parser.add_argument(
-        "--fine-region",
-        type=float,
-        nargs=6,
-        metavar=("X0", "X1", "Y0", "Y1", "Z0", "Z1"),
-        help="mm box for a finer crease pass",
     )
     args = parser.parse_args()
 
     source, target = args.frame_source, args.target
     mesh = trimesh.load(source / "normalized.glb", force="mesh")
-    surface = Surface(mesh, args.offset)
+    surface = Surface(mesh, OFFSET)
     profile = yaml.safe_load(args.profile.read_text())
     build = np.asarray(profile["world_from_build"])[:2, 3]
     base = np.asarray(profile["arms"][0]["world_from_base"])[:2, 3]
@@ -572,14 +524,14 @@ def main():
         s = np.linspace(0.003, 0.03, 10)
         if np.any(x[2] + s * a[2] - nose_radius(s) * np.sqrt(max(0.0, 1 - a[2] ** 2)) <= 0):
             return None
-        idx = tree.query_ball_point(x + a * 0.1, r=0.1 + 0.012 + WIRE_R + args.margin)
+        idx = tree.query_ball_point(x + a * 0.1, r=0.1 + 0.012 + WIRE_R + MARGIN)
         if not idx:
             return np.zeros(0, int)
         idx = np.asarray(idx)
         d = pts[idx] - x
         s = d @ a
         rho = np.linalg.norm(d - s[:, None] * a, axis=1)
-        return idx[(s > 0.003) & (rho < nose_radius(s) + WIRE_R + args.margin)]
+        return idx[(s > 0.003) & (rho < nose_radius(s) + WIRE_R + MARGIN)]
 
     framework = read_json(source / "framework_graph.json")
     frame = np.vstack([dense(np.asarray(e["segments"][0])[[0, -1]]) for e in framework["edges"]])
@@ -605,7 +557,7 @@ def main():
         clock[name] = clock.get(name, 0.0) + now - mark[0]
         mark[0] = now
 
-    candidates = sorted(candidate_lines(mesh, args), key=lambda c: -c[2])
+    candidates = sorted(candidate_lines(mesh, args.crease_threshold), key=lambda c: -c[2])
     lap("find crease lines")
     # 1-2. take lines by importance, skipping near-duplicates; lay each on the
     #      surface and cut it where it turns to another face or where no tilt
@@ -613,21 +565,21 @@ def main():
     pieces, stages = [], {"laid": 0.0, "one face": 0.0}
     chosen, taken, used, reachable = [], [], 0.0, 0.0
     laying = clearing = 0.0
-    for name, p, importance, push in candidates:
-        if reachable >= args.collect * args.detail:
+    for name, p, _ in candidates:
+        if reachable >= COLLECT * args.detail:
             break
-        if importance != np.inf and length(p) < args.min_line:
+        if length(p) < MIN_LINE:
             continue
         q = resample(p, 0.0005)
         if taken and (cKDTree(np.vstack(taken)).query(q)[0] < 0.0015).mean() > 0.5:
             continue
-        chosen.append((name, q, push))
+        chosen.append((name, q))
         taken.append(q)
         used += length(q)
         started = perf_counter()
-        p, az = surface.lay(q, push)
+        p, az = surface.lay(q)
         stages["laid"] += length(p)
-        p = dip(p, frame, frame_tree, args.dip)
+        p = dip(p, frame, frame_tree, DIP)
         sec = sector_of(az)
         for i in range(1, len(sec) - 1):
             if sec[i - 1] == sec[i + 1] != sec[i]:
@@ -678,7 +630,7 @@ def main():
                     if i not in tried
                     for rev in (False, True)
                 ]
-                options = [o for o in options if o[0] <= args.bridge]
+                options = [o for o in options if o[0] <= BRIDGE]
                 if not options:
                     break
                 _, i, rev = min(options)
@@ -697,7 +649,7 @@ def main():
             tours.append((np.vstack(path), sec, tilts, names))
     stages["joined (with connecting runs)"] = sum(length(t[0]) for t in tours)
     tours = sorted((t for t in tours if length(t[0]) >= 0.008), key=lambda t: -length(t[0]))[
-        : args.max_strokes
+        :MAX_STROKES
     ]
     stages["8 mm or longer, stroke cap"] = sum(length(t[0]) for t in tours)
 
@@ -862,46 +814,45 @@ def main():
         ready.append({"position": position, "k": k, "p": kept[0], "tilt": kept[1], "hints": hints})
 
     lap("order tours")
-    if args.check_with_planner:
-        # Keep what the arm can draw; cut a failing tour at the failing point,
-        # or trim the end it cannot reach, and check the pieces again.
-        # Scratch for the check, named for the object (its profile sits beside
-        # the cell profile, whose robot paths are relative to it); both go
-        # when the check is done.
-        scratch = f"{target.parent.name}_{target.name}_check"
-        check_profile = detail_profile(args.profile, args.profile.parent / f"{scratch}.yaml")
-        check_cell = target.parent / scratch
-        checker = PlannerCheck(source, framework, check_profile, check_cell, sectors)
-        queue, ready, checks = list(ready), [], 0
-        while queue:
-            entry = queue.pop(0)
-            p, tilt = entry["p"], entry["tilt"]
-            works, cut = checker.check(p, items[entry["k"]][1], entry["hints"], clear_sets)
-            checks += 1
-            if works:
-                ready.append({**entry, "hints": works})
-                continue
-            if cut is None or entry.get("depth", 0) >= 4:
-                continue
-            if cut == "start":
-                parts = [(p[5:], tilt[5:])]
-            elif cut == "end":
-                parts = [(p[:-5], tilt[:-5])]
-            else:
-                parts = [
-                    (p[: max(0, cut - 2)], tilt[: max(0, cut - 2)]),
-                    (p[cut + 3 :], tilt[cut + 3 :]),
-                ]
-            for q, t in parts:
-                kept = supported(q, t) if len(q) >= 8 else None
-                if kept is not None and length(kept[0]) >= 0.010:
-                    queue.append(
-                        {**entry, "p": kept[0], "tilt": kept[1], "depth": entry.get("depth", 0) + 1}
-                    )
-        shutil.rmtree(check_cell, ignore_errors=True)
-        check_profile.unlink(missing_ok=True)
-        stages["arm can draw it"] = sum(length(e["p"]) for e in ready)
-        print(f"planner check: {checks} lines checked, {len(ready)} drawable")
+    # Keep what the arm can draw; cut a failing tour at the failing point,
+    # or trim the end it cannot reach, and check the pieces again.
+    # Scratch for the check, named for the object (its profile sits beside
+    # the cell profile, whose robot paths are relative to it); both go
+    # when the check is done.
+    scratch = f"{target.parent.name}_{target.name}_check"
+    check_profile = detail_profile(args.profile, args.profile.parent / f"{scratch}.yaml")
+    check_cell = target.parent / scratch
+    checker = PlannerCheck(source, framework, check_profile, check_cell, sectors)
+    queue, ready, checks = list(ready), [], 0
+    while queue:
+        entry = queue.pop(0)
+        p, tilt = entry["p"], entry["tilt"]
+        works, cut = checker.check(p, items[entry["k"]][1], entry["hints"], clear_sets)
+        checks += 1
+        if works:
+            ready.append({**entry, "hints": works})
+            continue
+        if cut is None or entry.get("depth", 0) >= 4:
+            continue
+        if cut == "start":
+            parts = [(p[5:], tilt[5:])]
+        elif cut == "end":
+            parts = [(p[:-5], tilt[:-5])]
+        else:
+            parts = [
+                (p[: max(0, cut - 2)], tilt[: max(0, cut - 2)]),
+                (p[cut + 3 :], tilt[cut + 3 :]),
+            ]
+        for q, t in parts:
+            kept = supported(q, t) if len(q) >= 8 else None
+            if kept is not None and length(kept[0]) >= 0.010:
+                queue.append(
+                    {**entry, "p": kept[0], "tilt": kept[1], "depth": entry.get("depth", 0) + 1}
+                )
+    shutil.rmtree(check_cell, ignore_errors=True)
+    check_profile.unlink(missing_ok=True)
+    stages["arm can draw it"] = sum(length(e["p"]) for e in ready)
+    print(f"planner check: {checks} lines checked, {len(ready)} drawable")
 
     lap("planner check")
     # The longest lines within budget are drawn; the rest stay as spares that
@@ -1026,17 +977,7 @@ def main():
     rows = [r for r in rows if r not in spares]
     if not rows:
         no_detail("the arm can draw none of the detail lines")
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(source, target)
-    for stale in ("style_selection.json", "style_attachments.json"):
-        (target / stale).unlink(missing_ok=True)
-    construction = tilt_hints(section_actions(graph, group_sources=True), graph)
-    write_json(target / "stroke_graph.json", graph)
-    write_json(target / "construction_plan.json", construction)
-    write_section_artifacts(target, graph, construction)
-    screen = analyze_structure(graph, read_json(source / "fabrication_config.json")["structure"])
-    write_json(target / "structural_screen.json", screen)
+    screen = write_detail_source(source, target, graph)
     detail = sum(r["length_m"] for r in rows)
     minutes = estimated_minutes(detail, len(rows))
     write_json(
@@ -1050,10 +991,6 @@ def main():
             "settings": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
         },
     )
-    run = read_json(target / "run.json")
-    run["id"] = target.name
-    run["name"] = f"{run.get('name', target.name).split(' + ')[0]} + detail tours (not planned)"
-    write_json(target / "run.json", run)
     tilts = np.concatenate([r["tilt_deg"] for r in rows])
     median = 1e3 * np.median([r["length_m"] for r in rows])
     counts = dict(zip(*[x.tolist() for x in np.unique(tilts, return_counts=True)], strict=True))
@@ -1069,6 +1006,17 @@ def main():
     print(f"{len(fused)} fused contacts, about {minutes:.1f} min more")
     print(f"tilt samples {counts}; {steady}/{len(rows)} strokes keep one tilt")
     print(f"structure pass {screen['modeled_pass']} sag {sag:.3f} mm {screen.get('failure', '')}")
+
+
+def write_detail_source(source, target, graph):
+    """``target``: a copy of the source run ``source`` with the stroke graph
+    ``graph``, its strokes and its structural screen, which is returned."""
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
+    construction = tilt_hints(section_actions(graph), graph)
+    material = read_json(source / "fabrication_config.json")["structure"]
+    return write_strokes(target, graph, construction, material)
 
 
 def tilt_hints(construction, graph):
