@@ -26,7 +26,9 @@ one command, the expected output for the ghost, and what to try changing.
    into horizontal loops joined by zigzags (a vertical riser, then a slant
    back down of at most 27 degrees), within the 10 m wire budget, with a
    base grid on the bed, coils for thin parts, and a structural check that
-   the frame stands.
+   the frame stands. It then makes the frame drawable in as few pen-down
+   trails as possible (see "Chaining and lift-offs") and reports that
+   minimum.
 2. **Add detail** (decided by the user to come before planning): generate
    surface strokes that rest on the frame wire, about 2 m. Generation only;
    no planning yet. Detail is drawn after the frame. Detail is purely
@@ -91,15 +93,36 @@ frame (41 strokes): 15 travels with the library, 44 without it (every
 stroke lifted off), 10.9 and 14.2 min. Removing the library must therefore
 come with chaining in the planner's own sampler.
 
+**Fewest trails (decided by the user).** The frame is a graph: wire pieces
+are edges, the points where they meet are nodes. By Euler's rule, the
+fewest pen-down trails that draw every piece once is half the number of
+nodes where an odd number of pieces meet. The ghost frame (1,421 pieces,
+1,091 nodes) has 18 such nodes: 16 where base grid lines end on the bed
+outline, plus the bottom start and top end of the walls. Its minimum is 9
+trails: the walls above the bed are already one trail, the base grid adds
+8. The frame step adds connector wire to make those nodes even: it pairs
+odd nodes by a minimum-weight perfect matching and adds one connector per
+pair, so the whole frame can be one trail from bottom to top. Connectors
+are new wire, never wire printed over existing wire: on the bed they run
+just inside the outline (about one wire width), and they count against the
+10 m budget. Above the bed a connector is added only if it is supported and
+passes the structural check; otherwise the node stays odd and is reported.
+The planner's order then follows that trail. Every planning stage reports
+actual lift-offs next to the minimum, for example "1 possible, 3 actual",
+each with its reason. The tutorial has a short concept section on drawing
+without lifting the pen.
+
 ## Goals
 
 - A learner on the target machine runs the whole tutorial from a fresh clone
   by following the README.
 - Changing the build volume or the pen and rerunning the steps works: the
   ghost at 8 cm also plans to `FULL_BUILD_VERIFIED`.
-- The ghost frame plans with at most as many lift-offs as it had with the
-  motion library (15 travels on 41 strokes), and fewer if the planner can.
-  The README shows the lift-off count for every plan.
+- The ghost frame's minimum is 1 trail after connectors are added (9
+  before). It plans with at most as many lift-offs as it had with the
+  motion library (15 travels on 41 strokes), and as close to the minimum
+  as the robot allows. The README shows lift-offs against the minimum for
+  every plan.
 - The repository holds only what the tutorial uses: single arm,
   geometry-first planning, two config files, one command per step, five
   tests.
@@ -238,16 +261,20 @@ library when one is present and otherwise falls back to its own sampler
    first for every stroke that starts where the previous one ended; report
    lift-offs with reasons. Check the ghost frame is `FULL_BUILD_VERIFIED`
    with at most 15 lift-offs.
-3. Remove the turntable, the platform and the riser; the object stands on a
+3. Fewest trails: add connector wire by minimum-weight matching of odd
+   nodes, order the frame along the resulting trail, and report the minimum
+   next to the actual lift-offs. Check the ghost's minimum is 1 and its
+   lift-offs fall below step 2's.
+4. Remove the turntable, the platform and the riser; the object stands on a
    plate on the table. Frame strokes stay upright; detail strokes lean the
    pen toward the side of the object they draw on, and the arm reaches
    around. A stroke that fails the path-accuracy check from the robot's side
    retries with a finer path or another posture (today the planner turned
    the turntable instead). Check the ghost frame and detail plan to
-   `FULL_BUILD_VERIFIED` with no more lift-offs than step 2.
-4. Merge the configs into `cell.yaml` and `frame.yaml`.
-5. One command per step, in the order cell, frame, detail, plan-geometry,
+   `FULL_BUILD_VERIFIED` with no more lift-offs than step 3.
+5. Merge the configs into `cell.yaml` and `frame.yaml`.
+6. One command per step, in the order cell, frame, detail, plan-geometry,
    plan-timing, verify-full-robot, view; detail generation only, with
    dropping in plan-geometry and trimming in plan-timing.
-6. Write the tutorial README with measured outputs.
-7. From a fresh clone: run the tutorial at 15 cm and at 8 cm.
+7. Write the tutorial README with measured outputs.
+8. From a fresh clone: run the tutorial at 15 cm and at 8 cm.

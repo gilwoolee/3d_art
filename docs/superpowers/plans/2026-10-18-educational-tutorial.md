@@ -24,7 +24,8 @@ FastAPI), TypeScript + three.js viewer built with Vite, pytest, ruff.
 - Single arm (Flexiv Rizon4, 7 joints); geometry-first planning only; no
   turntable; no motion library.
 - Chain strokes as much as possible; lift off only when chaining fails, and
-  report every lift-off with its reason.
+  report every lift-off with its reason next to the minimum number of
+  trails (Euler's rule after connector wire is added).
 - Frame wire at most 10 m per object; detail about 2 m and at most 15 extra
   minutes of print time.
 - One pen orientation (tilt and lean direction) per stroke: the pen never
@@ -50,22 +51,22 @@ FastAPI), TypeScript + three.js viewer built with Vite, pytest, ruff.
    1000× too large): `pen-art frame` takes `--up {y,z}` and scales the
    longest side to the build volume; a wrong `--up` gives a lying-down
    frame, which the README's step 1 tells the learner to check in the
-   viewer. Owned by Task 7 (acceptance step with `--up z`).
+   viewer. Owned by Task 8 (acceptance step with `--up z`).
 2. **Rerunning a stage over an existing run folder.** Today
    `frame_source.py` silently keeps stale work when `runs/geomfirst_NAME`
    exists. Every `pen-art` stage either rebuilds its own output folder from
    scratch or refuses with a message naming the folder; it never mixes old
-   and new results. Owned by Task 7.
+   and new results. Owned by Task 8.
 3. **Running stages out of order** (`plan-timing` before `plan-geometry`,
    `verify-full-robot` before `plan-timing`, `plan-geometry` after the
    frame changed): the stage stops with a message naming the stage to run
-   first. Owned by Task 7.
+   first. Owned by Task 8.
 4. **Detail with nothing drawable** (every detail stroke dropped, or no
    crease lines found): planning continues with the frame alone and reports
-   0 m of detail. Owned by Task 7.
+   0 m of detail. Owned by Task 8.
 5. **A smaller build volume (8 cm)**: frame, plan and verification work with
    the same `frame.yaml`; the plate position default still reaches. Owned by
-   Task 9.
+   Task 10.
 
 The 5-test limit means these are acceptance checks (commands with expected
 output) in their owning tasks, not new pytest tests.
@@ -112,7 +113,7 @@ for Tasks 2 and 3.
   delete the importing code.
 - Modify: `pyproject.toml` (remove the `pen-art` and `pen-art-serve` entry
   points, which point at deleted or replaced code, and the `learning`
-  extra; Task 7 adds the new `pen-art`).
+  extra; Task 8 adds the new `pen-art`).
 - Delete: `src/pen_art/planning/motion_library.py`, `motion_runtime.py`.
 - Create: `src/pen_art/planning/collision_context.py` holding what
   `cell_planner.py` imports from them (`collision_context_hash`, `digest`,
@@ -254,7 +255,84 @@ git add -A && git commit -m "Chain strokes in the planner's own sampler; report 
 
 ---
 
-### Task 3: Single-arm naming
+### Task 3: Fewest trails: connectors and Euler order
+
+**Files:**
+- Modify: `src/pen_art/abstraction/wireprint.py` (new `eulerize_frame`)
+- Modify: `src/pen_art/planning/section_build.py:172,296` (call it after
+  `connect_framework_islands`), `src/pen_art/planning/sections.py` (frame
+  strokes follow the trail)
+- Modify: `src/pen_art/planning/full_build_export.py` (report the minimum)
+- Test: `tests/test_wireprint_nozzle.py` (assertions added to the existing
+  test; the test count stays 5)
+
+**Interfaces:**
+- Produces: `eulerize_frame(graph: dict, budget_m: float, structure: dict) -> dict`
+  in `wireprint.py`. It pairs the odd-degree nodes by minimum-weight perfect
+  matching (`networkx.min_weight_matching`) and adds one connector edge per
+  pair, `role: "framework"`, `origin: "euler_connector"`. Weights: on the bed
+  (`z == 0`), the length of a path just inside the outline, offset by one
+  strand diameter, which is also the connector's shape; above the bed, the
+  straight distance, and the connector is kept only if
+  `analyze_structure` still passes. A connector never lies on existing
+  wire. It leaves the bottom start and top end odd, and stops adding when
+  the wire budget would be exceeded. It records
+  `graph["generation"]["eulerization"] = {"odd_nodes_before", "odd_nodes_after",
+  "minimum_trails_before", "minimum_trails_after", "added_m",
+  "left_odd": [{"node", "reason"}]}`.
+- Produces: the construction plan's frame strokes follow an Euler trail
+  (Hierholzer) of each band, built bottom to top so a member comes after
+  the members that support it; consecutive frame strokes share an end
+  node wherever the trail continues.
+- Produces: `minimum_trails` (from `eulerization`) next to `lift_offs` in
+  `section_build.json` and the exported plan.
+
+- [ ] **Step 1: Add assertions to the frame generator test**
+
+In `test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork`,
+after the existing cube checks:
+```python
+graph = eulerize_frame(graph, budget_m=10.0, structure=STRUCTURE)
+odd = [n for n, d in topology(graph).degree() if d % 2]
+assert len(odd) <= 2
+info = graph["generation"]["eulerization"]
+assert info["minimum_trails_after"] == 1
+assert 0 < info["added_m"] < 0.5
+assert not any(on_existing_wire(e, graph) for e in graph["edges"]
+               if e["origin"] == "euler_connector")
+```
+(`STRUCTURE` from `configs/fabrication.yaml`'s `structure`; `topology` and
+`on_existing_wire` are small helpers in the test file.)
+
+- [ ] **Step 2: Run it to make sure it fails**
+
+Run: `.venv/bin/pytest -q tests/test_wireprint_nozzle.py`
+Expected: FAIL (`eulerize_frame` not defined).
+
+- [ ] **Step 3: Implement `eulerize_frame`, the trail order and the report**
+
+- [ ] **Step 4: Tests pass**
+
+Run: `.venv/bin/pytest -q && .venv/bin/ruff check src tests scripts`
+Expected: `5 passed`.
+
+- [ ] **Step 5: Ghost frame end to end**
+
+Regenerate the ghost frame, then run Task 0 Step 2 with `TAG=t3`.
+Expected: `eulerization` shows 18 odd nodes before, at most 2 after,
+`minimum_trails_after` 1, added wire under 0.5 m, frame still within 10 m;
+plan `FULL_BUILD_VERIFIED` with fewer lift-offs than Task 2. Record the
+lift-offs and their reasons.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "Fewest trails: connector wire pairs odd nodes; frame order follows the Euler trail"
+```
+
+---
+
+### Task 4: Single-arm naming
 
 **Files:**
 - Modify: `cell.py`, `cell_planner.py`, `cell_replay.py`, `full_build_export.py`,
@@ -263,7 +341,7 @@ git add -A && git commit -m "Chain strokes in the planner's own sampler; report 
   `web/src/simple.ts`, `src/pen_art/server.py`, `tests/test_parallel_build.py`
 - Delete: `configs/dual_arm.yaml` (move `assumed_cooling_s` and
   `maximum_subdivision_depth` into `configs/fabrication.yaml` under a new
-  `planning:` key; Task 6 moves it into `frame.yaml`)
+  `planning:` key; Task 7 moves it into `frame.yaml`)
 
 **Interfaces:**
 - Produces: run artifacts `plan.json` (was `offline_dual_arm_plan.json`),
@@ -285,9 +363,9 @@ Expected: `5 passed`, lint clean, Vite `built in`.
 
 - [ ] **Step 3: Ghost frame end to end**
 
-Run Task 0 Step 2 with `TAG=t3`.
-Expected: `FULL_BUILD_VERIFIED`, `runs/geomfirst_t3_ghost_w24/plan.json`
-exists, lift-offs and print time equal to Task 2's.
+Run Task 0 Step 2 with `TAG=t4`.
+Expected: `FULL_BUILD_VERIFIED`, `runs/geomfirst_t4_ghost_w24/plan.json`
+exists, lift-offs and print time equal to Task 3's.
 
 - [ ] **Step 4: Commit**
 
@@ -297,7 +375,7 @@ git add -A && git commit -m "Single arm only: rename dual-arm artifacts and remo
 
 ---
 
-### Task 4: Fixed build plate instead of the turntable
+### Task 5: Fixed build plate instead of the turntable
 
 **Files:**
 - Delete: `src/pen_art/planning/turntable.py`
@@ -334,25 +412,25 @@ git add -A && git commit -m "Single arm only: rename dual-arm artifacts and remo
 
 - [ ] **Step 1: Remove the turntable and add the plate and lean direction as listed**
 
-- [ ] **Step 2: Tests, lint, viewer build** (as Task 3 Step 2)
+- [ ] **Step 2: Tests, lint, viewer build** (as Task 4 Step 2)
 
 Expected: `5 passed`. `test_parallel_replay_reports_the_serial_rejection`
 already runs with `turntable=None`.
 
 - [ ] **Step 3: Choose the default plate position by planning the ghost**
 
-Plan the ghost frame (Task 0 Step 2, `TAG=t4`) with the plate centre at the
+Plan the ghost frame (Task 0 Step 2, `TAG=t5`) with the plate centre at the
 old build position (0.45, −0.15 m from the robot base, on the table). If
 it is not `FULL_BUILD_VERIFIED`, move the plate toward the robot in 2 cm
 steps (at most 5 tries) and keep the first position that verifies; record
 the tries.
-Expected: `FULL_BUILD_VERIFIED`, lift-offs no more than Task 2's.
+Expected: `FULL_BUILD_VERIFIED`, lift-offs no more than Task 3's.
 
 - [ ] **Step 4: Ghost detail end to end**
 
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/detail_tours.py runs/geomfirst_ghost_source runs/geomfirst_ghost_detail_source --profile runs/geomfirst_profiles/ghost.yaml --check-with-planner
-PYTHONPATH=src .venv/bin/python scripts/plan_detail.py runs/geomfirst_ghost_detail_source runs/geomfirst_profiles/ghost.yaml runs/geomfirst_t4_ghost_detail --frame-run runs/geomfirst_t4_ghost_w24 --detail 2 --minutes 15
+PYTHONPATH=src .venv/bin/python scripts/plan_detail.py runs/geomfirst_ghost_detail_source runs/geomfirst_profiles/ghost.yaml runs/geomfirst_t5_ghost_detail --frame-run runs/geomfirst_t5_ghost_w24 --detail 2 --minutes 15
 ```
 Expected: final line `FULL_BUILD_VERIFIED`; record detail metres, added
 minutes and lift-offs.
@@ -365,7 +443,7 @@ git add -A && git commit -m "Fixed build plate instead of the turntable; detail 
 
 ---
 
-### Task 5: Two config files and `pen-art cell`
+### Task 6: Two config files and `pen-art cell`
 
 **Files:**
 - Create: `configs/cell.yaml`, `configs/frame.yaml`
@@ -385,7 +463,7 @@ git add -A && git commit -m "Fixed build plate instead of the turntable; detail 
   build_volume_m: 0.15          # longest side of the object
   plate:
     size_m: [0.256, 0.256]      # Bambu Lab X1/P1/A1 plate
-    center_from_robot_m: [x, y] # from Task 4 Step 3
+    center_from_robot_m: [x, y] # from Task 5 Step 3
   pen:
     flange_to_tip_m: 0.225
     body_radius_m: 0.012
@@ -397,13 +475,13 @@ git add -A && git commit -m "Fixed build plate instead of the turntable; detail 
 - `configs/frame.yaml`: today's `fabrication.yaml` (`wireprint`, `graph`,
   `structure`, `process`) plus `timing` (from
   `timing_continuous_bounded.yaml`), `transit` (from `transit.yaml`) and
-  `planning` (from Task 3).
+  `planning` (from Task 4).
 - `pen_art.cell_config.expand_cell(cell: dict, robot_dir: Path) -> dict`
   returns the full profile (today's `frame_template.yaml` structure without
   the turntable) with the pen bodies, collision model and initial joint
   positions as fixed defaults in code.
 - `pen_art.cell_config.load_frame_config(path=Path("configs/frame.yaml")) -> dict`.
-- `pen-art cell` (wired in Task 7; until then
+- `pen-art cell` (wired in Task 8; until then
   `python -m pen_art.cell_config`) fetches nothing itself, expands
   `cell.yaml` and writes `runs/cell/cell.yaml`, `robot.urdf`,
   `robot_manifest.json`, `robot_reference.glb`.
@@ -414,12 +492,12 @@ git add -A && git commit -m "Fixed build plate instead of the turntable; detail 
 - [ ] **Step 2: The expanded profile equals today's**
 
 Run: `python -m pen_art.cell_config` then compare `runs/cell/cell.yaml`
-with the Task 4 profile.
+with the Task 5 profile.
 Expected: identical except for key order and paths.
 
-- [ ] **Step 3: Tests, lint, ghost frame end to end** (as Task 3 Steps 2-3, `TAG=t5`)
+- [ ] **Step 3: Tests, lint, ghost frame end to end** (as Task 4 Steps 2-3, `TAG=t6`)
 
-Expected: same verdict, lift-offs and print time as Task 4.
+Expected: same verdict, lift-offs and print time as Task 5.
 
 - [ ] **Step 4: Commit**
 
@@ -429,7 +507,7 @@ git add -A && git commit -m "Two config files: cell.yaml and frame.yaml"
 
 ---
 
-### Task 6: Planning split into plan-geometry, plan-timing and verify-full-robot
+### Task 7: Planning split into plan-geometry, plan-timing and verify-full-robot
 
 **Files:**
 - Create: `src/pen_art/stages.py`
@@ -464,7 +542,7 @@ git add -A && git commit -m "Two config files: cell.yaml and frame.yaml"
 - [ ] **Step 2: Same result as one run**
 
 Run the three stages on the ghost frame (no detail).
-Expected: `plan.json` equals Task 5's plan except for file names and
+Expected: `plan.json` equals Task 6's plan except for file names and
 timestamps; `FULL_BUILD_VERIFIED`; same lift-offs.
 
 - [ ] **Step 3: Frame plus detail**
@@ -488,7 +566,7 @@ git add -A && git commit -m "Split planning into plan-geometry, plan-timing and 
 
 ---
 
-### Task 7: The `pen-art` CLI
+### Task 8: The `pen-art` CLI
 
 **Files:**
 - Create: `src/pen_art/cli.py`
@@ -522,7 +600,7 @@ A stage whose output folder exists rebuilds it from scratch
 pen-art cell && pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost --up y
 pen-art detail ghost && pen-art plan-geometry ghost && pen-art plan-timing ghost && pen-art verify-full-robot ghost
 ```
-Expected: `FULL_BUILD_VERIFIED`; numbers match Task 6 Step 3.
+Expected: `FULL_BUILD_VERIFIED`; numbers match Task 7 Step 3.
 
 - [ ] **Step 3: Review Focus checks**
 
@@ -541,7 +619,7 @@ git add -A && git commit -m "pen-art CLI: one command per tutorial step"
 
 ---
 
-### Task 8: Viewer for the tutorial only
+### Task 9: Viewer for the tutorial only
 
 **Files:**
 - Delete: `web/src/main.ts`, `web/src/motion-reuse.ts`, the workbench page
@@ -571,7 +649,7 @@ git add -A && git commit -m "Viewer: tutorial page only, fixed plate, lift-off c
 
 ---
 
-### Task 9: Tutorial README and fresh-clone runs
+### Task 10: Tutorial README and fresh-clone runs
 
 **Files:**
 - Modify: `README.md` (rewrite), `AGENTS.md`, `tests/README.md`,
