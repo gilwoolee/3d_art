@@ -109,8 +109,11 @@ just inside the outline (about one wire width), and they count against the
 passes the structural check; otherwise the node stays odd and is reported.
 The planner's order then follows that trail. Every planning stage reports
 actual lift-offs next to the minimum, for example "1 possible, 3 actual",
-each with its reason. The tutorial has a short concept section on drawing
-without lifting the pen.
+each with its reason. The tutorial has a short concept section, "Drawing the frame in one
+stroke (an Euler trail)" (한붓그리기), that explains Euler's rule and
+Hierholzer's algorithm and links to the Seven Bridges of Königsberg
+(https://en.wikipedia.org/wiki/Seven_Bridges_of_K%C3%B6nigsberg), the
+puzzle Euler solved in 1736 (decided by the user).
 
 ## Goals
 
