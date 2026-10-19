@@ -10,7 +10,7 @@ has replayed with the whole robot: about ten minutes on a 24-core machine.
 Everything is simulation. Nothing has been printed, and the pen, the wire and
 the arm's limits are assumptions, not measurements.
 
-## The idea in one paragraph
+## What it does
 
 A 3D pen pushes out hot plastic that hardens in a second, so a robot holding
 one can draw a wire frame in mid-air, layer on layer: loops around the object
