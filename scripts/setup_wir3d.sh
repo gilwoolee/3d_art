@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Isolated RTX 5090 environment. Run from ~/Workspace/3d_art on Blondie.
+# Isolated RTX 5090 environment for WIR3D. Run from the repository root.
 set -euo pipefail
 task_root=$(pwd)
 task_python="$task_root/.venv-wir3d/bin/python"

@@ -1,6 +1,6 @@
 # Fast planning and verification: what the current version does, and what limits it
 
-Recorded 2026-10-13 on branch `geometry-first-planning`. Measured on Blondie
+Recorded 2026-10-13 on branch `geometry-first-planning`. Measured on one machine
 (24 cores without hyper-threading, 62 GB RAM, RTX 5090 unused). Everything is
 simulation only. History and earlier tables are in the
 [geometry-first planning plan](2026_1012_geometry_first_planning_plan.md).

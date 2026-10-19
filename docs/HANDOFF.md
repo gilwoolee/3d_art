@@ -22,9 +22,10 @@ over the surface, drawn after the frame.
 ## Moving to a new machine
 
 Git carries the code, docs, configs, the four meshes in `objs/` (Git LFS) and
-one cell profile template. Planned runs are not in git: the `runs/` folder here
-is 108 GB. A 2.3 GB archive holds the runs worth keeping and the motion
-library.
+one cell profile template. Planned runs are not in git. Two files on the
+[v1.0 release](https://github.com/gilwoolee/3d_art/releases/tag/v1.0) (970 MB,
+made with `scripts/pack_runs.sh`) hold the final runs, the motion library and
+the cell profiles.
 
 1. **Clone:**
 
@@ -45,20 +46,26 @@ library.
    the viewer. The cell's URDF names this machine's absolute mesh paths, so it
    is generated on each machine and never copied.
 
-3. **Copy and unpack the runs archive.** On the old machine it is
-   `/home/gilwoo/Workspace/3d_art_runs.tar.zst`; remake it with
-   `scripts/pack_runs.sh`. Unpack it in the clone's root:
+3. **Download and unpack the runs** from the
+   [v1.0 release](https://github.com/gilwoolee/3d_art/releases/tag/v1.0), in
+   the clone's root:
 
    ```bash
-   tar --zstd -xf 3d_art_runs.tar.zst
+   base=https://github.com/gilwoolee/3d_art/releases/download/v1.0
+   curl -LO $base/pen_art_final_runs.tar.zst
+   curl -LO $base/pen_art_motion_library.tar.zst
+   tar --zstd -xf pen_art_final_runs.tar.zst
+   tar --zstd -xf pen_art_motion_library.tar.zst
    ```
 
-   It holds:
-   - `runs/viewer_runs.json` and all profiles (`runs/geomfirst_profiles/`);
-   - the frame and detail sources behind the results below;
-   - the verified frame and detail runs, and the detail reports;
-   - the motion library `runs/motion_library_phase1_upright27_v1`, without its
-     `attempts/` folder.
+   - `pen_art_final_runs.tar.zst`: the four detail runs and the new Palace
+     frame (the Results table in the README), and `runs/viewer_runs.json`.
+   - `pen_art_motion_library.tar.zst`: the motion library
+     `runs/motion_library_phase1_upright27_v1`, without its `attempts/`
+     folder, and all profiles (`runs/geomfirst_profiles/`).
+
+   The frame-only runs and the frame and detail sources named below are not in
+   the release. Regenerate a source from `objs/` (see **Running**).
 
    **The library matters.** Frame strokes are drawings adapted from library
    records. Without it they fall back to the planner's cold sampler. On the
@@ -67,7 +74,7 @@ library.
    fresh clone at another path, all 38 ghost strokes came from it, with the same
    10.08 min. Detail strokes, which name their own tilts, never use it.
 
-   Without the archive you can still regenerate every frame from `objs/` (see
+   Without the release files you can still regenerate every frame from `objs/` (see
    **Running**), but the planned results are lost and frames plan slower.
 
 4. **Check:**
@@ -78,21 +85,30 @@ library.
    env -u DISPLAY tools/node/bin/node --test web/tests/*.test.mjs   # 4 pass
    ```
 
-   Then plan one frame to check the planner end to end (half a minute):
-   `TAG=gf102 scripts/plan_frame.sh ghost runs/geomfirst_ghost_b10_source runs/geomfirst_profiles/ghost_b10.yaml`.
-   - `runs/geomfirst_gf102_progress.txt` should end in `FULL_BUILD_VERIFIED`.
-   - `runs/geomfirst_gf102_ghost_w24/parallel_build.json` should show
-     `"selected": {"cache": 38, ...}`.
+   Then plan one frame from `objs/` to check the planner end to end (about
+   2 minutes):
+
+   ```bash
+   .venv/bin/python scripts/frame_source.py ghost objs/cute_ghost/cute_ghost.glb --up y
+   TAG=gf1 scripts/plan_frame.sh ghost runs/geomfirst_ghost_source runs/geomfirst_profiles/ghost.yaml
+   ```
+
+   - `runs/geomfirst_gf1_progress.txt` should end in `FULL_BUILD_VERIFIED`.
+   - `runs/geomfirst_gf1_ghost_w24/parallel_build.json` should show
+     `"selected": {"cache": 41, ...}`: every stroke from the library.
    - The seed count in `motion_reuse.json` reads 0 even when every stroke
      came from the library. Read `selected` instead.
 
-These steps were tested on 2026-10-14 in a fresh clone from GitHub at another
-path on the old machine:
+These steps were tested on 2026-10-18 in a fresh clone from GitHub with the
+release files:
 - setup completed;
 - 25 Python and 4 browser tests passed;
-- the ghost frame planned and verified at 10.08 min;
-- the Palace frame regenerated from `objs/` matched `geomfirst_palace2_source`
-  node for node.
+- the five released runs opened and played in the viewer;
+- the ghost frame planned and verified in 79 s, all 41 strokes from the
+  library.
+
+If your shell sets `PYTHONPATH` (for example ROS), unset it first: pytest
+otherwise loads ROS's plugins and fails.
 
 **Left behind on purpose:**
 - **The library's `attempts/` folder** (2 GB). It records past misses for
@@ -101,7 +117,7 @@ path on the old machine:
   cube, bottle and Palace searches from before geometry-first.
 - **The WIR3D GPU environment and its checkouts:** `.venv-wir3d`, and under
   `external/` CLIP, diffvg, nvdiffrast, pytorch3d and wir3d. Also cuRobo and
-  Blender. The current work uses none of them. `scripts/setup_wir3d_blondie.sh`
+  Blender. The current work uses none of them. `scripts/setup_wir3d.sh`
   rebuilds the WIR3D environment for an RTX 5090.
 
 **Machine habits that matter:**
@@ -114,7 +130,7 @@ path on the old machine:
   with X forwarding, or WebGL fails.
 - **The viewer** runs as
   `.venv/bin/python -m pen_art.server --root "$PWD" --port 8765`, in a tmux
-  session (`pen-art-viewer` on the old machine). Ctrl-C ends that session.
+  session. Ctrl-C ends that session.
   From a laptop:
   `ssh -N -L 127.0.0.1:8766:127.0.0.1:8765 <host>`, then open
   <http://127.0.0.1:8766>. The run list is `runs/viewer_runs.json`.
