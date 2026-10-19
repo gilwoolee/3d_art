@@ -41,6 +41,10 @@ one command, the expected output for the ghost, and what to try changing.
    collision-free arm path, checked against the cell and all wire laid so
    far. No timing yet. A detail stroke that cannot be drawn is dropped and
    reported; a frame stroke that cannot be drawn stops the plan and is named.
+   Wherever a stroke starts where the previous one ended, the planner first
+   tries to **chain** it: carry on drawing from the previous stroke's final
+   pose with the pen down. It lifts off only when chaining fails, and reports
+   every lift-off with its reason.
 4. **Time it once:** speeds, cooling holds, moves between strokes. This gives
    the print time. Detail is then trimmed to the budget: at most about 2 m
    and 15 minutes beyond the frame's own share of the timed plan, dropping
@@ -48,7 +52,8 @@ one command, the expected output for the ghost, and what to try changing.
    timed again. A timing failure is reported, never searched again.
 5. **Verify:** a separate check replays the full robot against everything
    built so far, once for the whole build. A plan that passes is
-   `FULL_BUILD_VERIFIED`.
+   `FULL_BUILD_VERIFIED`. Each stage reports the number of lift-offs next to
+   the print time.
 6. **View** the result in the browser viewer.
 
 Steps 3, 4 and 5 are three separate commands, `plan-geometry`,
@@ -70,12 +75,31 @@ The ghost (`objs/cute_ghost/`) is the worked example in every step. A short
 "Concepts" section explains frame, stroke, pen orientation, geometry-first
 planning, timing and verification in plain words.
 
+## Chaining and lift-offs (decided by the user)
+
+Strokes are chained as much as possible, and lift-offs are minimized. A
+lift-off means stopping the feed, withdrawing, travelling and approaching
+again to rejoin the wire. The arm runs open loop, so there is no way to be
+sure the pen comes back to the same pose; and every rejoin is a joint where
+new wire must fuse onto wire that may have sagged. Chaining keeps the wire
+continuous and avoids both.
+
+Today the frame generator already orders strokes so that each starts where
+the previous one ended, but the planner only chains when it takes a stroke
+from the motion library; its own sampler never chains. Measured on the ghost
+frame (41 strokes): 15 travels with the library, 44 without it (every
+stroke lifted off), 10.9 and 14.2 min. Removing the library must therefore
+come with chaining in the planner's own sampler.
+
 ## Goals
 
 - A learner on the target machine runs the whole tutorial from a fresh clone
   by following the README.
 - Changing the build volume or the pen and rerunning the steps works: the
   ghost at 8 cm also plans to `FULL_BUILD_VERIFIED`.
+- The ghost frame plans with at most as many lift-offs as it had with the
+  motion library (15 travels on 41 strokes), and fewer if the planner can.
+  The README shows the lift-off count for every plan.
 - The repository holds only what the tutorial uses: single arm,
   geometry-first planning, two config files, one command per step, five
   tests.
@@ -209,17 +233,21 @@ library when one is present and otherwise falls back to its own sampler
 1. Single arm and geometry first only: remove two-arm code, the motion
    library, other planning modes and unused code; keep the 5 tests green;
    check the ghost still plans to `FULL_BUILD_VERIFIED` (about 14.2 min with
-   today's turntable).
-2. Remove the turntable, the platform and the riser; the object stands on a
+   today's turntable, every stroke lifting off).
+2. Chaining in the planner's own sampler: try the chained continuation
+   first for every stroke that starts where the previous one ended; report
+   lift-offs with reasons. Check the ghost frame is `FULL_BUILD_VERIFIED`
+   with at most 15 lift-offs.
+3. Remove the turntable, the platform and the riser; the object stands on a
    plate on the table. Frame strokes stay upright; detail strokes lean the
    pen toward the side of the object they draw on, and the arm reaches
    around. A stroke that fails the path-accuracy check from the robot's side
    retries with a finer path or another posture (today the planner turned
    the turntable instead). Check the ghost frame and detail plan to
-   `FULL_BUILD_VERIFIED`.
-3. Merge the configs into `cell.yaml` and `frame.yaml`.
-4. One command per step, in the order cell, frame, detail, plan-geometry,
+   `FULL_BUILD_VERIFIED` with no more lift-offs than step 2.
+4. Merge the configs into `cell.yaml` and `frame.yaml`.
+5. One command per step, in the order cell, frame, detail, plan-geometry,
    plan-timing, verify-full-robot, view; detail generation only, with
    dropping in plan-geometry and trimming in plan-timing.
-5. Write the tutorial README with measured outputs.
-6. From a fresh clone: run the tutorial at 15 cm and at 8 cm.
+6. Write the tutorial README with measured outputs.
+7. From a fresh clone: run the tutorial at 15 cm and at 8 cm.
