@@ -94,7 +94,7 @@ def group_faces(source, target):
 
 
 def planned_seconds(run):
-    plan = read_json(run / "offline_dual_arm_plan.json")
+    plan = read_json(run / "plan.json")
     per_action = {
         a.get("stroke_id", a.get("id")): sum(
             e["end_s"] - e["start_s"] for e in a["trajectory"]["edges"]
@@ -155,7 +155,7 @@ def main():
             blocked = [
                 row["action"] for row in read_json(run / "parallel_build.json").get("blocked", [])
             ]
-        validation = run / "offline_dual_arm_validation.json"
+        validation = run / "verification.json"
         if not blocked and validation.exists() and status == "FULL_BUILD_REPLAY_REJECTED":
             # Planning checks the pen; the final replay checks the whole robot.
             failures = read_json(validation).get("failures", [])
@@ -172,7 +172,7 @@ def main():
             if not all(plan[a].get("stage") == "artistic" for a in blocked if a in plan):
                 row["note"] = "a frame stroke is blocked"
                 break
-        elif (run / "offline_dual_arm_plan.json").exists():
+        elif (run / "plan.json").exists():
             total, per_action = planned_seconds(run)
             tours = {}
             for action in plan.values():

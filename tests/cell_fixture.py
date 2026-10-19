@@ -11,8 +11,8 @@ import numpy as np
 from pen_art.planning.cell_planner import CellPlanner
 from pen_art.planning.clock_path import ClockEdge, ClockPath
 from pen_art.planning.collision import RobotCollisionModel, placed
-from pen_art.planning.dual_arm import MotionProposal, ScheduledMotion, ScheduleState
 from pen_art.planning.path_certificates import PathCertificateStore
+from pen_art.planning.schedule import MotionProposal, ScheduledMotion, ScheduleState
 from pen_art.robot import SerialArm
 
 

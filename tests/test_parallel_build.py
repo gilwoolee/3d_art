@@ -143,7 +143,7 @@ def replay_fixture(tmp_path, monkeypatch, tcp_radius):
         },
     )
     write_json(
-        tmp_path / "dual_arm_plan.json",
+        tmp_path / "plan.json",
         {
             "inputs": {},
             "settings_artifact": "settings.json",
@@ -169,7 +169,7 @@ def replay_fixture(tmp_path, monkeypatch, tcp_radius):
         },
     )
     write_json(tmp_path / "run.json", {"stages": {}})
-    plan_file = tmp_path / "dual_arm_plan.json"
+    plan_file = tmp_path / "plan.json"
     saved = replay.read_json(plan_file)
     saved["requires_final_verification"] = True
     write_json(plan_file, saved)

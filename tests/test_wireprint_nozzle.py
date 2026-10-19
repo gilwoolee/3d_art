@@ -174,9 +174,8 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     actions = section_actions(graph)["actions"]
     bed = [row for row in actions if row["parent_curve"] == "base-trail"]
     assert len(bed) == 1 and bed[0]["closed"]
-    assert any(
-        row["start"] == bed[0]["end"] for row in actions if row["parent_curve"].startswith("zigzag-")
-    )
+    walls = [row for row in actions if row["parent_curve"].startswith("zigzag-")]
+    assert any(row["start"] == bed[0]["end"] for row in walls)
     # The bed trail passes base-grid crossings twice; every corner is still
     # found in drawing order, not at a later pass through the same point,
     # even when the robot reaches each point only to within microns.

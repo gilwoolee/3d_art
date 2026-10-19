@@ -26,9 +26,9 @@ import numpy as np
 
 from ..curves import flatten_curve, transform_points
 from ..io import read_json, write_json
-from .dual_arm import MotionProposal, ScheduledMotion
 from .replay_checkpoint import IMPLEMENTATION, digest
 from .scene import MaterialScene
+from .schedule import MotionProposal, ScheduledMotion
 from .turntable import index_angle
 
 POLICY = "parallel-forward-v1"

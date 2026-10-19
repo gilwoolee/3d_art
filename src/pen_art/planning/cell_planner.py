@@ -4,13 +4,11 @@ All output is simulation-only. Missing pen geometry/flow calibration and materia
 strength remain explicit; geometric acceptance is not fabrication acceptance.
 """
 
-import argparse
 import hashlib
 import json
 from collections import Counter
 from copy import copy
 from dataclasses import replace
-from itertools import permutations
 from pathlib import Path
 from time import monotonic, perf_counter
 
@@ -20,7 +18,7 @@ import yaml
 
 from ..cell import load_cell
 from ..curves import transform_points
-from ..io import artifact, read_json, sha256, stage_update, write_json
+from ..io import read_json, sha256, write_json
 from ..kinematics import inverse_candidates
 from ..strokes import orient_stroke
 from ..timing import (
@@ -37,17 +35,9 @@ from .axis_repair import (
     repair_collision_witness,
     repair_drawing_axes,
 )
-from .cell_motion import drawing_alternatives, radial_pen_rotations
+from .cell_motion import radial_pen_rotations
 from .clock_path import timed_path
 from .collision import QUERY_STATS, Body, RobotCollisionModel, placed
-from .coordinated_motion import check_pair_linear, check_pair_paths
-from .dual_arm import (
-    MotionProposal,
-    ScheduledMotion,
-    ScheduleState,
-    search_schedule,
-    tasks_from_construction,
-)
 from .geometric_path import geometric_path
 from .pen_spheres import PenSpheres, wire_arrays
 from .process_clock import (
@@ -57,7 +47,10 @@ from .process_clock import (
     source_vertex_schedule,
 )
 from .rrt import connect
-from .scene import MaterialScene
+from .schedule import (
+    MotionProposal,
+    tasks_from_construction,
+)
 from .smooth_audit import CubicPiece, bounded_segments, check_tracking
 from .tool import sampled_pen_tilt
 from .tracking import tracking_bounds
@@ -636,20 +629,6 @@ class CellPlanner:
 
         identities = list(self.arms)
         for candidate in product(*(choices[identity] for identity in identities)):
-            if len(identities) == 2:
-                first, second = identities
-                check = check_pair_linear(
-                    self.tip_models[first],
-                    self.tip_models[second],
-                    candidate[0],
-                    candidate[0],
-                    candidate[1],
-                    candidate[1],
-                    margin_m=self.margin,
-                    deadline=self.deadline,
-                )
-                if check["status"] != "CERTIFIED_INTER_ARM_INTERVAL":
-                    continue
             for identity, q in zip(identities, candidate, strict=True):
                 self.arms[identity].initial_positions = q
             return {
@@ -848,66 +827,6 @@ class CellPlanner:
         else:
             self.add_piece(scene, identity, edge.piece(start, end), edge.radius_m, name)
 
-    def prepare(self, state, task, identity):
-        if identity not in self.enabled_arms or monotonic() >= self.deadline:
-            return []
-        arm = self.collision_arm(identity)
-        q_start = np.array(dict(state.configurations)[identity])
-        available = task.anchors & state.ready_nodes()
-        drawings = [
-            row
-            for row in self.drawings.get((identity, task.identity), [])
-            if row["start_anchor"] in available
-        ]
-        # Reversal exposes the other endpoint without imposing serial ownership.
-        for row in self.drawings.get((identity, task.identity), []):
-            if row["end_anchor"] in available and row["start_anchor"] != row["end_anchor"]:
-                drawings.append(
-                    {
-                        **row,
-                        "variant": row["variant"] + "-reversed",
-                        "start_anchor": row["end_anchor"],
-                        "end_anchor": row["start_anchor"],
-                        "positions": row["positions"][::-1],
-                        "tcp_targets_m": row["tcp_targets_m"][::-1],
-                    }
-                )
-        if not drawings:
-            for row in drawing_alternatives(
-                arm,
-                self.actions[task.identity],
-                available,
-                np.asarray(self.profile["world_from_build"]),
-                self.obstacles,
-                deadline=self.deadline,
-                seeds=[q_start],
-                clearance_m=self.margin,
-            ):
-                if row["status"] == "SAMPLED_DRAWING_PATH":
-                    drawings.append(row)
-                    self.drawings.setdefault((identity, task.identity), []).append(row)
-                if len(drawings) >= self.settings["alternatives_per_dispatch"]:
-                    break
-        proposals = []
-        for drawing in drawings[: self.settings["alternatives_per_dispatch"]]:
-            if monotonic() >= self.deadline:
-                break
-            key = (
-                identity,
-                task.identity,
-                drawing["variant"],
-                tuple(q_start),
-                self.material_key(state.payload),
-            )
-            if key in self.cache:
-                if self.cache[key] is not None:
-                    proposals.append(self.cache[key])
-                continue
-            proposal = self.prepare_drawing(state, identity, drawing, q_start)
-            self.cache[key] = proposal
-            if proposal is not None:
-                proposals.append(proposal)
-        return proposals
 
     def prepare_idle(self, state, identity):
         """Allow a finished arm to vacate the shared volume while its peer draws."""
@@ -2032,21 +1951,6 @@ class CellPlanner:
                     )
                     if check["status"] != "CERTIFIED_MODELED_EDGE":
                         return None, {"arm": identity, "time_s": a, **check}
-            if len(self.arms) == 2:
-                left, right = self.arms
-                check = check_pair_paths(
-                    self.collision_tip_model(left),
-                    self.collision_tip_model(right),
-                    paths[left][1],
-                    paths[right][1],
-                    paths[left][2],
-                    paths[right][2],
-                    margin_m=self.margin,
-                    maximum_depth=self.settings["maximum_subdivision_depth"],
-                    deadline=self.deadline,
-                )
-                if check["status"] != "CERTIFIED_INTER_ARM_INTERVAL":
-                    return None, {"phase": "INTER_ARM", "time_s": a, **check}
             self.checked_intervals += 1
         if store is not None and not getattr(self, "verification_raw", False):
             for identity, motion in motions.items():
@@ -2074,323 +1978,3 @@ class CellPlanner:
                             },
                         )
         return scene, None
-
-    def finish(self, state):
-        # Try either return order. Each return is checked against the other
-        # stationary arm and the complete material, on the same clock.
-        for order in permutations(self.arms):
-            current, failed = state, False
-            for identity in order:
-                arm = self.arms[identity]
-                result = self.travel(
-                    identity,
-                    current.payload,
-                    np.array(dict(current.configurations)[identity]),
-                    arm.initial_positions,
-                )
-                if result["status"] != "CONNECTED":
-                    failed = True
-                    break
-                if len(result["positions"]) < 2 or np.allclose(
-                    result["positions"], result["positions"][0], atol=1e-12, rtol=0
-                ):
-                    continue
-                path = timed_path(
-                    [{"kind": "RETURN", "positions": result["positions"]}],
-                    arm,
-                    arm.robot.velocity * self.timing["velocity_fraction"],
-                    np.array(self.timing["joint_acceleration_rad_s2"]),
-                    self.process["nominal_speed_m_s"],
-                    self.timing["travel_speed_m_s"],
-                )
-                proposal = MotionProposal(
-                    f"return-{identity}",
-                    identity,
-                    "return",
-                    path.duration_s,
-                    "parking",
-                    tuple(arm.initial_positions),
-                    path,
-                )
-                move = ScheduledMotion(proposal, current.time_s)
-                scene, failure = self.validate_interval(current, (move,), move.end_s)
-                if failure:
-                    failed = True
-                    break
-                q = dict(current.configurations)
-                q[identity] = tuple(arm.initial_positions)
-                current = replace(
-                    current,
-                    time_s=move.end_s,
-                    configurations=tuple(q.items()),
-                    payload=scene,
-                    history=current.history + (move,),
-                )
-            if not failed:
-                return current, None
-        return None, {"status": "NO_RETURN_ORDER_FOUND"}
-
-
-def _plan_cell(
-    run,
-    profile_path,
-    settings_path,
-    maximum_seconds=300,
-    output_name="dual_arm_plan",
-    enabled_arms=None,
-    resume_from=None,
-):
-    run = Path(run)
-    settings = yaml.safe_load(Path(settings_path).read_text())
-    if enabled_arms is not None:
-        settings["enabled_arms"] = enabled_arms
-    if not output_name.replace("_", "").isalnum():
-        raise ValueError("Output name must contain only letters, digits and underscores")
-    config_name = output_name.removesuffix("_plan") + "_config.json"
-    if settings.get("clock") != "quintic_stop_at_geometric_knots" or not settings.get(
-        "simulation_only"
-    ):
-        raise ValueError("Unsupported cell planning configuration")
-    deadline = monotonic() + maximum_seconds
-    planner = CellPlanner(run, profile_path, settings, deadline)
-    resume_state, seed_name = None, None
-    if resume_from:
-        if resume_from == output_name or not resume_from.replace("_", "").isalnum():
-            raise ValueError("Resume into a different named output")
-        from .cell_replay import _replay_cell
-
-        seed_name = f"{output_name}_seed.json"
-        seed = read_json(run / f"{resume_from}.json")
-        seed_config = read_json(run / seed["settings_artifact"])
-        for field, current in (
-            ("process", planner.process),
-            ("timing", planner.timing),
-            ("transit", planner.transit),
-        ):
-            if seed_config[field] != current:
-                raise ValueError(f"Cannot resume across changed {field} assumptions")
-        if seed.get("enabled_arms") != planner.enabled_arms:
-            raise ValueError("Cannot change enabled arms while resuming")
-        write_json(run / seed_name, seed)
-        audit, resume_state = _replay_cell(
-            run,
-            profile_path,
-            min(120, max(1, deadline - monotonic())),
-            seed_name.removesuffix(".json"),
-            return_state=True,
-            verification_raw=False,
-        )
-        if audit["status"] not in ("CERTIFIED_PREFIX_REPLAY", "CERTIFIED_GEOMETRIC_REPLAY"):
-            raise ValueError(f"Resume replay rejected: {audit['status']}")
-        for identity, arm in planner.arms.items():
-            if not np.allclose(seed["initial_positions"][identity], arm.initial_positions):
-                raise ValueError("Staged poses changed; replan from the beginning")
-    write_json(
-        run / config_name,
-        {
-            "search": settings,
-            "transit": planner.transit,
-            "timing": planner.timing,
-            "process": planner.process,
-        },
-    )
-    output = artifact(
-        "dual_arm_plan",
-        status="RUNNING",
-        executable=False,
-        simulation_only=True,
-        frame="world",
-        units="m",
-        angle_units="rad",
-        time_units="s",
-        inputs={
-            name: sha256(run / name)
-            for name in (
-                "cell_manifest.json",
-                "cell_drawing_variants.json",
-                "construction_plan.json",
-                "stroke_graph.json",
-                config_name,
-            )
-        },
-        actions=[],
-        events=[],
-        completed_strokes=0,
-        requested_strokes=len(planner.tasks),
-        modeled_duration_s=0,
-        checked_intervals=0,
-        failures=[],
-        assumptions=settings,
-        settings_artifact=config_name,
-        enabled_arms=planner.enabled_arms,
-        resumed_from=resume_from,
-        initial_positions={
-            identity: arm.initial_positions.tolist() for identity, arm in planner.arms.items()
-        },
-        initial_pose_repairs=planner.initial_pose_repairs,
-        limitations=[
-            "Provisional base placement and tool transforms; unmeasured pen/mount geometry",
-            "C2 quintic clocks stop at geometric waypoints; pen flow through stops is uncalibrated",
-            "Drawing tip contact, hot-material stability and physical tracking are not certified",
-            "Startup/shutdown durations are unknown; cooling and pen response are assumptions",
-            "Bounded beam search does not establish optimality or global infeasibility",
-        ],
-    )
-    if seed_name:
-        output["inputs"][seed_name] = sha256(run / seed_name)
-
-    def save(state, explored):
-        output.update(
-            completed_strokes=len(state.completed),
-            modeled_duration_s=state.time_s,
-            checked_intervals=planner.checked_intervals,
-            explored_states=explored,
-            material_segments=len(state.payload.segments),
-            actions=[
-                {
-                    "arm": move.proposal.arm,
-                    "stroke_id": move.proposal.task,
-                    "variant": move.proposal.variant,
-                    "start_s": move.start_s,
-                    "end_s": move.end_s,
-                    "start_anchor": move.proposal.start_anchor,
-                    "auxiliary": move.proposal.auxiliary,
-                    "trajectory": move.proposal.payload.record(),
-                }
-                for move in state.history
-            ],
-            failures=planner.attempts,
-            events=sorted(
-                [
-                    {
-                        "time_s": move.start_s + edge.start_s,
-                        "arm": move.proposal.arm,
-                        "stroke_id": move.proposal.task,
-                        "command": "FEED_ON" if edge.kind == "PEN_START_WAIT" else "FEED_OFF",
-                    }
-                    for move in state.history
-                    for edge in move.proposal.payload.edges
-                    if edge.kind in ("PEN_START_WAIT", "PEN_STOP_WAIT")
-                    and move.start_s + edge.start_s <= state.time_s
-                ],
-                key=lambda event: (event["time_s"], event["arm"]),
-            ),
-        )
-        write_json(run / f"{output_name}.json", output)
-        if output_name.startswith("dual_arm"):
-            stage_update(
-                run,
-                "cell",
-                "partial",
-                artifact=f"{output_name}.json",
-                message=f"{len(state.completed)}/{len(planner.tasks)} strokes scheduled; "
-                "joint motion search",
-            )
-        print(
-            f"Scheduled {len(state.completed)}/{len(planner.tasks)}; {state.time_s:.1f}s",
-            flush=True,
-        )
-
-    def estimate(state):
-        active = {m.proposal.task for m in state.active}
-        work = sum(
-            planner.actions[t.identity]["length_m"] * 1.875 / planner.process["nominal_speed_m_s"]
-            for t in planner.tasks
-            if t.identity not in state.completed and t.identity not in active
-        )
-        work += sum(m.end_s - state.time_s for m in state.active)
-        return work / len(planner.enabled_arms)
-
-    initial = {identity: tuple(arm.initial_positions) for identity, arm in planner.arms.items()}
-    root = ScheduleState(
-        0,
-        tuple(initial.items()),
-        frozenset(),
-        tuple((node, 0) for node in planner.ground),
-        payload=MaterialScene(),
-    )
-    if resume_state is not None:
-        root = resume_state
-    save(root, 0)
-    result = search_schedule(
-        planner.tasks,
-        initial,
-        planner.ground,
-        planner.prepare,
-        planner.validate_interval,
-        finish=planner.finish,
-        initial_payload=MaterialScene(),
-        start_offsets_s=settings["start_offsets_s"],
-        maximum_states=settings["maximum_states"],
-        beam_width=settings["beam_width"],
-        maximum_dispatch_batches=settings.get("maximum_dispatch_batches"),
-        maximum_successors_per_state=settings.get("maximum_successors_per_state"),
-        completion_first=settings.get("completion_first", False),
-        deadline=deadline,
-        estimate_remaining=estimate,
-        observe=save,
-        prepare_idle=planner.prepare_idle,
-        initial_state=resume_state,
-    )
-    output["status"] = (
-        "COORDINATED_GEOMETRIC_PREVIEW" if result["status"] == "FOUND" else result["termination"]
-    )
-    output["search"] = {
-        key: value for key, value in result.items() if key not in ("state", "failures")
-    }
-    output["search_failures"] = result["failures"]
-    save(result["state"], result["explored_states"])
-    return output
-
-
-def plan_cell(
-    run,
-    profile_path,
-    settings_path,
-    maximum_seconds=300,
-    output_name="dual_arm_plan",
-    enabled_arms=None,
-    resume_from=None,
-):
-    try:
-        return _plan_cell(
-            run,
-            profile_path,
-            settings_path,
-            maximum_seconds,
-            output_name,
-            enabled_arms,
-            resume_from,
-        )
-    except Exception as error:
-        path = Path(run) / f"{output_name}.json"
-        if path.exists():
-            output = read_json(path)
-            output.update(
-                status="ERROR", error={"type": type(error).__name__, "message": str(error)}
-            )
-            write_json(path, output)
-        if output_name.startswith("dual_arm"):
-            stage_update(Path(run), "cell", "partial", message=f"Joint planner error: {error}")
-        raise
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", type=Path, default=Path("runs/palace_15cm_dual"))
-    parser.add_argument("--config", type=Path, default=Path("configs/cell/two_flexiv.yaml"))
-    parser.add_argument("--settings", type=Path, default=Path("configs/dual_arm.yaml"))
-    parser.add_argument("--maximum-seconds", type=float, default=300)
-    parser.add_argument("--output-name", default="dual_arm_plan")
-    parser.add_argument("--enabled-arms", nargs="+")
-    parser.add_argument("--resume-from", help="Replay and continue another saved plan prefix")
-    args = parser.parse_args()
-    plan_cell(
-        args.run,
-        args.config,
-        args.settings,
-        args.maximum_seconds,
-        args.output_name,
-        args.enabled_arms,
-        args.resume_from,
-    )

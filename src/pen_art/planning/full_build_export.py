@@ -31,7 +31,7 @@ def seal_repair_evidence(run, key, path):
 
 
 def schedule_destination(run):
-    path = run / "offline_dual_arm_plan.json"
+    path = run / "plan.json"
     if path.with_suffix(".clocks.json").exists():
         raise ValueError("Use a fresh run to preserve existing packed-clock evidence")
     return path
@@ -145,7 +145,7 @@ def export_sections(build, witnesses, returned, *, release_witnesses=False):
             }
         )
         clock += returned.duration_s
-    settings = "offline_dual_arm_config.json"
+    settings = "plan_config.json"
     write_json(
         run / settings,
         {
@@ -168,7 +168,7 @@ def export_sections(build, witnesses, returned, *, release_witnesses=False):
     save_schedule(
         run,
         artifact(
-            "dual_arm_plan",
+            "plan",
             status="FULL_SECTION_SCHEDULE_REPLAY_PENDING",
             full_schedule=True,
             section_schedule=True,

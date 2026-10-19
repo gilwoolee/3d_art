@@ -24,7 +24,6 @@ from .clock_path import (
     posture_change,
     tcp_tangent_bound,
 )
-from .dual_arm import MotionProposal, ScheduledMotion, ScheduleState
 from .process_clock import PROCESS_CLOCK_POLICY, action_ready_times, audit_process_clock
 from .replay_checkpoint import (
     IMPLEMENTATION,
@@ -36,6 +35,7 @@ from .replay_checkpoint import (
     digest as context_digest,
 )
 from .scene import MaterialScene
+from .schedule import MotionProposal, ScheduledMotion, ScheduleState
 from .sections import coverage_audit, replay_sections
 
 # Smallest parallel replay job, in clock edges, and the number of jobs to aim
@@ -232,7 +232,7 @@ def _replay_cell_body(
     run,
     profile_path,
     maximum_seconds=300,
-    plan_name="dual_arm_plan",
+    plan_name="plan",
     return_state=False,
     *,
     path_certificates=None,
@@ -244,7 +244,7 @@ def _replay_cell_body(
     pen_proofs=True,
     pools,
 ):
-    validation_name = plan_name.removesuffix("_plan") + "_validation.json"
+    validation_name = "verification.json"
     plan_file = plan_name + ".json"
     run = Path(run)
     phase_seconds, phase_started = {}, perf_counter()
@@ -261,7 +261,7 @@ def _replay_cell_body(
     for name, digest in saved["inputs"].items():
         if sha256(run / name) != digest:
             raise ValueError(f"Stale plan input: {name}")
-    settings = read_json(run / saved.get("settings_artifact", "dual_arm_config.json"))
+    settings = read_json(run / saved.get("settings_artifact", "plan_config.json"))
     # Planning may deliberately defer robot collision checks. A final replay,
     # including its accelerated mode, always restores the complete model.
     replay_search = {**settings["search"], "collision_scope": "full_robot"}
@@ -300,7 +300,7 @@ def _replay_cell_body(
         }
     )
     checkpoint_context = context_digest([certificate_context, plan_digest])
-    checkpoint_path = run / (plan_name.removesuffix("_plan") + "_replay_checkpoint.json")
+    checkpoint_path = run / "verification_checkpoint.json"
     checkpoint = (
         None
         if verification_raw or not reuse_material_checkpoint
@@ -650,7 +650,7 @@ def _replay_cell_body(
             raise ValueError("Turntable profile or initial index does not match the plan")
         state.payload.table_index = planner.turntable.home_index
     output = artifact(
-        "dual_arm_validation",
+        "verification",
         status="RUNNING",
         phase="PATH_CHECKS",
         simulation_only=True,
@@ -943,7 +943,7 @@ def _replay_cell_body(
         # exactly the material its predecessor's full check produced.
         from .parallel_build import MaterialPrefix
 
-        journal_root = run / (plan_name.removesuffix("_plan") + "_replay_journals")
+        journal_root = run / "verification_journals"
         rmtree(journal_root, ignore_errors=True)
         journal_root.mkdir(parents=True)
         # Cut long actions at their own edge boundaries. The validator already
@@ -1170,7 +1170,7 @@ def replay_cell(
     run,
     profile_path,
     maximum_seconds=300,
-    plan_name="dual_arm_plan",
+    plan_name="plan",
     *,
     path_certificates=None,
     verification_raw=True,
@@ -1187,7 +1187,7 @@ def replay_cell(
     ties every rebuilt prefix to the checked result of the interval before it.
     """
     plan_file = plan_name + ".json"
-    validation_name = plan_name.removesuffix("_plan") + "_validation.json"
+    validation_name = "verification.json"
     stage_update(
         Path(run),
         "validation",
@@ -1255,7 +1255,7 @@ def replay_cell(
         except (OSError, ValueError):
             output = {}
         if output.get("source_plan_sha256") != digest:
-            output = artifact("dual_arm_validation")
+            output = artifact("verification")
         output.update(
             status="REPLAY_ERROR",
             simulation_only=True,
@@ -1273,10 +1273,10 @@ def replay_cell(
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", type=Path, default=Path("runs/palace_15cm_dual"))
-    parser.add_argument("--config", type=Path, default=Path("configs/cell/two_flexiv.yaml"))
+    parser.add_argument("--run", type=Path, required=True)
+    parser.add_argument("--config", type=Path, required=True, help="The cell profile planned with")
     parser.add_argument("--maximum-seconds", type=float, default=300)
-    parser.add_argument("--plan-name", default="dual_arm_plan")
+    parser.add_argument("--plan-name", default="plan")
     parser.add_argument("--workers", type=int, default=1, help="Parallel interval checks")
     parser.add_argument(
         "--accept-geometry-proofs",

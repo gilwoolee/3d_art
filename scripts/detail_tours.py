@@ -296,8 +296,7 @@ class PlannerCheck:
         from pen_art.planning.section_build import prepare_candidates
         from pen_art.planning.turntable import IndexedTurntable
 
-        settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
-        settings.update(maximum_subdivision_depth=20)
+        settings = dict(yaml.safe_load(Path("configs/fabrication.yaml").read_text())["planning"])
         shutil.rmtree(cell_dir, ignore_errors=True)
         prepare_cell(profile_path, cell_dir, frame_source)
         prepare_candidates(cell_dir)

@@ -7,9 +7,9 @@ from importlib.metadata import version
 from pathlib import Path
 
 from ..io import artifact, read_json, sha256, write_json
-from .dual_arm import ScheduleState
 from .process_clock import PROCESS_CLOCK_POLICY
 from .scene import MaterialScene
+from .schedule import ScheduleState
 
 
 def digest(value):

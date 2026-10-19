@@ -67,7 +67,7 @@ def launch(args, workers):
     verification_command = [
         sys.executable, "-m", "pen_art.planning.cell_replay",
         "--run", str(run), "--config", str(args.profile),
-        "--plan-name", "offline_dual_arm_plan",
+        "--plan-name", "plan",
         "--workers", str(workers), "--maximum-seconds", str(args.maximum_seconds),
         *args.verification_option,
     ]
@@ -136,7 +136,7 @@ def collect(job):
         result["wall_seconds"] = job["wall_seconds"]
         result["selected_deposits"] = [row["deposit_key"] for row in parallel["actions"]]
         result["repair_attempts"] = sum(row["attempts"] for row in parallel["actions"])
-    validation = run / "offline_dual_arm_validation.json"
+    validation = run / "verification.json"
     if validation.exists():
         replay = read_json(validation)
         result["replay"] = {
@@ -159,7 +159,7 @@ def collect(job):
                 "optimize_contact_geometry",
             )
         }
-        result["plan_sha256"] = sha256(run / "offline_dual_arm_plan.json")
+        result["plan_sha256"] = sha256(run / "plan.json")
     return result
 
 

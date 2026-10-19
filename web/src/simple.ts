@@ -110,7 +110,7 @@ async function show(runId: string) {
   const robotDone = (async () => {
     views.robot.clearCell();
     views.robot.clearSequence();
-    const planFile = ['offline_dual_arm_plan.json', 'dual_arm_repair_plan.json', 'dual_arm_plan.json'].find(has);
+    const planFile = ['plan.json', 'offline_dual_arm_plan.json'].find(has);
     if (!has('cell_manifest.json') || !planFile) { $('#simple-robot-note').textContent = 'This run has no saved robot motion.'; return; }
     const cell = await json<CellManifest>(url('cell_manifest.json'));
     const arms: CellArmView[] = await Promise.all(cell.arms.map(async arm => ({
@@ -129,7 +129,7 @@ async function show(runId: string) {
     if (current !== request) return;
     const plan = JSON.parse(new TextDecoder().decode(bytes)) as CoordinatedPlan;
     // Say whether this exact file is the one the separate verification passed.
-    const validationFile = planFile.replace('_plan.json', '_validation.json');
+    const validationFile = planFile === 'plan.json' ? 'verification.json' : planFile.replace('_plan.json', '_validation.json');
     let verified = false;
     if (has(validationFile)) {
       const validation = await json<Validation>(url(validationFile));

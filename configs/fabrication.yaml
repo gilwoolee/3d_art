@@ -66,3 +66,7 @@ process:
   stop_lag_s: 0.5
   start_lag_s: 0.5
   strand_diameter_m: 0.001
+planning:
+  # Cooling is a development assumption because the pen profile is not measured.
+  assumed_cooling_s: 2.0
+  maximum_subdivision_depth: 20

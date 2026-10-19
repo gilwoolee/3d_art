@@ -36,7 +36,7 @@ environment:
     calibrated: false
     radius_m: 0.074
 arms:
-- id: arm_1
+- id: arm
   robot_urdf: ../../research/planning_cell/robot.urdf
   robot_manifest: ../../research/planning_cell/robot_manifest.json
   robot_visual: ../../research/planning_cell/robot_reference.glb

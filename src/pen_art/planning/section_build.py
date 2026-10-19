@@ -20,8 +20,8 @@ from ..strokes import orient_stroke
 from ..structure import analyze_member_prefixes, analyze_structure
 from .cell_planner import CellPlanner
 from .clock_path import ClockPath, timed_path
-from .dual_arm import ScheduleState
 from .scene import MaterialScene
+from .schedule import ScheduleState
 from .sections import section_actions
 
 
@@ -259,9 +259,8 @@ class SectionBuild:
         from .pen_spheres import PEN_SPHERES_REVISION
 
         self.run, self.profile = Path(run), Path(profile)
-        settings = yaml.safe_load(Path("configs/dual_arm.yaml").read_text())
+        settings = dict(yaml.safe_load(Path("configs/fabrication.yaml").read_text())["planning"])
         settings.update(
-            maximum_subdivision_depth=20,
             collision_scope="pen_candidate",
             merge_deposits_m=20e-6,
             path_pieces="members",

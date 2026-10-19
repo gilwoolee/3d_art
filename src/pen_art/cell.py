@@ -14,7 +14,6 @@ import yaml
 from .io import artifact, now, read_json, sha256, stage_update, write_json
 from .kinematics import rigid_transform
 from .planning.collision import RobotCollisionModel, work_surfaces
-from .planning.coordinated_motion import check_pair_linear
 from .planning.fixture import riser_object
 from .planning.tool import load_tool
 from .robot import SerialArm
@@ -380,18 +379,6 @@ def prepare_cell(profile_path, output, source_run, source_variant="original"):
                 ),
             }
         )
-    pair_check = None
-    if len(arms) == 2:
-        a, b = arms.values()
-        pair_check = check_pair_linear(
-            a.collision,
-            b.collision,
-            a.initial_positions,
-            a.initial_positions,
-            b.initial_positions,
-            b.initial_positions,
-            margin_m=profile["environment"]["clearance_m"],
-        )
     result = artifact(
         "robot_cell_preview",
         status="CELL_SETUP_PREVIEW",
@@ -405,7 +392,6 @@ def prepare_cell(profile_path, output, source_run, source_variant="original"):
         environment=profile["environment"],
         **({"turntable": profile["turntable"]} if "turntable" in profile else {}),
         placement_confirmed=profile.get("placement_confirmed", False),
-        initial_inter_arm_check=pair_check,
         limitations=[
             "Base placement, robot variants and pen offsets are provisional",
             "This is a setup view, not a coordinated trajectory or fabrication schedule",
