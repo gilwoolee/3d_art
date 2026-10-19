@@ -1,6 +1,5 @@
 """Explicit shared-world model for independently configured seven-axis arms."""
 
-import argparse
 import re
 import shutil
 from collections import Counter
@@ -373,13 +372,3 @@ def prepare_cell(profile_path, output, source_run, source_variant="original"):
         message=f"{len(arms)}-arm world setup; motion planning pending",
     )
     return result
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("configs/cell/two_flexiv.yaml"))
-    parser.add_argument("--output", type=Path, default=Path("runs/palace_15cm_dual"))
-    parser.add_argument("--source-run", type=Path, default=Path("runs/palace_15cm_selected"))
-    parser.add_argument("--source-variant", choices=["original", "backbone"], default="original")
-    args = parser.parse_args()
-    prepare_cell(args.config, args.output, args.source_run, args.source_variant)

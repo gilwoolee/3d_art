@@ -8,10 +8,10 @@ from time import monotonic
 
 import networkx as nx
 import numpy as np
-import yaml
 
 from ..assets import prepare_asset
 from ..cell import prepare_cell
+from ..cell_config import load_frame_config
 from ..curves import curve_length, flatten_curve, transform_points
 from ..graph import topology
 from ..io import artifact, now, read_json, sha256, stage_update, write_json
@@ -115,7 +115,7 @@ def prepare_framework(source, run, profile):
     if not (source / "fabrication_config.json").exists():
         write_json(
             source / "fabrication_config.json",
-            yaml.safe_load(Path("configs/fabrication.yaml").read_text()),
+            load_frame_config(),
         )
     fabrication = read_json(source / "fabrication_config.json")
     material = fabrication["structure"]
@@ -219,7 +219,7 @@ def prepare_mesh_within_wire(mesh, run, source_up, max_extent_m, fabrication=Non
             raise ValueError("Prepared mesh inputs changed; choose a fresh run")
         return prepare_mesh(mesh, run, source_up, saved["max_extent_m"])
     if fabrication is None:
-        fabrication = yaml.safe_load(Path("configs/fabrication.yaml").read_text())
+        fabrication = load_frame_config()
     budget = fabrication.get("wireprint", {}).get("maximum_wire_m")
     extent, tries = max_extent_m, []
     while True:
@@ -259,7 +259,7 @@ class SectionBuild:
         from .pen_spheres import PEN_SPHERES_REVISION
 
         self.run, self.profile = Path(run), Path(profile)
-        settings = dict(yaml.safe_load(Path("configs/fabrication.yaml").read_text())["planning"])
+        settings = dict(load_frame_config()["planning"])
         settings.update(
             collision_scope="pen_candidate",
             merge_deposits_m=20e-6,
@@ -268,8 +268,7 @@ class SectionBuild:
             pen_sample_m=0.010,
             chain_strokes=True,
         )
-        timing = yaml.safe_load(Path("configs/timing_continuous_bounded.yaml").read_text())
-        timing.pop("target_seconds", None)
+        timing = dict(load_frame_config()["timing"])
         # The scanned clock already holds the tip under its speed limit over
         # every interval, by the tangent bound it is rescaled against. The
         # audit therefore checks joint limits and does not bound drawing tip

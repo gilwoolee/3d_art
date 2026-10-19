@@ -80,7 +80,7 @@ def dense(p, step=0.0005):
 def nose_radius(dz):
     """Radius of the estimated tapered nose dz behind the tip.
 
-    From configs/cell/one_flexiv_straight.yaml; the tip itself is 0.5 mm.
+    The modelled pen's nose (src/pen_art/cell_template.yaml); the tip itself is 0.5 mm.
     """
     return np.minimum(np.where(dz < 0.003, WIRE_R, 0.0008 + (dz - 0.003) * (0.0112 / 0.027)), 0.012)
 
@@ -292,11 +292,12 @@ class PlannerCheck:
 
     def __init__(self, frame_source, framework, profile_path, cell_dir, faces, seconds=5.0):
         from pen_art.cell import prepare_cell
+        from pen_art.cell_config import load_frame_config
         from pen_art.planning.cell_planner import CellPlanner
         from pen_art.planning.plate import FixedPlate
         from pen_art.planning.section_build import prepare_candidates
 
-        settings = dict(yaml.safe_load(Path("configs/fabrication.yaml").read_text())["planning"])
+        settings = dict(load_frame_config()["planning"])
         shutil.rmtree(cell_dir, ignore_errors=True)
         prepare_cell(profile_path, cell_dir, frame_source)
         prepare_candidates(cell_dir)

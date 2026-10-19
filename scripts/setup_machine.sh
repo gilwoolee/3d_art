@@ -6,8 +6,8 @@
 #   1. objs/ meshes and pictures from Git LFS
 #   2. .venv (Python 3.12) with the planner and dev tools
 #   3. external/flexiv_description at the pinned commit, then the robot cell in
-#      research/planning_cell (its URDF holds this machine's absolute paths,
-#      so it is made here, never copied)
+#      runs/cell from configs/cell.yaml (its URDF holds this machine's
+#      absolute paths, so it is made here, never copied)
 #   4. Node 24 in tools/node, the viewer's packages and build
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -31,8 +31,8 @@ if [ ! -d external/flexiv_description ]; then
   git clone https://github.com/flexivrobotics/flexiv_description.git external/flexiv_description
 fi
 git -C external/flexiv_description checkout --quiet --detach "$flexiv"
-if [ ! -f research/planning_cell/robot.urdf ] || ! grep -q "$root/external" research/planning_cell/robot.urdf; then
-  .venv/bin/python scripts/prepare_single_arm_cell.py
+if [ ! -f runs/cell/robot.urdf ] || ! grep -q "$root/external" runs/cell/robot.urdf; then
+  .venv/bin/python -c "from pen_art.cell_config import prepare_cell_model; prepare_cell_model()"
 fi
 
 echo "== 4. Node and the viewer"

@@ -201,14 +201,3 @@ def prepare_flexiv(repository, output, variant="Rizon4"):
     )
     write_json(output / "robot_manifest.json", manifest)
     return manifest
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repository", type=Path, default=Path("external/flexiv_description"))
-    parser.add_argument("--output", type=Path, default=Path("runs/palace_15cm"))
-    parser.add_argument("--variant", choices=sorted(FLEXIV_VARIANTS), default="Rizon4")
-    args = parser.parse_args()
-    prepare_flexiv(args.repository, args.output, args.variant)

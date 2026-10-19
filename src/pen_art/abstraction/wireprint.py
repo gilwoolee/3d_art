@@ -7,7 +7,6 @@ This is a WirePrint-style generator, not a calibrated printer implementation.
 The returned topology and order still require structural and robot validation.
 """
 
-import argparse
 from copy import deepcopy
 from pathlib import Path
 
@@ -1102,12 +1101,6 @@ def reinforce_base(graph, reason):
     return graph
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", required=True, type=Path)
-    args = parser.parse_args()
-    graph = generate(args.run)
-    print(f"{len(graph['nodes'])} nodes, {len(graph['edges'])} sections")
 
 
 def _trails(graph):
@@ -1313,4 +1306,3 @@ def _order_bed_trail(graph, starts, on_bed):
         edge["source_interval"] = [position, position + len(edge["segments"])]
         edge["order_hint"] = hint
         position += len(edge["segments"])
-

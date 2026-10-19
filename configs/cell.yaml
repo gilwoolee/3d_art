@@ -1,0 +1,24 @@
+# The robot cell: what you change to try another setup. `pen-art cell` turns
+# this into the full robot model in runs/cell/. Distances are in metres, in
+# the robot's frame: x forward, y left, z up, origin at the base on the table.
+
+robot:
+  model: Rizon4        # Flexiv Rizon 4, 7 joints
+
+# The longest side an object is scaled to. Frame settings (layer height,
+# spacing) stay the same: a smaller object gets fewer layers and less wire.
+build_volume_m: 0.15
+
+# A 3D-printer build plate (Bambu Lab X1/P1/A1 size) on a stand. The stand
+# keeps the arm away from its awkward, singular poses near the table.
+plate:
+  size_m: [0.256, 0.256]
+  center_m: [0.45, 0.0]  # straight in front of the robot
+  top_z_m: 0.10          # top of the plate above the table
+
+# The 3D pen on the robot's flange.
+pen:
+  length_m: 0.225        # flange to tip
+  body_radius_m: 0.012
+  nose_length_m: 0.027   # the tapered end
+  tip_radius_m: 0.0005

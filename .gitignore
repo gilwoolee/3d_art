@@ -12,7 +12,6 @@ logs/
 .env
 .env.*
 !.env.example
-/research/planning_cell/
 web/node_modules/
 web/dist/
 .DS_Store

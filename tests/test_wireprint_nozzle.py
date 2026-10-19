@@ -123,7 +123,7 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
             "segments": [np.linspace(top + [0, 0, 0.001], top + [0.004, 0, 0.001], 4).tolist()],
         }],
     }
-    material = yaml.safe_load(open("configs/fabrication.yaml"))["structure"]
+    material = yaml.safe_load(open("configs/frame.yaml"))["structure"]
     assert analyze_structure(rest, material).get("failure") == "UNSUPPORTED_COMPONENT"
     rest["fused_turns"] = wound["fused_turns"] + [["rest-a", coil[-1]["end"]]]
     assert analyze_structure(rest, material).get("failure") != "UNSUPPORTED_COMPONENT"
@@ -161,7 +161,7 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
 
     # Connector wire pairs the odd nodes so the whole frame is one trail.
     graph = mesh_framework(cube(), maximum_descent_angle_deg=27, base_line_spacing=0.02)
-    structure = yaml.safe_load(open("configs/fabrication.yaml"))["structure"]
+    structure = yaml.safe_load(open("configs/frame.yaml"))["structure"]
     graph = eulerize_frame(graph, budget_m=10.0, structure=structure)
     assert sum(degree % 2 for _, degree in topology(graph).degree()) <= 2
     info = graph["generation"]["eulerization"]

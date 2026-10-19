@@ -1,16 +1,11 @@
-"""Build a WirePrint frame source and its cell profile for a new mesh.
+"""Build a WirePrint frame source for a mesh, in the cell from ``pen-art cell``.
 
-    .venv/bin/python scripts/frame_source.py NAME MESH [--up y] [--layer 0.0097]
-        [--feature 0.008] [--coil-width M] [--template PROFILE]
+    .venv/bin/python scripts/frame_source.py NAME MESH [--up y] [--layer M]
+        [--feature M] [--coil-width M] [--profile runs/cell/cell.yaml]
 
-The default template is the cell all current frames were planned in
-(``configs/profiles/frame_template.yaml``).
-
-Writes ``runs/geomfirst_NAME_source`` (the frame within the 10 m wire budget,
-longest side up to 150 mm) and ``runs/geomfirst_profiles/NAME.yaml``, a copy
-of the template profile. Plan
-the frame with ``TAG=gfNN scripts/plan_frame.sh NAME SOURCE PROFILE`` and keep
-the run as the detail harness's ``--frame-run``.
+Writes ``runs/geomfirst_NAME_source``: the frame within the wire budget, the
+mesh scaled so its longest side is the cell's build volume. Plan it with
+``TAG=gfNN scripts/plan_frame.sh NAME SOURCE runs/cell/cell.yaml``.
 """
 
 import argparse
@@ -18,6 +13,7 @@ from pathlib import Path
 
 import yaml
 
+from pen_art.cell_config import CELL_DIR, load_frame_config
 from pen_art.io import read_json
 from pen_art.planning.section_build import prepare_framework, prepare_mesh_within_wire
 
@@ -30,28 +26,22 @@ def main():
     parser.add_argument("--layer", type=float, default=0.0097, help="m between outline loops")
     parser.add_argument("--feature", type=float, default=0.008, help="m; thinner parts dropped")
     parser.add_argument("--coil-width", type=float, help="m; parts this narrow are wound")
-    parser.add_argument(
-        "--template", type=Path, default=Path("configs/profiles/frame_template.yaml")
-    )
+    parser.add_argument("--profile", type=Path, default=CELL_DIR / "cell.yaml")
     args = parser.parse_args()
 
-    config = yaml.safe_load(Path("configs/fabrication.yaml").read_text())
+    config = load_frame_config()
     config["wireprint"].update(layer_height=args.layer, minimum_feature_m=args.feature)
     if args.coil_width is not None:
         config["wireprint"]["coil_maximum_width"] = args.coil_width
+    extent = yaml.safe_load(args.profile.read_text())["build_volume_m"]
     run = Path(f"runs/geomfirst_{args.name}")
-    source = prepare_mesh_within_wire(args.mesh, run, args.up, 0.15, config)
-    profile = yaml.safe_load(args.template.read_text())
-    prepare_framework(source, run, args.template)
+    source = prepare_mesh_within_wire(args.mesh, run, args.up, extent, config)
+    prepare_framework(source, run, args.profile)
 
     graph = read_json(source / "stroke_graph.json")
-    out = Path(f"runs/geomfirst_profiles/{args.name}.yaml")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(yaml.safe_dump(profile, sort_keys=False))
     screen = read_json(source / "structural_screen.json")
     wire = sum(e["length_m"] for e in graph["edges"])
     print(f"{source}: {wire:.2f} m frame, structure pass {screen['modeled_pass']}")
-    print(f"{out}: cell profile")
 
 
 if __name__ == "__main__":

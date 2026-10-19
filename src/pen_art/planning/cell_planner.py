@@ -13,9 +13,9 @@ from time import monotonic, perf_counter
 
 import fcl
 import numpy as np
-import yaml
 
 from ..cell import load_cell
+from ..cell_config import load_frame_config
 from ..curves import transform_points
 from ..io import read_json, sha256, write_json
 from ..kinematics import inverse_candidates
@@ -374,13 +374,13 @@ class CellPlanner:
         # A profile may adjust transit settings (detail drawn on the outside
         # backs away a shorter distance).
         self.transit = {
-            **yaml.safe_load(Path("configs/transit.yaml").read_text()),
+            **load_frame_config()["transit"],
             **self.profile.get("transit", {}),
         }
         self.timing = (
             timing_override
             if timing_override is not None
-            else yaml.safe_load(Path("configs/timing.yaml").read_text())
+            else load_frame_config()["timing"]
         )
         self.margin = self.profile["environment"]["clearance_m"]
         self.tip_models = {}
