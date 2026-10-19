@@ -50,7 +50,12 @@ from .dual_arm import (
 )
 from .geometric_path import geometric_path
 from .pen_spheres import PenSpheres, wire_arrays
-from .process_clock import PROCESS_CLOCK_POLICY, derive_deposition_events, source_vertex_schedule
+from .process_clock import (
+    PROCESS_CLOCK_POLICY,
+    derive_deposition_events,
+    next_visit,
+    source_vertex_schedule,
+)
 from .rrt import connect
 from .scene import MaterialScene
 from .smooth_audit import CubicPiece, bounded_segments, check_tracking
@@ -155,7 +160,7 @@ def member_drawing_path(arm, drawing, members, schedule, deadline):
         return None
     keep, previous = {0, len(q) - 1}, 0
     for point in members:
-        index = previous + int(np.argmin(np.linalg.norm(targets[previous:] - point, axis=1)))
+        index = next_visit(targets, previous, point, 1e-6)
         if np.linalg.norm(targets[index] - point) > 1e-6:
             return None
         keep.add(index)

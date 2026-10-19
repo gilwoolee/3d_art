@@ -8,7 +8,10 @@ import pytest
 import trimesh
 import yaml
 
-from pen_art.abstraction.wireprint import mesh_framework
+from pen_art.abstraction.wireprint import eulerize_frame, mesh_framework
+from pen_art.graph import topology
+from pen_art.planning.process_clock import source_vertex_schedule
+from pen_art.planning.sections import section_actions
 from pen_art.structure import analyze_structure
 
 
@@ -155,6 +158,50 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
             contour_lengths[edge["parent_curve"]] += edge["length_m"]
     assert all(length == pytest.approx(0.32, abs=5e-6) for length in contour_lengths.values())
     solidified_fork_drops_the_fin_and_keeps_printable_layers()
+
+    # Connector wire pairs the odd nodes so the whole frame is one trail.
+    graph = mesh_framework(cube(), maximum_descent_angle_deg=27, base_line_spacing=0.02)
+    structure = yaml.safe_load(open("configs/fabrication.yaml"))["structure"]
+    graph = eulerize_frame(graph, budget_m=10.0, structure=structure)
+    assert sum(degree % 2 for _, degree in topology(graph).degree()) <= 2
+    info = graph["generation"]["eulerization"]
+    assert info["odd_nodes_before"] == 18 and info["minimum_trails_before"] == 9
+    assert info["minimum_trails_after"] == 1
+    assert 0 < info["added_m"] < 0.5
+    connectors = [edge for edge in graph["edges"] if edge.get("origin") == "euler_connector"]
+    assert connectors and all(clear_of_other_wire(edge, graph) for edge in connectors)
+    # The bed is drawn as one stroke that ends where the walls begin.
+    actions = section_actions(graph)["actions"]
+    bed = [row for row in actions if row["parent_curve"] == "base-trail"]
+    assert len(bed) == 1 and bed[0]["closed"]
+    assert any(
+        row["start"] == bed[0]["end"] for row in actions if row["parent_curve"].startswith("zigzag-")
+    )
+    # The bed trail passes base-grid crossings twice; every corner is still
+    # found in drawing order, not at a later pass through the same point,
+    # even when the robot reaches each point only to within microns.
+    path = np.asarray([bed[0]["segments"][0][0]] + [piece[-1] for piece in bed[0]["segments"]])
+    path += np.random.default_rng(0).normal(0, 2e-6, path.shape)
+    breaks, _, _ = source_vertex_schedule(bed[0], {}, path, np.eye(4), 0.0)
+    assert breaks == sorted(breaks) and len(breaks) > 8
+
+
+def clear_of_other_wire(connector, graph, margin=0.003):
+    """No point of the connector away from its ends lies on another wire."""
+    nodes = {node["id"]: np.asarray(node["position"]) for node in graph["nodes"]}
+    ends = nodes[connector["start"]], nodes[connector["end"]]
+    points = [np.asarray(point) for segment in connector["segments"] for point in segment]
+    points = [p for p in points if min(np.linalg.norm(p - end) for end in ends) > margin]
+    for edge in graph["edges"]:
+        if edge is connector:
+            continue
+        for segment in edge["segments"]:
+            a, b = np.asarray(segment[0]), np.asarray(segment[-1])
+            for p in points:
+                t = np.clip(np.dot(p - a, b - a) / max(np.dot(b - a, b - a), 1e-18), 0, 1)
+                if np.linalg.norm(p - (a + t * (b - a))) < connector["diameter_m"]:
+                    return False
+    return True
 
 
 def solidified_fork_drops_the_fin_and_keeps_printable_layers():

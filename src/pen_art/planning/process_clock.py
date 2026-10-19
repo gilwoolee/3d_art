@@ -89,6 +89,24 @@ def action_ready_times(path, action, cooling_s):
     return result
 
 
+def next_visit(points, start, target, tolerance):
+    """Index of the first pass of ``points`` (from ``start``) through ``target``.
+
+    A trail may pass the same spot again later; the closest point overall can
+    belong to that later pass, so take the first point within ``tolerance``
+    and then the closest point of that pass. Returns the overall closest
+    index when no point is within ``tolerance``.
+    """
+    distances = np.linalg.norm(points[start:] - target, axis=1)
+    near = np.flatnonzero(distances <= tolerance)
+    if not len(near):
+        return start + int(np.argmin(distances))
+    index = near[0]
+    while index + 1 < len(distances) and distances[index + 1] < distances[index]:
+        index += 1
+    return start + int(index)
+
+
 def source_vertex_schedule(action, drawing, targets, transform, cooling_s, process=None):
     """Locate actual tangent discontinuities, never smooth-curve sampling knots.
 
@@ -124,7 +142,7 @@ def source_vertex_schedule(action, drawing, targets, transform, cooling_s, proce
         outgoing /= np.linalg.norm(outgoing)
         if np.linalg.norm(incoming - outgoing) < 1e-5:
             continue
-        index = previous + int(np.argmin(np.linalg.norm(targets[previous:] - before[-1], axis=1)))
+        index = next_visit(targets, previous, before[-1], 0.00035)
         if np.linalg.norm(targets[index] - before[-1]) > 0.00035:
             raise ValueError("Tracked path omits a physical source vertex")
         previous = index

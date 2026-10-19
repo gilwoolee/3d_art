@@ -103,7 +103,12 @@ def _sag(screen):
 
 
 def prepare_framework(source, run, profile):
-    from ..abstraction.wireprint import connect_framework_islands, generate, reinforce_base
+    from ..abstraction.wireprint import (
+        connect_framework_islands,
+        eulerize_frame,
+        generate,
+        reinforce_base,
+    )
 
     if (run / "run.json").exists():
         return
@@ -116,7 +121,11 @@ def prepare_framework(source, run, profile):
     material = fabrication["structure"]
 
     def framework(**settings):
-        graph = connect_framework_islands(generate(source, **settings))
+        graph = eulerize_frame(
+            connect_framework_islands(generate(source, **settings)),
+            fabrication.get("wireprint", {}).get("maximum_wire_m", float("inf")),
+            material,
+        )
         screen = analyze_structure(graph, material)
         if not screen["modeled_pass"] and "maximum_displacement_m" in screen:
             graph = reinforce_base(
@@ -200,7 +209,7 @@ def prepare_mesh_within_wire(mesh, run, source_up, max_extent_m, fabrication=Non
     longest side by the square root of the overshoot. The size settled on and
     the wire at each try are written to ``wire_budget.json``.
     """
-    from ..abstraction.wireprint import connect_framework_islands, generate
+    from ..abstraction.wireprint import connect_framework_islands, eulerize_frame, generate
 
     source = run.with_name(run.name + "_source")
     record = source / "wire_budget.json"
@@ -218,7 +227,8 @@ def prepare_mesh_within_wire(mesh, run, source_up, max_extent_m, fabrication=Non
         write_json(source / "fabrication_config.json", fabrication)
         if budget is None:
             break
-        graph = connect_framework_islands(generate(source))
+        # Measured with its connector wire, so the frame that fits keeps them.
+        graph = eulerize_frame(connect_framework_islands(generate(source)), float("inf"))
         wire = sum(edge["length_m"] for edge in graph["edges"])
         tries.append({"max_extent_m": extent, "wire_m": wire})
         if wire <= budget or len(tries) == 6:

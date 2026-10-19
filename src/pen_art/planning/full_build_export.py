@@ -209,6 +209,7 @@ def export_sections(build, witnesses, returned, *, release_witnesses=False):
             ),
             initial_pose_repairs=planner.initial_pose_repairs,
             lift_offs=getattr(build, "lift_offs", None),
+            minimum_trails=getattr(build, "minimum_trails", None),
             limitations=[
                 "Simulation only",
                 "Pen, cooling, material and joint behavior uncalibrated",

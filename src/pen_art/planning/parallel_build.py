@@ -1536,6 +1536,7 @@ def run_parallel_forward(
             coordinator.submit = submit
             started = perf_counter()
             build.lift_offs = schedule.lift_offs()
+            build.minimum_trails = _minimum_trails(build)
             exported = export_sections(
                 build,
                 witnesses,
@@ -1556,6 +1557,7 @@ def run_parallel_forward(
     summary["blocked"] = schedule.blocked()
     summary["timing_rejections"] = timing_rejections
     summary["lift_offs"] = schedule.lift_offs()
+    summary["minimum_trails"] = _minimum_trails(build)
     write_json(build.run / "parallel_build.json", summary)
     compact = {
         key: summary[key]
@@ -1565,6 +1567,7 @@ def run_parallel_forward(
         report = read_json(build.run / "section_build.json")
         report["parallel"] = compact
         report["lift_offs"] = summary["lift_offs"]
+        report["minimum_trails"] = summary["minimum_trails"]
         write_json(build.run / "section_build.json", report)
     if status != "COMPLETE":
         build.report(
@@ -1576,5 +1579,13 @@ def run_parallel_forward(
             }[status],
             parallel=compact,
             lift_offs=summary["lift_offs"],
+            minimum_trails=summary["minimum_trails"],
         )
     return summary
+
+
+def _minimum_trails(build):
+    """Fewest pen-down trails the frame allows (Euler's rule), as generated."""
+    return build.planner.graph.get("generation", {}).get("eulerization", {}).get(
+        "minimum_trails_after"
+    )
