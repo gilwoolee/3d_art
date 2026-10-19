@@ -128,10 +128,15 @@ def eulerize_frame(graph, budget_m, bow_m=0.003):
                 length = float(np.linalg.norm(np.diff(arc, axis=0), axis=1).sum())
                 pairs.add_edge(a, b, weight=length, arc=arc)
         matched = nx.min_weight_matching(pairs)
+        # The matching is a set, so its order follows the hash seed: orient
+        # each pair along its arc and take them in order around the outline.
+        oriented = []
         for a, b in matched:
             arc = pairs[a][b]["arc"]
             if not np.allclose(arc[0], nodes[a]):
                 a, b = b, a
+            oriented.append((index[a], a, b, arc))
+        for _, a, b, arc in sorted(oriented, key=lambda pair: pair[:3]):
             connectors.append((a, b, _bowed_arc(arc, outline, bow_m)))
         paired = {node for pair in matched for node in pair}
         left += [
@@ -177,7 +182,7 @@ def eulerize_frame(graph, budget_m, bow_m=0.003):
     left += [
         {"node": node, "reason": "above the bed"}
         for node in sorted(odd)
-        if not on_bed(node) and node != max(odd, key=lambda n: nodes[n][2])
+        if not on_bed(node) and node != max(sorted(odd), key=lambda n: nodes[n][2])
     ]
     _order_bed_trail(graph, walls & odd, on_bed)
     trails_after, odd_after = _trails(graph)
@@ -210,7 +215,7 @@ def _order_bed_trail(graph, starts, on_bed):
     by_id = {edge["id"]: edge for edge in bed}
     hint = min(edge.get("order_hint", 0) for edge in bed)
     position = 0
-    for a, _, key in nx.eulerian_circuit(network, source=next(iter(starts)), keys=True):
+    for a, _, key in nx.eulerian_circuit(network, source=min(starts), keys=True):
         edge = by_id[key]
         if edge["start"] != a:
             edge["start"], edge["end"] = edge["end"], edge["start"]

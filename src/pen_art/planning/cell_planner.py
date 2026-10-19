@@ -264,44 +264,35 @@ class CellPlanner:
             else load_frame_config()["timing"]
         )
         self.margin = self.profile["environment"]["clearance_m"]
-        self.tip_models = {}
-        self.pen_models, self.pen_tip_models = {}, {}
-        self._pen_spheres = {}
+        self._pen_spheres = None
         self.attempts = []
         self.checked_intervals = 0
-        for identity, arm in self.arms.items():
-            # Verify live inputs used by load_cell against the stored snapshot.
-            for suffix, path in (("robot.urdf", arm.urdf), ("robot.json", arm.manifest_path)):
-                if sha256(path) != sha256(self.run / f"{identity}_{suffix}"):
-                    raise ValueError(f"Live robot changed: {identity}")
-            saved = next(a for a in self.cell["arms"] if a["id"] == identity)
-            if arm.tool.metadata != saved["tool_model"]:
-                raise ValueError(f"Live tool changed: {identity}")
-            radius = arm.tool.tip_radius_m or self.transit["virtual_tip_radius_m"]
-            tip = Body("virtual_tip", arm.robot.tip, arm.flange_to_tcp, fcl.Sphere(radius), radius)
-            self.tip_models[identity] = RobotCollisionModel(arm.robot, [*arm.tool.bodies, tip])
-            # Pen-scope planning checks the pen; a profile may add the robot's
-            # links, so tilted poses that fold the arm into itself fail early.
-            with_robot = bool(self.profile.get("planning_checks_robot", False))
-            self.pen_models[identity] = RobotCollisionModel(
-                arm.robot, arm.tool.bodies, include_robot=with_robot
-            )
-            self.pen_tip_models[identity] = RobotCollisionModel(
-                arm.robot, [*arm.tool.bodies, tip], include_robot=with_robot
-            )
+        # load_cell accepts exactly one arm.
+        ((identity, arm),) = self.arms.items()
+        # Verify live inputs used by load_cell against the stored snapshot.
+        for suffix, path in (("robot.urdf", arm.urdf), ("robot.json", arm.manifest_path)):
+            if sha256(path) != sha256(self.run / f"{identity}_{suffix}"):
+                raise ValueError(f"Live robot changed: {identity}")
+        saved = next(a for a in self.cell["arms"] if a["id"] == identity)
+        if arm.tool.metadata != saved["tool_model"]:
+            raise ValueError(f"Live tool changed: {identity}")
+        radius = arm.tool.tip_radius_m or self.transit["virtual_tip_radius_m"]
+        tip = Body("virtual_tip", arm.robot.tip, arm.flange_to_tcp, fcl.Sphere(radius), radius)
+        self.tip_model = RobotCollisionModel(arm.robot, [*arm.tool.bodies, tip])
+        # Pen-scope planning checks the pen; a profile may add the robot's
+        # links, so tilted poses that fold the arm into itself fail early.
+        with_robot = bool(self.profile.get("planning_checks_robot", False))
+        self.pen_model = RobotCollisionModel(arm.robot, arm.tool.bodies, include_robot=with_robot)
+        self.pen_tip_model = RobotCollisionModel(
+            arm.robot, [*arm.tool.bodies, tip], include_robot=with_robot
+        )
         # A tool body may keep its own clearance from wire (the nose right
         # behind a tip that runs along existing wire): every collision model.
         own = self.profile["environment"].get("tool_clearance_m", {})
         self.tool_margins = {f"tool/{name}": value for name, value in own.items()}
         if own:
-            for identity, arm in self.arms.items():
-                for model in (
-                    arm.collision,
-                    self.tip_models[identity],
-                    self.pen_models[identity],
-                    self.pen_tip_models[identity],
-                ):
-                    model.material_margins = self.tool_margins
+            for model in (arm.collision, self.tip_model, self.pen_model, self.pen_tip_model):
+                model.material_margins = self.tool_margins
         self.initial_pose_repairs = self.choose_initial_poses(source)
         self.verification_raw = verification_raw
         self.optimize_contact_geometry = (
@@ -325,15 +316,11 @@ class CellPlanner:
         if self.collision_scope == "full_robot":
             return arm
         proposal = copy(arm)
-        proposal.collision = self.pen_models[identity]
+        proposal.collision = self.pen_model
         return proposal
 
     def collision_tip_model(self, identity):
-        return (
-            self.pen_tip_models[identity]
-            if self.collision_scope == "pen_candidate"
-            else self.tip_models[identity]
-        )
+        return self.pen_tip_model if self.collision_scope == "pen_candidate" else self.tip_model
 
     def path_certificate_context(self, identity, *, kinematic=False, pen=False):
         """Bind invariant checks without including the changing material scene.
@@ -376,10 +363,8 @@ class CellPlanner:
                 **self._path_certificate_context(identity, kinematic=True),
                 "obstacles": full["obstacles"],
                 "pen_models": {
-                    "pen": collision_context_hash(self.pen_models[identity], arm.tool.metadata),
-                    "tip": collision_context_hash(
-                        self.pen_tip_models[identity], arm.tool.metadata
-                    ),
+                    "pen": collision_context_hash(self.pen_model, arm.tool.metadata),
+                    "tip": collision_context_hash(self.pen_tip_model, arm.tool.metadata),
                 },
             }
         if kinematic:
@@ -401,7 +386,7 @@ class CellPlanner:
 
         arm = self.arms[identity]
         model = getattr(arm.collision, "model", arm.collision)
-        tip = getattr(self.tip_models[identity], "model", self.tip_models[identity])
+        tip = getattr(self.tip_model, "model", self.tip_model)
         model_key = (identity, id(model), id(tip), digest(arm.tool.metadata))
         if model_key not in self._path_model_contexts:
             self._path_model_contexts[model_key] = {
@@ -444,13 +429,9 @@ class CellPlanner:
         be used as a collision-free path origin. Staging at the selected start
         is an explicit job precondition, not a fictitious transit through it.
         """
-        contacts = {
-            identity: self.tip_models[identity].check(
-                arm.initial_positions, self.obstacles, self.margin
-            )
-            for identity, arm in self.arms.items()
-        }
-        if not any(contacts.values()):
+        ((identity, arm),) = self.arms.items()
+        contacts = self.tip_model.check(arm.initial_positions, self.obstacles, self.margin)
+        if not contacts:
             return {}
         center = np.asarray(self.profile["world_from_build"])[:3, 3]
         source_motion = source / "sequence_motion.json"
@@ -459,28 +440,27 @@ class CellPlanner:
             if source_motion.exists()
             else None
         )
-        for identity, arm in self.arms.items():
-            seeds = [arm.initial_positions]
-            if parking is not None:
-                seeds.insert(0, np.asarray(parking))
-            direction = arm.robot.world_from_base[:2, 3] - center[:2]
-            direction /= np.linalg.norm(direction)
-            # The first clear pose above the plate, nearest distance first.
-            clear = None
-            for distance in (0.30, 0.40, 0.16, 0.10):
-                target = np.eye(4)
-                target[:3, :3] = arm.robot.world_from_base[:3, :3] @ np.diag([-1.0, 1.0, -1.0])
-                target[:3, 3] = center + np.r_[direction * distance, 0.14]
-                for solution in inverse_candidates(arm.robot, target, arm.flange_to_tcp, seeds):
-                    q = np.asarray(solution["positions"])
-                    if not self.tip_models[identity].check(q, self.obstacles, self.margin):
-                        clear = q
-                        break
-                if clear is not None:
+        seeds = [arm.initial_positions]
+        if parking is not None:
+            seeds.insert(0, np.asarray(parking))
+        direction = arm.robot.world_from_base[:2, 3] - center[:2]
+        direction /= np.linalg.norm(direction)
+        # The first clear pose above the plate, nearest distance first.
+        clear = None
+        for distance in (0.30, 0.40, 0.16, 0.10):
+            target = np.eye(4)
+            target[:3, :3] = arm.robot.world_from_base[:3, :3] @ np.diag([-1.0, 1.0, -1.0])
+            target[:3, 3] = center + np.r_[direction * distance, 0.14]
+            for solution in inverse_candidates(arm.robot, target, arm.flange_to_tcp, seeds):
+                q = np.asarray(solution["positions"])
+                if not self.tip_model.check(q, self.obstacles, self.margin):
+                    clear = q
                     break
-            if clear is None:
-                raise ValueError(f"No clear staged start found for {identity}")
-            arm.initial_positions = clear
+            if clear is not None:
+                break
+        if clear is None:
+            raise ValueError(f"No clear staged start found for {identity}")
+        arm.initial_positions = clear
         return {
             "source_contacts": contacts,
             "precondition": "Start the job with the arm at this clear staged pose",
@@ -591,9 +571,9 @@ class CellPlanner:
         ``fractions[k]``: a member's own wire is only what it has drawn so far.
         """
         arm = self.arms[identity]
-        if identity not in self._pen_spheres:
-            self._pen_spheres[identity] = PenSpheres(arm.tool.metadata)
-        spheres, wires = self._pen_spheres[identity], wire_arrays(scene)
+        if self._pen_spheres is None:
+            self._pen_spheres = PenSpheres(arm.tool.metadata)
+        spheres, wires = self._pen_spheres, wire_arrays(scene)
         # A body may keep its own clearance from wire (the nose right behind a
         # tip that runs along existing wire); every other body keeps the margin.
         margins = {None: self.margin, **self.tool_margins}
