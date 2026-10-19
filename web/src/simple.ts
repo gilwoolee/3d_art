@@ -55,6 +55,7 @@ $<HTMLInputElement>('#simple-ghost').addEventListener('change', event => views.s
 
 async function show(runId: string) {
   const current = ++request;
+  delete $('#simple-status').dataset.verdict; // Never the previous run's verdict.
   stop();
   const url = (file: string) => `/api/runs/${runId}/artifacts/${file}`;
   const status = (text: string) => { if (current === request) $('#simple-status').textContent = text; };

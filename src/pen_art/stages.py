@@ -150,16 +150,25 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         )
         status = report["status"]
         plan = {a["id"]: a for a in read_json(source / "construction_plan.json")["actions"]}
-        blocked = [row["action"] for row in report.get("parallel", {}).get("blocked", [])]
+        rows = report.get("parallel", {}).get("blocked", [])
+        blocked = [row["action"] for row in rows]
         if status == "GEOMETRY_PLANNED" or not blocked:
             break
-        tours = sorted({plan[a].get("parent_curve") for a in blocked if a in plan})
+        why = {
+            plan[row["action"]].get("parent_curve"): _reason(row.get("last_failure"))
+            for row in rows
+            if row["action"] in plan
+        }
+        tours = sorted(why)
         if not all(plan[a].get("stage") == "artistic" for a in blocked if a in plan):
             status = "FRAME_STROKE_BLOCKED"
-            state["blocked"] = blocked
+            state["blocked"] = [
+                f"{row['action']} ({_reason(row.get('last_failure'))})" for row in rows
+            ]
             break
-        log(f"  dropping detail the arm cannot draw: {', '.join(tours)}")
-        dropped += [{"stroke": t, "reason": "no collision-free path"} for t in tours]
+        for tour in tours:
+            log(f"  dropping detail the arm cannot draw: {tour} ({why[tour]})")
+        dropped += [{"stroke": t, "reason": why[t]} for t in tours]
         following = folder / f"round-{number + 1:02d}-source"
         if not drop_strokes(source, following, set(tours)):
             status = "STRUCTURE_FAILS_WITHOUT_DROPPED_DETAIL"
@@ -174,11 +183,26 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         lift_offs=report.get("lift_offs", []),
         minimum_trails=report.get("minimum_trails"),
     )
+    # plan-timing trims from this plan each time it runs, so a bigger budget
+    # brings trimmed detail back.
+    state["planned"] = {key: state[key] for key in ("round", "source", "inputs", "lift_offs")}
     return _save(folder, state)
 
 
-def _require(folder, stage, status):
-    state = _state(folder)
+def _reason(failure):
+    """Why the planner gave up on a stroke, in words."""
+    if not failure:
+        return "no attempt finished in time"
+    where = {
+        "propose": "no collision-free drawing path",
+        "check": "no clear approach, drawing or withdrawal",
+        "connect": "no clear move from the stroke before",
+    }.get(failure["stage"], failure["stage"])
+    return f"{where}, last {failure['status']}"
+
+
+def _require(folder, stage, status, state=None):
+    state = _state(folder) if state is None else state
     command = "plan-geometry" if stage == "geometry" else "plan-timing"
     if state.get(stage) is None:
         raise StageOrderError(f"{folder}: run `pen-art {command}` first")
@@ -219,8 +243,13 @@ def detail_budget(run, source):
 def plan_timing(folder, workers=24, detail_m=2.0, minutes=15.0, maximum_rounds=20, log=print):
     """Time the planned paths; trim detail to its budget, planning again if needed."""
     folder = Path(folder)
-    state = _require(folder, "geometry", "GEOMETRY_PLANNED")
+    state = _state(folder)
+    state.update(state.get("planned", {}))
+    state = _require(folder, "geometry", "GEOMETRY_PLANNED", state)
     profile, source = Path(state["profile"]), Path(state["source"])
+    for old in folder.glob("round-*"):
+        if old.name.split("-")[1] > state["round"].split("-")[1]:
+            shutil.rmtree(old)
     trimmed = []
     for _ in range(maximum_rounds):
         run = folder / state["round"]
@@ -255,7 +284,7 @@ def plan_timing(folder, workers=24, detail_m=2.0, minutes=15.0, maximum_rounds=2
         timing=status,
         source=str(source),
         inputs=_inputs(source, profile, state["cell"]),
-        trimmed=state.get("trimmed", []) + trimmed,
+        trimmed=trimmed,
         print_minutes=plan.get("modeled_duration_s", 0) / 60 or None,
         lift_offs=plan.get("lift_offs", state.get("lift_offs")),
         detail_m=None if detail is None else detail[0],

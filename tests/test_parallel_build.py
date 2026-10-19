@@ -111,6 +111,18 @@ def test_coordinator_chains_continuing_strokes_and_drops_stale_results(tmp_path)
     refused.apply(jobs(refused)["propose", 1], offered("n1"))
     assert refused.lift_offs()[1] == {"before": "b", "reason": "chain blocked: NO_CANDIDATE"}
 
+    # A stroke with no alternatives left is reported with where it last failed.
+    stuck = ForwardSchedule(["a"], "binding", maximum_attempts=1)
+    stuck.apply(jobs(stuck)["propose", 0], candidate("a"))
+    stuck.reject(0, "check", {"status": "REJECTED", "failure": {"status": "COLLISION"}})
+    assert stuck.blocked() == [
+        {
+            "action": "a",
+            "outcome": "NO_VERIFIED_CANDIDATE",
+            "last_failure": {"stage": "check", "status": "COLLISION"},
+        }
+    ]
+
 
 
 def replay_fixture(tmp_path, monkeypatch, tcp_radius):

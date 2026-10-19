@@ -12,10 +12,12 @@ Each command prints one summary line. Everything is simulation.
 """
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -25,6 +27,14 @@ from .io import read_json
 
 RUNS = Path("runs")
 PROFILE = CELL_DIR / "cell.yaml"
+
+
+def _repository():
+    """The repository this is run in: the nearest folder up with configs/cell.yaml."""
+    for folder in [Path.cwd(), *Path.cwd().parents]:
+        if (folder / CELL_CONFIG).is_file():
+            return folder
+    raise SystemExit(f"no {CELL_CONFIG} here or above: run pen-art inside the repository")
 
 
 def _name(name):
@@ -87,7 +97,8 @@ def frame(args):
     graph = read_json(source / "stroke_graph.json")
     wire = sum(edge["length_m"] for edge in graph["edges"])
     euler = graph["generation"].get("eulerization", {})
-    size = read_json(source / "wire_budget.json")["max_extent_m"]
+    budget = read_json(source / "wire_budget.json")
+    size = budget["max_extent_m"]
     stands = read_json(source / "structural_screen.json")["modeled_pass"]
     if wire < 1.0:
         print("  very little wire: is the mesh's up axis right (--up y or --up z)?")
@@ -97,6 +108,12 @@ def frame(args):
         f"fewest trails {euler.get('minimum_trails_after', '?')} "
         f"(was {euler.get('minimum_trails_before', '?')} before connector wire)"
     )
+    if not budget["within_budget"]:
+        wire_budget = budget["maximum_wire_m"]
+        print(f"  over the {wire_budget:g} m wire budget even at the smallest size tried")
+    reasons = Counter(row["reason"] for row in euler.get("left_odd", []))
+    for reason, count in sorted(reasons.items()):
+        print(f"  {count} odd nodes not joined by connector wire: {reason}")
 
 
 def detail(args):
@@ -203,7 +220,7 @@ def main(argv=None):
     steps = parser.add_subparsers(dest="step", required=True)
 
     step = steps.add_parser("cell", help="build the robot cell from configs/cell.yaml")
-    step.add_argument("--cell", type=Path, default=CELL_CONFIG)
+    step.add_argument("--cell", type=Path, help=f"default: {CELL_CONFIG}")
     step.set_defaults(run=cell)
 
     step = steps.add_parser("frame", help="turn a mesh into a frame")
@@ -244,6 +261,14 @@ def main(argv=None):
     step.set_defaults(run=view)
 
     args = parser.parse_args(argv)
+    # Paths given on the command line are where the user is; everything else
+    # is relative to the repository.
+    for key in ("mesh", "cell"):
+        if getattr(args, key, None) is not None:
+            setattr(args, key, getattr(args, key).resolve())
+    if args.step == "cell" and args.cell is None:
+        args.cell = CELL_CONFIG
+    os.chdir(_repository())
     try:
         args.run(args)
     except Exception as error:

@@ -75,11 +75,12 @@ and checks that the frame stands.
 
 ```
 $ .venv/bin/pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost
-frame ghost: 9.9 m of wire, 142 mm tall at most, 1545 wire pieces, stands: yes, fewest trails 1 (was 10 before connector wire)
+frame ghost: 9.9 m of wire, 142 mm tall at most, 1535 wire pieces, stands: yes, fewest trails 1 (was 10 before connector wire)
 ```
 
 Everything for the ghost goes in `runs/ghost/`. Running `frame` again starts
-that folder over.
+that folder over. When the frame misses its wire budget, or some odd nodes
+could not be joined by connector wire, an extra line says so.
 
 *Try:* `--layer 0.015` (fewer, taller layers, less wire), or `--up z` for a
 mesh whose up axis is z. The settings are in `configs/frame.yaml`.
@@ -94,7 +95,7 @@ it draws on, and the arm reaches around the object for the far side.
 
 ```
 $ .venv/bin/pen-art detail ghost
-detail ghost: 3.18 m in 29 strokes (plan-geometry drops what the arm cannot draw; plan-timing trims to the budget)
+detail ghost: 3.30 m in 28 strokes (plan-geometry drops what the arm cannot draw; plan-timing trims to the budget)
 ```
 
 This takes about three minutes. `--crease-threshold` (in mm; smaller values
@@ -119,12 +120,14 @@ plan.
 $ .venv/bin/pen-art plan-geometry ghost --frame-only
 plan-geometry ghost: GEOMETRY_PLANNED, 1 lift-offs (fewest possible for the frame: 1)
 $ .venv/bin/pen-art plan-geometry ghost
-plan-geometry ghost: GEOMETRY_PLANNED, 28 lift-offs (fewest possible for the frame: 1), dropped 2 detail strokes the arm cannot draw
+  dropping detail the arm cannot draw: tour-019 (no clear approach, drawing or withdrawal, last PEN_WIRE_COLLISION)
+plan-geometry ghost: GEOMETRY_PLANNED, 28 lift-offs (fewest possible for the frame: 1), dropped 1 detail strokes the arm cannot draw
 ```
 
 The frame alone takes about 16 s and is drawn in one stroke: the only
-lift-off is the first approach. With detail it takes about two minutes, and
-every detail stroke starts with a lift-off.
+lift-off is the first approach. With detail it takes about a minute and a half, and
+every detail stroke starts with a lift-off. Each dropped stroke is named with
+where the planner last failed on it.
 
 ### 4. Time it: `pen-art plan-timing`
 
@@ -135,10 +138,13 @@ give the least detail per minute are dropped and the rest planned again.
 
 ```
 $ .venv/bin/pen-art plan-timing ghost
-plan-timing ghost: FULL_BUILD_PLANNED, 13.1 min of printing, 14 lift-offs (fewest possible for the frame: 1), detail 1.87 m adding 3.5 min, trimmed 14 detail strokes to fit
+  trimming 14 detail strokes to fit 2 m and 15 min
+plan-timing ghost: FULL_BUILD_PLANNED, 13.0 min of printing, 14 lift-offs (fewest possible for the frame: 1), detail 1.99 m adding 3.4 min, trimmed 14 detail strokes to fit
 ```
 
-The frame alone prints in 9.7 min.
+The frame alone prints in 9.7 min. Trimming always starts again from the
+plan `plan-geometry` made, so running `plan-timing` again with a larger
+`--detail` or `--minutes` brings trimmed strokes back.
 
 ### 5. Verify: `pen-art verify-full-robot`
 
@@ -148,7 +154,7 @@ built so far. Only a plan that passes counts.
 
 ```
 $ .venv/bin/pen-art verify-full-robot ghost
-verify-full-robot ghost: FULL_BUILD_VERIFIED (simulation only)
+verify-full-robot ghost: FULL_BUILD_VERIFIED (simulation only), 13.0 min of printing, 14 lift-offs (fewest possible for the frame: 1)
 ```
 
 ### 6. Look at it: `pen-art view`
@@ -160,7 +166,7 @@ verify-full-robot ghost: FULL_BUILD_VERIFIED (simulation only)
 Four panels: the object's picture, the textured model, the frame (green) and
 detail (orange), and the robot drawing it, with one set of play controls.
 
-Stages run in order. Running one before the stage it builds on, after it
+The commands work from any folder inside the repository. Stages run in order. Running one before the stage it builds on, after it
 failed, or after the frame, the cell or the planning settings changed, stops
 with a message naming the stage to run. A failed stage exits with a non-zero
 status and points to `runs/NAME/planning.log`.
@@ -216,8 +222,8 @@ layers and less wire. With `build_volume_m: 0.08` in `configs/cell.yaml`
 | Fewest frame strokes with connector wire (without) | 1 (10) | 1 (6) |
 | Frame print time | 9.7 min | 3.2 min |
 | Frame lift-offs | 1 | 1 |
-| Detail kept | 1.87 m (+3.5 min) | 1.27 m (+4.2 min) |
-| Frame and detail print time | 13.1 min | 7.3 min |
+| Detail kept | 1.99 m (+3.4 min) | 1.27 m (+4.2 min) |
+| Frame and detail print time | 13.0 min | 7.3 min |
 | Lift-offs with detail | 14 | 28 |
 | Verdict | `FULL_BUILD_VERIFIED` | `FULL_BUILD_VERIFIED` |
 

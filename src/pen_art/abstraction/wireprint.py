@@ -1144,7 +1144,15 @@ def _bowed_arc(points, outline, bow_m):
         target = inner.interpolate(inner.project(Point(*dense[i, :2])))
         share = np.sin(np.pi * s[i] / s[-1])
         result[i, :2] += share * (np.array([target.x, target.y]) - dense[i, :2])
-    return result
+    # Points pulled toward a corner of the shrunk outline crowd together; keep
+    # them at least half a millimetre apart so no wire piece is a stub.
+    kept = [result[0]]
+    for point in result[1:-1]:
+        if np.linalg.norm(point - kept[-1]) >= 0.0005:
+            kept.append(point)
+    if len(kept) > 1 and np.linalg.norm(result[-1] - kept[-1]) < 0.0005:
+        kept.pop()
+    return np.vstack([*kept, result[-1]])
 
 
 def eulerize_frame(graph, budget_m, structure=None, bow_m=0.003):

@@ -117,6 +117,13 @@ class MaterialPrefix:
         return self.scene
 
 
+def _failure(row):
+    """Where a failed attempt failed (propose, check or connect) and its most specific status."""
+    detail = row.get("detail")
+    status = (detail.get("status") if isinstance(detail, dict) else None) or row["status"]
+    return {"stage": row["stage"], "status": status}
+
+
 class ForwardSchedule:
     """Dependency bookkeeping for one fixed construction order.
 
@@ -352,7 +359,11 @@ class ForwardSchedule:
     def blocked(self):
         """Actions with no remaining alternative; never a proof of infeasibility."""
         return [
-            {"action": self.actions[index], "outcome": slot["unresolved"]}
+            {
+                "action": self.actions[index],
+                "outcome": slot["unresolved"],
+                "last_failure": _failure(slot["history"][-1]) if slot["history"] else None,
+            }
             for index, slot in enumerate(self.slots)
             if slot["unresolved"] is not None
         ]

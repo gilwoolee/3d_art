@@ -831,13 +831,13 @@ def main():
     if args.check_with_planner:
         # Keep what the arm can draw; cut a failing tour at the failing point,
         # or trim the end it cannot reach, and check the pieces again.
-        checker = PlannerCheck(
-            source,
-            framework,
-            detail_profile(args.profile, args.profile.parent / f"{target.name}_check_profile.yaml"),
-            target.parent / f"{target.name}_check_cell",
-            sectors,
-        )
+        # Scratch for the check, named for the object (its profile sits beside
+        # the cell profile, whose robot paths are relative to it); both go
+        # when the check is done.
+        scratch = f"{target.parent.name}_{target.name}_check"
+        check_profile = detail_profile(args.profile, args.profile.parent / f"{scratch}.yaml")
+        check_cell = target.parent / scratch
+        checker = PlannerCheck(source, framework, check_profile, check_cell, sectors)
         queue, ready, checks = list(ready), [], 0
         while queue:
             entry = queue.pop(0)
@@ -864,6 +864,8 @@ def main():
                     queue.append(
                         {**entry, "p": kept[0], "tilt": kept[1], "depth": entry.get("depth", 0) + 1}
                     )
+        shutil.rmtree(check_cell, ignore_errors=True)
+        check_profile.unlink(missing_ok=True)
         stages["arm can draw it"] = sum(length(e["p"]) for e in ready)
         print(f"planner check: {checks} lines checked, {len(ready)} drawable")
 
