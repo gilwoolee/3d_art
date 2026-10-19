@@ -27,25 +27,32 @@ one command, the expected output for the ghost, and what to try changing.
    back down of at most 27 degrees), within the 10 m wire budget, with a
    base grid on the bed, coils for thin parts, and a structural check that
    the frame stands.
-2. **Plan the paths, geometry first**, on 24 workers. The build order comes
-   from the frame. Each stroke gets one pen orientation (tilt and lean
-   direction) and a collision-free arm path, checked against the cell and all wire laid so
-   far. No timing yet. A stroke that cannot be drawn stops the plan and is
-   named.
-3. **Time it once:** speeds, cooling holds, moves between strokes.
-   This gives the print time. A timing failure is reported, never searched
-   again.
-4. **Verify:** a separate check replays the full robot against everything
-   built so far. A plan that passes is `FULL_BUILD_VERIFIED`.
-5. **Add detail:** generate surface strokes, plan them the same way (steps
-   2-4), drop strokes that cannot be drawn, trim to about 2 m and 15 extra
-   minutes.
+2. **Add detail** (decided by the user to come before planning): generate
+   surface strokes that rest on the frame wire, about 2 m. Generation only;
+   no planning yet. Detail is drawn after the frame.
+3. **Plan the paths, geometry first**, on 24 workers, for frame and detail
+   together. The build order comes from the frame, then the detail. Each
+   stroke gets one pen orientation (tilt and lean direction) and a
+   collision-free arm path, checked against the cell and all wire laid so
+   far. No timing yet. A detail stroke that cannot be drawn is dropped and
+   reported; a frame stroke that cannot be drawn stops the plan and is named.
+4. **Time it once:** speeds, cooling holds, moves between strokes. This gives
+   the print time. Detail is then trimmed to the budget: at most about 2 m
+   and 15 minutes beyond the frame's own share of the timed plan, dropping
+   the strokes that give the least detail per minute; the trimmed plan is
+   timed again. A timing failure is reported, never searched again.
+5. **Verify:** a separate check replays the full robot against everything
+   built so far, once for the whole build. A plan that passes is
+   `FULL_BUILD_VERIFIED`.
 6. **View** the result in the browser viewer.
 
-Steps 2, 3 and 4 are three separate commands, `plan-geometry`,
+Steps 3, 4 and 5 are three separate commands, `plan-geometry`,
 `plan-timing` and `verify-full-robot` (decided by the user), so the learner
 runs and inspects each stage on its own. Each reads the previous stage's
-output from the run folder and writes its own.
+output from the run folder and writes its own. Each stage runs exactly once:
+what today's `plan_detail.py` hides in rounds of replanning becomes visible
+as "plan-geometry dropped these strokes, plan-timing trimmed these". A
+learner may skip step 2 to plan the frame alone.
 
 **Input meshes.** The tutorial says plainly that the pipeline generally
 assumes a mesh made by a text- or image-to-3D generator such as Meshy
@@ -161,10 +168,12 @@ library when one is present and otherwise falls back to its own sampler
   so order-of-work step 2 checks the ghost there and picks the default plate
   position from what plans.
 - **Command form:** one entry point, `pen-art <step>`, with the steps
-  `cell`, `frame`, `plan-geometry`, `plan-timing`, `verify-full-robot`
-  (these three names decided by the user), `detail`, `view`.
-- **Detail** stays one command: its rounds of planning and dropping strokes
-  run the same three stages internally.
+  `cell`, `frame`, `detail`, `plan-geometry`, `plan-timing`,
+  `verify-full-robot` (these three names decided by the user), `view`.
+- **Dropping is a single pass.** `plan-geometry` drops every detail stroke
+  it cannot draw in one pass, rather than replanning in rounds. If dropping
+  a stroke can make a later one drawable, that later one may still be
+  dropped; acceptable for a tutorial.
 - **The 5 tests:** frame generator (slice heights), continuous collision
   check, timing sweeps exactly the checked path, verification reports a
   rejection, and the pen is checked against wire already laid. Browser
@@ -185,7 +194,9 @@ library when one is present and otherwise falls back to its own sampler
 - How to split today's single planning process (paths and timing together
   in `section_build`) so that timing runs as its own command on a saved
   untimed plan; verification (`cell_replay`) is already separate.
-- Whether `detail` reuses the three stage commands directly.
+- How `plan-timing` trims detail to the budget (re-time after removing
+  strokes, or remove and re-time in steps) and how much of
+  `scripts/plan_detail.py` it reuses.
 - How `cell.yaml` values map onto the existing profile and collision model.
 
 ## Order of work
@@ -202,7 +213,8 @@ library when one is present and otherwise falls back to its own sampler
    the turntable instead). Check the ghost frame and detail plan to
    `FULL_BUILD_VERIFIED`.
 3. Merge the configs into `cell.yaml` and `frame.yaml`.
-4. One command per step, with geometry, timing and verification split into
-   `plan-geometry`, `plan-timing` and `verify-full-robot`.
+4. One command per step, in the order cell, frame, detail, plan-geometry,
+   plan-timing, verify-full-robot, view; detail generation only, with
+   dropping in plan-geometry and trimming in plan-timing.
 5. Write the tutorial README with measured outputs.
 6. From a fresh clone: run the tutorial at 15 cm and at 8 cm.
