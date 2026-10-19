@@ -4,8 +4,8 @@ Date: 2026-10-18. Status: for the user's approval.
 
 ## Intent
 
-Pen Art plans wire sculptures drawn in the air by a 3D pen on one robot arm,
-with a turntable. The research work is finished. The repository becomes an
+Pen Art plans wire sculptures drawn in the air by a 3D pen on one robot arm
+(7 joints) around a fixed build plate. The research work is finished. The repository becomes an
 **educational example** that walks a learner through the full path from a
 mesh to a verified print plan, in simulation.
 
@@ -20,18 +20,18 @@ The README is a tutorial in this order. Each step has: what it does and why,
 one command, the expected output for the ghost, and what to try changing.
 
 0. **Describe the cell** (`configs/cell.yaml`): build volume, pen shape,
-   robot placement, turntable. One command writes the robot cell from it.
+   robot placement, build plate. One command writes the robot cell from it.
 1. **Mesh to frame** (`configs/frame.yaml`): the generator slices the mesh
    into horizontal loops joined by zigzags (a vertical riser, then a slant
    back down of at most 27 degrees), within the 10 m wire budget, with a
    base grid on the bed, coils for thin parts, and a structural check that
    the frame stands.
 2. **Plan the paths, geometry first**, on 24 workers. The build order comes
-   from the frame. Each stroke gets one turntable face and one pen tilt and
-   a collision-free arm path, checked against the cell and all wire laid so
+   from the frame. Each stroke gets one pen orientation (tilt and lean
+   direction) and a collision-free arm path, checked against the cell and all wire laid so
    far. No timing yet. A stroke that cannot be drawn stops the plan and is
    named.
-3. **Time it once:** speeds, cooling holds, turntable turns between strokes.
+3. **Time it once:** speeds, cooling holds, moves between strokes.
    This gives the print time. A timing failure is reported, never searched
    again.
 4. **Verify:** a separate check replays the full robot against everything
@@ -47,7 +47,7 @@ runs and inspects each stage on its own. Each reads the previous stage's
 output from the run folder and writes its own.
 
 The ghost (`objs/cute_ghost/`) is the worked example in every step. A short
-"Concepts" section explains frame, stroke, turntable face, geometry-first
+"Concepts" section explains frame, stroke, pen orientation, geometry-first
 planning, timing and verification in plain words.
 
 ## Goals
@@ -63,6 +63,8 @@ planning, timing and verification in plain words.
 ## Non-goals
 
 - Two arms.
+- A turntable. The current code turns the object in 90 degree steps between
+  strokes; that goes, along with its timing, collision checks and test.
 - Any planning mode other than geometry first: the sequential timed planner,
   its checkpoints and resume, and benchmark comparison modes.
 - The motion library: storing, retrieving and adapting earlier motions, and
@@ -85,8 +87,10 @@ planning, timing and verification in plain words.
 - Single arm, geometry-first planning only.
 - Frame wire at most 10 m per object; detail about 2 m and at most 15 extra
   minutes of print time.
-- The pen never twists wire while depositing: one tilt and one turntable
-  face per stroke.
+- The pen never twists wire while depositing: one pen orientation (tilt
+  and lean direction) per stroke.
+- No turntable (decided by the user): the build plate is fixed and the arm
+  reaches around the object.
 - Frame settings (layer height, zigzag spacing, base grid spacing) are
   physical sizes set by the wire and the pen. They do **not** scale with the
   build volume: a smaller volume gives a smaller object with fewer layers
@@ -124,10 +128,24 @@ The geometry-first planner currently takes frame strokes from the motion
 library when one is present and otherwise falls back to its own sampler
 (`cold_fallback`); that sampler becomes the only path.
 
+## Turntable experiment (2026-10-18, ghost, no library, 24 workers)
+
+- Today the ghost frame uses face 0 for 40 of 41 strokes; detail uses faces
+  1-3 for 12 of 15 strokes, because detail tilts the pen toward the robot
+  only.
+- With the plate fixed and the pen upright, 40 of 41 frame strokes plan,
+  including whole rings around the ghost. One ring (`zigzag-10`, 8.4-9.4 cm
+  high) fails a path-accuracy check (1.28 mm from the line against a 0.3 mm
+  limit), not reach or collision; with the turntable the planner turned and
+  found a posture that passed. Without it, such a stroke needs a retry with
+  a finer path or another posture.
+- Detail with the plate fixed and the pen leaning toward the side it draws:
+  running; results to be added.
+
 ## Decisions
 
 - **Configs:** merge the 7 into `configs/cell.yaml` (build volume, pen
-  geometry, robot placement, turntable) and `configs/frame.yaml` (frame
+  geometry, robot placement, build plate) and `configs/frame.yaml` (frame
   generator, plus process settings such as speeds, cooling and strand
   diameter under `process`). The pen stays upright with the 27 degree slant
   limit; these are not tutorial settings.
@@ -146,8 +164,8 @@ library when one is present and otherwise falls back to its own sampler
   run the same three stages internally.
 - **The 5 tests:** frame generator (slice heights), continuous collision
   check, timing sweeps exactly the checked path, verification reports a
-  rejection, and a quarter turn of the turntable rejects a collision between
-  clear endpoints. Browser tests are dropped.
+  rejection, and the pen is checked against wire already laid. Browser
+  tests are dropped.
 - **README numbers** are measured from a fresh clone and written as
   "about"; repeated plans gave identical results in testing.
 - **Downloads:** `scripts/setup_machine.sh` may still fetch its usual inputs
@@ -171,9 +189,14 @@ library when one is present and otherwise falls back to its own sampler
 
 1. Single arm and geometry first only: remove two-arm code, the motion
    library, other planning modes and unused code; keep the 5 tests green;
-   check the ghost still plans to `FULL_BUILD_VERIFIED` at about 14.2 min.
-2. Merge the configs into `cell.yaml` and `frame.yaml`.
-3. One command per step, with geometry, timing and verification split into
+   check the ghost still plans to `FULL_BUILD_VERIFIED` (about 14.2 min with
+   today's turntable).
+2. Remove the turntable. Frame strokes stay upright; detail strokes lean the
+   pen toward the side of the object they draw on, and the arm reaches
+   around. Check the ghost frame and detail plan to `FULL_BUILD_VERIFIED`
+   (see "Turntable experiment").
+3. Merge the configs into `cell.yaml` and `frame.yaml`.
+4. One command per step, with geometry, timing and verification split into
    `plan-geometry`, `plan-timing` and `verify-full-robot`.
-4. Write the tutorial README with measured outputs.
-5. From a fresh clone: run the tutorial at 15 cm and at 8 cm.
+5. Write the tutorial README with measured outputs.
+6. From a fresh clone: run the tutorial at 15 cm and at 8 cm.
