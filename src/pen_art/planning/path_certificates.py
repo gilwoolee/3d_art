@@ -2,14 +2,46 @@
 
 import hashlib
 import json
+import sys
 from collections import Counter
+from importlib.metadata import version
 from pathlib import Path
 from time import perf_counter
 
 import numpy as np
 
-from ..io import read_json, write_json
-from .replay_checkpoint import IMPLEMENTATION, digest
+from ..io import read_json, sha256, write_json
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+
+# Captured when this process imports it: a later source edit must not label an
+# already running planner or verifier with the new implementation hash.
+IMPLEMENTATION = digest(
+    {
+        "sources": {
+            str(path.relative_to(Path(__file__).parents[1])): sha256(path)
+            for path in sorted(Path(__file__).parents[1].rglob("*.py"))
+        },
+        "python": sys.version,
+        "packages": {name: version(name) for name in ("numpy", "scipy", "python-fcl")},
+    }
+)
+
+
+def plain(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {key: plain(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [plain(item) for item in value]
+    return value
+
 
 POLICY = "exact-path-invariants-v2"
 SCOPE_STATUS = {
@@ -69,8 +101,6 @@ def drawing_binding(path_record, *, durations=True):
     from adding a travel prefix therefore causes a safe miss, not relaxed reuse.
     Context still binds physical settings and source geometry independently.
     """
-    from .clock_store import plain
-
     edges = []
     for row in path_record["edges"]:
         if row["kind"] != "DRAW":
@@ -81,7 +111,6 @@ def drawing_binding(path_record, *, durations=True):
             local["duration_s"] = row["end_s"] - row["start_s"]
         edges.append(local)
     return {"edges": edges, "fixed_tcp_rotation": path_record.get("fixed_tcp_rotation"),
-            "drawing_table_index": path_record.get("drawing_table_index"),
             "tracking_orientation_constraint": path_record.get("tracking_orientation_constraint")}
 
 
@@ -93,12 +122,8 @@ class PathCertificateStore:
     including its timing and orientation metadata. It certifies no material scene.
     """
 
-    def __init__(self, directory, *, enabled=True, fallback=None):
+    def __init__(self, directory):
         self.directory = Path(directory)
-        # A frozen library's proofs stay readable while new ones are written
-        # elsewhere, so concurrent or repeated runs see identical inputs.
-        self.fallback = None if fallback is None else Path(fallback)
-        self.enabled = enabled
         self.stats = Counter()
         self.seconds = Counter()
         self._memory = {}
@@ -120,20 +145,12 @@ class PathCertificateStore:
             )),
         }
 
-    def key(self, context, path_record, scope):
-        return digest(self._binding(context, path_record, scope))
-
     def get(self, context, path_record, scope):
         started = perf_counter()
         try:
-            if not self.enabled:
-                self.stats["disabled"] += 1
-                return None
             binding = self._binding(context, path_record, scope)
             key = digest(binding)
             path = self.directory / f"{key}.json"
-            if self.fallback is not None and not path.exists():
-                path = self.fallback / f"{key}.json"
             try:
                 stat = path.stat()
                 signature = (stat.st_mtime_ns, stat.st_size)
@@ -170,9 +187,6 @@ class PathCertificateStore:
         proof = _canonical(proof)
         if not isinstance(proof, dict) or proof.get("status") != SCOPE_STATUS[scope]:
             raise ValueError(f"Only a successful {scope} proof can be admitted")
-        if not self.enabled:
-            self.stats["disabled"] += 1
-            return None
         key = digest(binding)
         contents = {"kind": "exact_path_certificate", "binding": binding, "proof": proof}
         row = {**contents, "checksum": digest(contents)}
@@ -184,4 +198,4 @@ class PathCertificateStore:
         return key
 
     def report(self):
-        return {"counts": dict(self.stats), "seconds": dict(self.seconds), "enabled": self.enabled}
+        return {"counts": dict(self.stats), "seconds": dict(self.seconds)}

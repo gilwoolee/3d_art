@@ -55,10 +55,6 @@ class ScheduleState:
     history: tuple[ScheduledMotion, ...] = ()
     payload: object = field(default=None, compare=False, repr=False)
 
-    @property
-    def table_index(self):
-        return getattr(self.payload, "table_index", 0)
-
     def ready_nodes(self):
         return frozenset(node for node, ready in self.support_ready if ready <= self.time_s)
 

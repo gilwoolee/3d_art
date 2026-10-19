@@ -22,7 +22,7 @@ def geometric_path(operations, arm):
     Expansion, travel coalescing and the dropping of zero-length holds mirror
     ``timed_path``. A drawing (its ``path`` is the checked cubic spline)
     contributes one edge per spline piece instead of one per retiming grid
-    interval, as the ``cubic_toppra`` clock times it.
+    interval, as the drawing clock times it.
     """
     expanded = []
     for operation in operations:

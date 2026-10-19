@@ -1,4 +1,5 @@
-"""Incremental capsule scene for conservative deposited-strand geometry."""
+"""Incremental capsule scene for conservative deposited-strand geometry, and
+the fixed build plate it stands on."""
 
 from collections import Counter
 from hashlib import sha256
@@ -10,9 +11,22 @@ import numpy as np
 from .collision import placed
 
 
+class FixedPlate:
+    """The build plate: it lies on the table and never moves."""
+
+    def __init__(self, world_from_build):
+        self.world_from_build = np.asarray(world_from_build, float)
+
+    @classmethod
+    def from_profile(cls, profile):
+        return cls(profile["world_from_build"])
+
+    def build_transform(self):
+        return self.world_from_build
+
+
 class MaterialScene:
     def __init__(self):
-        self.table_index = 0
         self.manager = fcl.DynamicAABBTreeCollisionManager()
         self.manager.setup()
         self.objects = []
@@ -94,14 +108,13 @@ class MaterialScene:
         count = len(self.objects) if count is None else count
         if not isinstance(count, int) or not 0 <= count <= len(self.objects):
             raise ValueError("Material prefix must lie within the scene")
-        return self._geometry_prefixes[count], self.table_index
+        return self._geometry_prefixes[count]
 
     def prefix(self, count):
         """Share the first capsules of an append-only scene, in insertion order."""
         self.geometry_prefix(count)  # Validate before allocating a manager.
         result = MaterialScene()
         result.clearance_query_enabled = self.clearance_query_enabled
-        result.table_index = self.table_index
         for index in range(count):
             segment = {**self._physical_segments[index], "name": self.segments[index]["name"]}
             result._append_object(self.objects[index], self.geometry_ids[index], segment)
@@ -112,7 +125,6 @@ class MaterialScene:
         self.geometry_prefix(start)  # Validate before allocating a manager.
         result = MaterialScene()
         result.clearance_query_enabled = self.clearance_query_enabled
-        result.table_index = self.table_index
         for index in range(start, len(self.objects)):
             segment = {**self._physical_segments[index], "name": self.segments[index]["name"]}
             result._append_object(self.objects[index], self.geometry_ids[index], segment)
@@ -374,7 +386,6 @@ class MaterialScene:
     def copy(self):
         result = MaterialScene()
         result.clearance_query_enabled = self.clearance_query_enabled
-        result.table_index = self.table_index
         for obj, geometry_id, segment in zip(
             self.objects, self.geometry_ids, self._physical_segments, strict=True
         ):
@@ -397,7 +408,6 @@ class MaterialScene:
             raise ValueError("Contact region must be a finite positive-radius 3D ball")
         clipped = MaterialScene()
         clipped.clearance_query_enabled = self.clearance_query_enabled
-        clipped.table_index = self.table_index
         self._clip_into(clipped, range(len(self.objects)), center, radius)
         return clipped
 
@@ -496,10 +506,6 @@ class ContactMaterialView(MaterialScene):
     @property
     def upper(self):
         return self.source.upper
-
-    @property
-    def table_index(self):
-        return self.source.table_index
 
     def geometry_prefix(self, count=None):
         return (

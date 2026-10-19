@@ -84,8 +84,6 @@ planning:
   assumed_cooling_s: 2.0
   maximum_subdivision_depth: 20
 timing:
-  drawing_clock: cubic_toppra
-  acceleration_constraint: cubic_bernstein
   joint_acceleration_rad_s2: [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8]
   velocity_fraction: 0.5
   travel_speed_m_s: 0.25

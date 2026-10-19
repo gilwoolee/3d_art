@@ -295,16 +295,21 @@ def verify_full_robot(folder, workers=24):
     command = [
         sys.executable, "-m", "pen_art.planning.cell_replay",
         "--run", str(run), "--config", state["profile"], "--workers", str(workers),
-        "--maximum-seconds", "7200", "--accept-geometry-proofs",
+        "--maximum-seconds", "7200",
     ]
     (run / "verification.json").unlink(missing_ok=True)
     with open(folder / "planning.log", "a") as out:
         result = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, check=False)
-    # The verdict of this replay, never one left over from an earlier one.
-    finished = (run / "verification.json").exists()
-    state["verification"] = (
-        read_json(run / "section_build.json")["status"] if finished else "VERIFICATION_ERROR"
+    # The verdict of this replay, never one left over from an earlier one. A
+    # replay that stopped with an error leaves the plan's own status behind.
+    verdict = (
+        read_json(run / "section_build.json")["status"]
+        if (run / "verification.json").exists()
+        else None
     )
-    if result.returncode and state["verification"] == "FULL_BUILD_VERIFIED":
-        state["verification"] = "VERIFICATION_ERROR"
+    if verdict in (None, "FULL_BUILD_PLANNED") or (
+        result.returncode and verdict == "FULL_BUILD_VERIFIED"
+    ):
+        verdict = "VERIFICATION_ERROR"
+    state["verification"] = verdict
     return _save(folder, state)

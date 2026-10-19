@@ -14,9 +14,9 @@ collision scope; acceptance remains the independent ordered full-robot replay.
 import os
 import pickle
 import traceback
+from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
-from dataclasses import replace
 from multiprocessing import get_context
 from pathlib import Path
 from time import monotonic, perf_counter
@@ -24,7 +24,7 @@ from time import monotonic, perf_counter
 import numpy as np
 
 from ..curves import flatten_curve, transform_points
-from ..io import read_json, write_json
+from ..io import artifact, read_json, sha256, stage_update, write_json
 from .cell_motion import (
     DEFAULT_PEN_TILTS_DEG,
     DEFAULT_SETTINGS,
@@ -32,18 +32,17 @@ from .cell_motion import (
     fixed_rotation_families,
     pen_clear,
 )
-from .clock_path import ClockPath
 from .material_journal import (
     MaterialPrefix,
     _merged,
+    cached_journal,
     deposit_difference,
     deposit_key,
-    load_journal,
     write_journal,
 )
-from .plate import FixedPlate
-from .replay_checkpoint import IMPLEMENTATION, digest
-from .scene import MaterialScene
+from .path_certificates import IMPLEMENTATION, digest
+from .process_clock import action_ready_times, feed_events
+from .scene import FixedPlate, MaterialScene
 from .schedule import MotionProposal, ScheduledMotion
 
 POLICY = "parallel-forward-v1"
@@ -114,7 +113,7 @@ class ForwardSchedule:
         for slot in self.slots:
             if slot["candidate"] is None:
                 break
-            chain.append([slot["candidate"]["deposit_key"], slot["candidate"]["table_index"]])
+            chain.append(slot["candidate"]["deposit_key"])
             digests.append(digest([digests[-1], chain[-1]]))
         return chain, digests
 
@@ -184,8 +183,8 @@ class ForwardSchedule:
             "previous": ends[0],
             "current": ends[1],
             "chain": chain,
-            "start": None if previous == HOME else [previous["q_end"], previous["table_index"]],
-            "end": None if current == HOME else [current["q_start"], current["table_index"]],
+            "start": None if previous == HOME else previous["q_end"],
+            "end": None if current == HOME else current["q_start"],
             "key": self._key("connect", index, ends, self._prefix_digest(index)),
         }
 
@@ -228,7 +227,6 @@ class ForwardSchedule:
                     "rotation": previous["candidate"]["tcp_rotation"],
                     "pen_tilt_deg": previous["candidate"].get("pen_tilt_deg"),
                     "roll_rad": previous["candidate"].get("roll_rad"),
-                    "table_index": previous["candidate"]["table_index"],
                     "previous": previous["candidate"]["key"],
                 }
         chain = self.chain(index)
@@ -398,7 +396,7 @@ class ForwardSchedule:
                 if slot["candidate"] is None
                 else {
                     name: slot["candidate"].get(name)
-                    for name in ("mode", "source", "variant", "parent", "table_index", "capsules")
+                    for name in ("mode", "source", "variant", "parent", "capsules")
                 },
                 "candidate_key": None if slot["candidate"] is None else slot["candidate"]["key"],
                 "deposit_key": None
@@ -447,17 +445,7 @@ def greedy_forward_order(actions, ground, stable, *, deadline=float("inf")):
     return None if remaining else order
 
 
-def at_index(path, index):
-    if path is None or path is False:
-        return path
-    result = ClockPath([replace(edge, table_index=index) for edge in path.edges])
-    result.metadata.update(path.metadata)
-    if hasattr(path, "timing_operations"):
-        result.timing_operations = path.timing_operations
-    return result
-
-
-class IndexedMotions:
+class Motions:
     """The planner's drawing and travel samplers, as the workers call them."""
 
     def __init__(self, build):
@@ -478,16 +466,8 @@ class IndexedMotions:
         )
         return False
 
-    def transition(self, scene, start, start_index, end, end_index):
-        """A pen-off travel between two drawings; the plate never turns."""
-        if start_index != end_index:
-            raise ValueError("A fixed build plate has one position")
-        return at_index(self.build.travel_clock(scene, start, end), start_index)
-
-    def drawings(
-        self, row, available, q, index, scene, *, chain=None, prefer_start=None, retry=0
-    ):
-        """Sampled drawings of ``row`` at table position ``index``.
+    def drawings(self, row, available, q, scene, *, chain=None, prefer_start=None, retry=0):
+        """Sampled drawings of ``row``.
 
         ``chain`` is the predecessor's end: ``node``, joint position ``q`` and
         ``rotation``. Only drawings that start there, keep that pen
@@ -500,13 +480,13 @@ class IndexedMotions:
         world azimuth (detail drawn on the far side of the object).
         """
         if chain is not None:
-            yield from self._chained(row, chain, index)
+            yield from self._chained(row, chain)
             return
         if prefer_start is not None and prefer_start in available and len(available) > 1:
-            yield from self.drawings(row, {prefer_start}, q, index, scene, retry=retry)
+            yield from self.drawings(row, {prefer_start}, q, scene, retry=retry)
             available = set(available) - {prefer_start}
         build, planner = self.build, self.build.planner
-        transform = self.table.build_transform(index)
+        transform = self.table.build_transform()
         # Keep the pen orientations whose pen clears the wire at the stroke's
         # start, middle and end; IK then runs along the stroke for those.
         points, _ = flatten_curve(row, 0.00005, 0.003)
@@ -563,11 +543,11 @@ class IndexedMotions:
             orientation_policy=planner.profile.get("drawing_orientation_policy", "fixed"),
         ):
             if drawing["status"] == "SAMPLED_DRAWING_PATH":
-                yield self._candidate(drawing, index)
+                yield self._candidate(drawing)
 
-    def _chained(self, row, chain, index):
+    def _chained(self, row, chain):
         build, planner = self.build, self.build.planner
-        transform = self.table.build_transform(index)
+        transform = self.table.build_transform()
         start = np.asarray(chain["q"], float)
         rotation = {
             "orientation_policy": "fixed",
@@ -596,13 +576,12 @@ class IndexedMotions:
             if not np.allclose(drawing["positions"][0], start, atol=1e-6, rtol=0):
                 continue
             drawing["positions"][0] = start.tolist()
-            yield self._candidate(drawing, index)
+            yield self._candidate(drawing)
 
-    def _candidate(self, drawing, index):
+    def _candidate(self, drawing):
         planner = self.build.planner
         drawing.update(
             release_cooling_s=self.build.cooling,
-            table_index=index,
             collision_scope=planner.collision_scope,
             requires_full_robot_validation=planner.collision_scope == "pen_candidate",
         )
@@ -646,20 +625,7 @@ def _load(root, key):
 
 
 def _deposits(root, key):
-    from collections import OrderedDict
-
-    cache = _WORKER.setdefault("deposits", OrderedDict())
-    if key not in cache:
-        path = root / "deposits" / f"{key}.json"
-        value = (load_journal(path) if path.exists() else
-                 pickle.loads(path.with_suffix(".pkl").read_bytes()))
-        if deposit_key(value) != key:
-            raise ValueError("Changed material journal")
-        cache[key] = value
-        while len(cache) > 4:
-            cache.popitem(last=False)
-    cache.move_to_end(key)
-    return cache[key]
+    return cached_journal(_WORKER.setdefault("deposits", OrderedDict()), root / "deposits", key)
 
 
 def _prefix(context):
@@ -672,17 +638,15 @@ def _completed(context, index):
     return frozenset(row["id"] for row in context["order"][:index])
 
 
-def _points(context, row, index):
+def _points(context, row):
     points, _ = flatten_curve(row, 0.00005, 0.003)
-    return transform_points(points, context["model"].table.build_transform(index))
+    return transform_points(points, context["model"].table.build_transform())
 
 
-def _journal(context, index, clock, table_index):
+def _journal(context, index, clock):
     """Deposits implied by a clock, from the validator's own deposition path."""
     build = context["build"]
     scene = MaterialScene()
-    scene.table_index = table_index
-    clock = at_index(clock, table_index)
     move = MotionProposal(
         context["order"][index]["id"],
         build.arm.identity,
@@ -716,15 +680,13 @@ def _propose(context, spec, seconds):
     # the other pen roll, for a stroke that missed the path-accuracy check.
     chain_from = spec.get("chain_from")
     if chain_from is not None:
-        # Carry on from the predecessor's end: same node, joint position, pen
-        # orientation and table position, with the pen still down.
+        # Carry on from the predecessor's end: same node, joint position and
+        # pen orientation, with the pen still down.
         available = {chain_from["node"]}
-    table_index = 0
-
     scene = _prefix(context).scene_for(spec["chain"])
     started = perf_counter()
     for drawing in model.drawings(
-        row, available, build.initial, table_index, scene,
+        row, available, build.initial, scene,
         chain=chain_from, prefer_start=spec.get("prefer_start"), retry=spec["ordinal"],
     ):
         seconds["proposal"] += perf_counter() - started
@@ -737,8 +699,8 @@ def _propose(context, spec, seconds):
             started = perf_counter()
             continue
         started = perf_counter()
-        operations = _journal(context, index, local["draw_clock"], table_index)
-        local["deposits"] = [row for op in operations if op[0] == "add" for row in op[1]]
+        operations = _journal(context, index, local["draw_clock"])
+        local["deposits"] = [row for _, rows in operations for row in rows]
         operations = _merged(planner, operations)
         seconds["predicted_deposit"] += perf_counter() - started
         key = deposit_key(operations)
@@ -748,13 +710,12 @@ def _propose(context, spec, seconds):
         seconds["serialization"] += _store(
             context["root"],
             spec["key"],
-            {"drawing": drawing, "local": local, "table_index": table_index},
+            {"drawing": drawing, "local": local},
         )
         return {
             "status": "OK",
             "deposit_key": key,
-            "table_index": table_index,
-            "capsules": sum(len(op[1]) for op in operations if op[0] == "add"),
+            "capsules": sum(len(rows) for _, rows in operations),
             "source": drawing.get("proposal_source", "planner"),
             "variant": drawing.get("variant"),
             # What a stroke chained after this one starts from.
@@ -783,7 +744,7 @@ def _check(context, spec, seconds):
     started = perf_counter()
     candidate = _load(context["root"], spec["candidate"])
     seconds["serialization"] += perf_counter() - started
-    table_index, drawing = candidate["table_index"], candidate["drawing"]
+    drawing = candidate["drawing"]
     started = perf_counter()
     scene = _prefix(context).scene_for(spec["chain"])
     seconds["material_reconstruction"] += perf_counter() - started
@@ -803,12 +764,10 @@ def _check(context, spec, seconds):
             "status": "UNRESOLVED" if monotonic() >= planner.deadline else "REJECTED",
             "failure": planner.attempts[-1] if planner.attempts else None,
         }
-    local = at_index(move.payload, table_index)
-    local.metadata["drawing_table_index"] = table_index
+    local = move.payload
     swing = posture_change(local, build.arm)
     if swing:
         return {"status": "REJECTED", "failure": swing}
-    move = replace(move, payload=local, duration_s=local.duration_s)
     operations = []
     started = perf_counter()
     _, failure = planner.validate_interval(
@@ -833,7 +792,6 @@ def _check(context, spec, seconds):
     )
     return {
         "status": "OK",
-        "table_index": table_index,
         "q_start": local.edges[0].q0.tolist(),
         "q_end": local.edges[-1].q1.tolist(),
         "duration_s": local.duration_s,
@@ -855,25 +813,19 @@ def _timing_failure(build, row, clock):
 
 def _connect(context, spec, seconds):
     from .section_build import combine_clocks
-    from .source_coverage import audit_source_curve
+    from .smooth_audit import audit_source_curve
 
-    build, model, planner = context["build"], context["model"], context["build"].planner
-    index, home = spec["index"], context["model"].table.home_index
-    start, start_index = (build.initial, home) if spec["start"] is None else spec["start"]
-    end, end_index = (build.initial, home) if spec["end"] is None else spec["end"]
-    start, end = np.asarray(start, float), np.asarray(end, float)
+    build, planner = context["build"], context["build"].planner
+    index = spec["index"]
+    start = np.asarray(build.initial if spec["start"] is None else spec["start"], float)
+    end = np.asarray(build.initial if spec["end"] is None else spec["end"], float)
     started = perf_counter()
     scene = _prefix(context).scene_for(spec["chain"])
     seconds["material_reconstruction"] += perf_counter() - started
     started = perf_counter()
     # A chained stroke begins exactly where its predecessor stopped.
-    chained = (
-        spec["start"] is not None
-        and spec["end"] is not None
-        and start_index == end_index
-        and np.array_equal(start, end)
-    )
-    incoming = None if chained else model.transition(scene, start, start_index, end, end_index)
+    chained = spec["start"] is not None and spec["end"] is not None and np.array_equal(start, end)
+    incoming = None if chained else build.travel_clock(scene, start, end)
     seconds["transit"] += perf_counter() - started
     if incoming is False:
         return {
@@ -911,17 +863,16 @@ def _connect(context, spec, seconds):
     checked = _load(context["root"], spec["current"])
     seconds["serialization"] += perf_counter() - started
     path = combine_clocks(incoming, checked["clock"])
-    path.metadata["drawing_table_index"] = end_index
     started = perf_counter()
-    store = None if planner.verification_raw else planner.path_certificates
+    store = planner.path_certificates
     coverage_context = {
         "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
-        "source_points_m": _points(context, row, end_index),
+        "source_points_m": _points(context, row),
     }
-    audit = None if store is None else store.get(coverage_context, path.record(), "source_coverage")
+    audit = store.get(coverage_context, path.record(), "source_coverage")
     if audit is None:
         audit = audit_source_curve(build.arm, [path], coverage_context["source_points_m"])
-        if store is not None and audit["status"] == "BOUNDED":
+        if audit["status"] == "BOUNDED":
             store.admit(coverage_context, path.record(), "source_coverage", audit)
     seconds["source_coverage"] += perf_counter() - started
     if audit["status"] != "BOUNDED":
@@ -945,7 +896,6 @@ def _time(context, spec, seconds):
     """Time one accepted untimed action; its checked sweep must be unchanged."""
     from ..timing import TimingParameterizationError
     from .geometric_path import same_sweep
-    from .plate import audit_plate_clock
     from .section_build import combine_clocks
 
     build, planner = context["build"], context["build"].planner
@@ -953,19 +903,16 @@ def _time(context, spec, seconds):
     started = perf_counter()
     payload = _load(context["root"], spec["connected"])
     seconds["serialization"] += perf_counter() - started
-    local, table_index = payload["local"], payload["clock"].metadata["drawing_table_index"]
+    local = payload["local"]
     started = perf_counter()
     try:
-        timed = planner.time_local_drawing(build.arm.identity, local, row["id"], table_index)
+        timed = planner.time_local_drawing(build.arm.identity, local, row["id"])
     except TimingParameterizationError as error:
         return {"status": "REJECTED", "failure": {"status": "TIMING", "detail": str(error)}}
     except ValueError as error:
         return {"status": "REJECTED", "failure": {"status": "SWEEP", "detail": str(error)}}
-    timed = at_index(timed, table_index)
-    timed.metadata["drawing_table_index"] = table_index
     seconds["retiming"] += perf_counter() - started
     path = combine_clocks(payload["incoming"], timed)
-    path.metadata["drawing_table_index"] = table_index
     # Audit the clock exactly as it is saved, transit included: a speed proof
     # binds each floating-point duration, and joining the transit shifts them.
     started = perf_counter()
@@ -978,38 +925,33 @@ def _time(context, spec, seconds):
         return {"status": "REJECTED", "failure": {"status": "SWEEP", "detail": guard}}
     # The timed clock visits exactly the configurations of the untimed path, so
     # that path's proof of covering the source curve holds for it too.
-    store = None if planner.verification_raw else planner.path_certificates
-    if store is not None:
-        coverage_context = {
-            "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
-            "source_points_m": _points(context, row, table_index),
-        }
-        # Its check and transit cleared the pen against exactly this chain of
-        # earlier deposits, under the pen-only model. Verification may accept
-        # that for this clock when the plan it replays has the same chain.
+    store = planner.path_certificates
+    coverage_context = {
+        "invariants": planner.path_certificate_context(build.arm.identity, kinematic=True),
+        "source_points_m": _points(context, row),
+    }
+    # Its check and transit cleared the pen against exactly this chain of
+    # earlier deposits, under the pen-only model. Verification may accept
+    # that for this clock when the plan it replays has the same chain.
+    store.admit(
+        planner.path_certificate_context(build.arm.identity, pen=True),
+        path.record(),
+        "pen_material_path",
+        {
+            "status": "CHECKED",
+            "deposit": spec["deposit"],
+            "chain_sha256": digest(spec["chain"]),
+            "derived_from": "same_sweep_of_checked_untimed_path",
+        },
+    )
+    covered = store.get(coverage_context, payload["clock"].record(), "source_coverage")
+    if covered is not None:
         store.admit(
-            planner.path_certificate_context(build.arm.identity, pen=True),
+            coverage_context,
             path.record(),
-            "pen_material_path",
-            {
-                "status": "CHECKED",
-                "deposit": spec["deposit"],
-                "chain_sha256": digest(spec["chain"]),
-                "derived_from": "same_sweep_of_checked_untimed_path",
-            },
+            "source_coverage",
+            {**covered, "derived_from": "same_sweep_of_untimed_path"},
         )
-        covered = store.get(coverage_context, payload["clock"].record(), "source_coverage")
-        if covered is not None:
-            store.admit(
-                coverage_context,
-                path.record(),
-                "source_coverage",
-                {**covered, "derived_from": "same_sweep_of_untimed_path"},
-            )
-    try:
-        audit_plate_clock(path)
-    except ValueError as error:
-        return {"status": "REJECTED", "failure": {"status": "INDEXED_CLOCK", "detail": str(error)}}
     seconds["serialization"] += _store(
         context["root"], spec["key"], {"clock": path, "drawing": payload["drawing"]}
     )
@@ -1339,7 +1281,7 @@ def prepare_context(build, action_budget=240.0, workers=1):
                 name: value for name, value in screen.items() if name not in {"nodes", "edges"}
             }
     write_json(build.run / "structural_screens.json", {"screens": screens})
-    model = IndexedMotions(build)
+    model = Motions(build)
     root = build.run / "parallel"
     _CONTEXT = {
         "build": build,
@@ -1360,8 +1302,6 @@ def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
     ``geometry_plan.json``; "timing" times those saved paths and exports;
     "all" does both.
     """
-    from .full_build_export import export_sections
-
     if workers < 1:
         raise ValueError("Parallel planning needs at least one worker")
     started = launched = perf_counter()
@@ -1488,10 +1428,7 @@ def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
                         "connect_key": schedule._connected(index)["key"],
                         # The wire this action's pen was checked against, and its own.
                         "chain": schedule.chain(index),
-                        "deposit": [
-                            schedule.slots[index]["candidate"]["deposit_key"],
-                            schedule.slots[index]["candidate"]["table_index"],
-                        ],
+                        "deposit": schedule.slots[index]["candidate"]["deposit_key"],
                     }
                     for index in range(len(order))
                 ]
@@ -1587,12 +1524,7 @@ def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
             started = perf_counter()
             build.lift_offs = lift_offs
             build.minimum_trails = _minimum_trails(build)
-            exported = export_sections(
-                build,
-                witnesses,
-                returned,
-                release_witnesses=True,
-            )
+            exported = export_sections(build, witnesses, returned)
             phases["export_0"] = perf_counter() - started
     finally:
         for pool in pools:
@@ -1632,6 +1564,149 @@ def run_parallel_forward(build, workers, *, action_budget=240.0, stage="all"):
             minimum_trails=summary["minimum_trails"],
         )
     return summary
+
+
+def export_sections(build, witnesses, returned):
+    """Save the planned clocks as ``plan.json``, for verification and playback.
+
+    Each stroke starts once its start joint has cooled, or at once when it is
+    chained to the stroke before. The plan is simulation only and awaits the
+    separate full-robot verification.
+    """
+    planner, run = build.planner, build.run
+    actions, clock = [], 0.0
+    ready = {node: 0.0 for node in planner.ground}
+    framework_ready = 0.0
+    for key, move, drawing in witnesses:
+        section = build.actions[key]
+        path = move.payload
+        # A chained stroke continues from its predecessor with the pen down;
+        # only a stroke that attaches afresh waits for its joint to cool.
+        if not path.metadata.get("chained_in"):
+            clock = max(clock, ready.get(move.start_anchor, float("inf")))
+        elif move.start_anchor not in ready:
+            raise ValueError("Cannot chain a section onto absent material")
+        if section["stage"] == "artistic":
+            clock = max(clock, framework_ready)
+        if not np.isfinite(clock):
+            raise ValueError("Cannot schedule a section on absent material")
+        actions.append(
+            {
+                **{
+                    field: section[field]
+                    for field in (
+                        "id",
+                        "parent_curve",
+                        "source_interval",
+                        "members",
+                        "stage",
+                        "start",
+                        "end",
+                        "role",
+                        "junction_visits",
+                        "closed",
+                    )
+                },
+                **(
+                    {"source_intervals": section["source_intervals"]}
+                    if "source_intervals" in section
+                    else {}
+                ),
+                "arm": build.arm.identity,
+                "stroke_id": key,
+                "variant": move.variant,
+                "start_anchor": move.start_anchor,
+                "reverse": drawing["reverse"],
+                "start_visit": drawing.get("start_visit", 0),
+                "proposal_source": drawing.get("proposal_source", "planner"),
+                "start_s": clock,
+                "end_s": clock + path.duration_s,
+                "trajectory": path.record(),
+                "auxiliary": False,
+            }
+        )
+        availability = action_ready_times(path)
+        for node, relative in availability.items():
+            ready[node] = min(ready.get(node, float("inf")), clock + relative)
+        if section["stage"] == "framework":
+            framework_ready = max(framework_ready, clock + max(availability.values()))
+        clock += path.duration_s
+    if returned is not None:
+        actions.append(
+            {
+                "arm": build.arm.identity,
+                "stroke_id": "return-" + build.arm.identity,
+                "variant": "return",
+                "start_anchor": "parking",
+                "start_s": clock,
+                "end_s": clock + returned.duration_s,
+                "trajectory": returned.record(),
+                "auxiliary": True,
+            }
+        )
+        clock += returned.duration_s
+    settings = "plan_config.json"
+    write_json(
+        run / settings,
+        {
+            "search": planner.settings,
+            "transit": planner.transit,
+            "timing": planner.timing,
+            "process": planner.process,
+        },
+    )
+    plan = artifact(
+        "plan",
+        status="FULL_SCHEDULE_VERIFICATION_PENDING",
+        requires_final_verification=True,
+        full_schedule=True,
+        section_schedule=True,
+        executable=False,
+        simulation_only=True,
+        frame="world",
+        units="m",
+        inputs={
+            name: sha256(run / name)
+            for name in (
+                "cell_manifest.json",
+                "cell_drawing_variants.json",
+                "construction_plan.json",
+                "stroke_graph.json",
+                "fabrication_config.json",
+                settings,
+            )
+        },
+        actions=actions,
+        events=feed_events(actions),
+        modeled_duration_s=clock,
+        completed_strokes=len(witnesses),
+        requested_strokes=len(build.actions),
+        checked_intervals=0,
+        settings_artifact=settings,
+        initial_positions={build.arm.identity: build.initial.tolist()},
+        lift_offs=getattr(build, "lift_offs", None),
+        minimum_trails=getattr(build, "minimum_trails", None),
+        limitations=[
+            "Simulation only",
+            "Pen, cooling, material and joint behavior uncalibrated",
+        ],
+        failures=[],
+    )
+    write_json(run / "plan.json", plan, compact=True)
+    stage_update(run, "timing", "complete", artifact="plan.json")
+    stage_update(run, "motion", "partial", artifact="plan.json",
+                 message="Schedule saved; separate full-robot verification required")
+    stage_update(run, "validation", "pending", message="Separate full-robot verification required")
+    build.best = [key for key, _, _ in witnesses]
+    # The viewer reads the saved JSON; release export-only clocks now.
+    import gc
+
+    actions.clear()
+    witnesses.clear()
+    plan.clear()
+    gc.collect()
+    build.report("FULL_BUILD_PLANNED", replay_status="NOT_RUN")
+    return {"status": "SCHEDULE_SAVED", "replay_status": "NOT_RUN"}
 
 
 def _minimum_trails(build):

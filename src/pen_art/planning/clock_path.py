@@ -1,12 +1,11 @@
 """Exact serialized clocks for linear travel and continuous spline drawing.
 
-The default quintic clock stops at edge boundaries. The opt-in drawing clock
-uses midpoint-refined, shape-preserving cubic interpolation and TOPPRA. Its
-changed geometry requires fresh tracking and collision checks. Neither clock
-establishes the behavior of an uncalibrated physical pen.
+Travel, approach, withdrawal and holds get a quintic clock that stops at every
+edge boundary. A drawing keeps its checked shape-preserving cubic spline and is
+timed along it by ``timing.scan_clock``. Neither clock establishes the behavior
+of an uncalibrated physical pen.
 """
 
-from copy import copy
 from dataclasses import dataclass
 from time import monotonic
 
@@ -15,7 +14,7 @@ from numpy.polynomial import Polynomial
 from scipy.interpolate import PPoly
 
 from ..kinematics import geometric_jacobian
-from ..timing import clock_polynomials, make_path, retime_operation, tcp_acceleration_bound
+from ..timing import SplinePath, clock_polynomials, retime_operation, tcp_acceleration_bound
 from .smooth_audit import PolynomialPiece
 
 
@@ -75,7 +74,7 @@ def polynomial_tcp_speed_bound(edge, arm, limit, *, deadline=None):
             + tcp_acceleration_bound(arm.robot, arm.flange_to_tcp, first, second) * (b - a) / 2
         ) / duration
         # Near a fast endpoint, the whole-interval acceleration enclosure can
-        # remain loose after ten bisections even for a valid TOPPRA clock.
+        # remain loose after ten bisections even for a valid clock.
         # Refine that enclosure further; keep the speed limit and tolerance.
         if bound > limit + 1e-8 and observed / duration <= limit + 1e-8 and depth < 16:
             return max(visit(a, middle, depth + 1), visit(middle, b, depth + 1))
@@ -156,6 +155,67 @@ def posture_change(path, arm, limit_deg_per_mm=POSTURE_LIMIT_DEG_PER_MM):
     return finish(run)
 
 
+def check_clock_limits(planner, arm, clock, record, *, drawing_tip_speed=True):
+    """Hold every edge of a timed clock to the joint position, velocity and
+    acceleration limits and to its tip speed limit. Raises ``ValueError``.
+
+    A ``joint_speed`` proof for this exact clock (``record``) skips the check,
+    a ``drawing_speed`` proof its drawing edges; a passing check records both.
+    Returns whether a proof skipped the check.
+    """
+    store = planner.path_certificates
+    context = planner.path_certificate_context(arm.identity, kinematic=True)
+    if store.get(context, record, "joint_speed") is not None:
+        return True
+    drawing_proof = store.get(context, record, "drawing_speed")
+    for index, edge in enumerate(clock.edges):
+        if drawing_proof is not None and edge.kind == "DRAW":
+            continue
+        if monotonic() >= planner.deadline:
+            raise TimeoutError("Clock limit check deadline")
+        duration = edge.end_s - edge.start_s
+        limit = (
+            planner.process["nominal_speed_m_s"]
+            if edge.kind == "DRAW"
+            else planner.timing["travel_speed_m_s"]
+        )
+        if edge.coefficients is not None:
+            piece = edge.piece()
+            ranges = piece.ranges(0, 1)
+            if np.any(ranges[:, 0] < arm.robot.lower - 1e-9) or np.any(
+                ranges[:, 1] > arm.robot.upper + 1e-9
+            ):
+                raise ValueError("Clock polynomial exceeds joint position limits")
+            first, second = piece.derivatives(0, 1)
+            velocity, acceleration = first / duration, second / duration**2
+            speed = (
+                polynomial_tcp_speed_bound(edge, arm, limit, deadline=planner.deadline)
+                if drawing_tip_speed or edge.kind != "DRAW"
+                else 0.0
+            )
+        else:
+            # h'(u) <= 15/8 and |h''(u)| <= 10/sqrt(3); the tangent bound also
+            # checks both ends against the joint limits.
+            dq = abs(edge.q1 - edge.q0)
+            velocity, acceleration = 1.875 * dq / duration, 10 / np.sqrt(3) * dq / duration**2
+            speed = 1.875 * tcp_tangent_bound(arm, edge.q0, edge.q1) / duration
+        if np.any(velocity > arm.robot.velocity * planner.timing["velocity_fraction"] + 1e-8):
+            raise ValueError("Clock exceeds joint velocity limits")
+        if np.any(acceleration > np.asarray(planner.timing["joint_acceleration_rad_s2"]) + 1e-8):
+            raise ValueError("Clock exceeds joint acceleration limits")
+        if speed > limit + 1e-8:
+            raise ValueError(
+                f"Cannot certify tip speed: {edge.stroke} edge {index}; "
+                f"upper bound {speed:.9g} m/s, limit {limit:.9g} m/s"
+            )
+    if drawing_proof is None and any(edge.kind == "DRAW" for edge in clock.edges):
+        store.admit(context, record, "drawing_speed", {"status": "CHECKED"})
+    store.admit(
+        context, record, "joint_speed", {"status": "CHECKED", "checked_edges": len(clock.edges)}
+    )
+    return False
+
+
 @dataclass
 class ClockEdge:
     start_s: float
@@ -170,8 +230,6 @@ class ClockEdge:
     tcp1: np.ndarray | None = None
     # Ascending powers of normalized edge time, one row per joint.
     coefficients: list[list[float]] | None = None
-    table_index: int | None = None
-    table_to_index: int | None = None
 
     def __getstate__(self):
         return {name: value for name, value in self.__dict__.items() if name != "_piece"}
@@ -231,10 +289,6 @@ class ClockEdge:
         }
         if self.coefficients is not None:
             result["coefficients"] = [list(row) for row in self.coefficients]
-        if self.table_index is not None:
-            result["table_index"] = self.table_index
-        if self.table_to_index is not None:
-            result["table_to_index"] = self.table_to_index
         return result
 
 
@@ -276,15 +330,7 @@ class ClockPath:
                 None if row.get("tcp0_m") is None else np.asarray(row["tcp0_m"]),
                 None if row.get("tcp1_m") is None else np.asarray(row["tcp1_m"]),
                 row.get("coefficients"),
-                row.get("table_index"),
-                row.get("table_to_index"),
             )
-            if (
-                edge.table_index not in (None, 0)
-                or edge.table_to_index is not None
-                or edge.kind in ("INDEX_TURN", "TABLE_SETTLE")
-            ):
-                raise ValueError("A fixed build plate never turns")
             if (
                 not np.isfinite([edge.start_s, edge.end_s]).all()
                 or edge.end_s <= edge.start_s
@@ -348,18 +394,13 @@ def restrict_spline(path, first, last):
     """Restrict a checked spline at its knots without fitting new geometry."""
     if not 0 <= first < last < len(path.cspl.x):
         raise ValueError("Invalid drawing spline interval")
-    result = copy(path)
     start, end = path.cspl.x[[first, last]]
     width = end - start
     knots = (path.cspl.x[first : last + 1] - start) / width
     coefficients = path.cspl.c[:, first:last].copy()
     for index in range(len(coefficients)):
         coefficients[index] *= width ** (len(coefficients) - 1 - index)
-    result.cspl = PPoly(coefficients, knots)
-    result.cspld, result.cspldd = result.cspl.derivative(), result.cspl.derivative(2)
-    result.ss_waypoints = knots
-    result._q_waypoints = result.cspl(knots)
-    return result
+    return SplinePath(PPoly(coefficients, knots))
 
 
 def split_drawing_operations(operation):
@@ -411,19 +452,15 @@ def timed_path(
     drawing_speed,
     travel_speed,
     *,
-    drawing_clock="quintic_stop_at_geometric_knots",
-    acceleration_constraint="interpolated",
     grid_samples=101,
     grid_midpoints=True,
-    solver="toppra",
     grid_ramps=False,
 ):
-    """Analytically time checked edges without changing their geometric sweep."""
+    """Analytically time checked edges without changing their geometric sweep.
+
+    A drawing operation carries its checked spline as ``path``.
+    """
     edges, elapsed, diagnostics = [], 0.0, []
-    if drawing_clock not in {"quintic_stop_at_geometric_knots", "cubic_toppra"}:
-        raise ValueError(f"Unsupported drawing clock: {drawing_clock}")
-    if acceleration_constraint not in {"interpolated", "cubic_bernstein"}:
-        raise ValueError(f"Unsupported acceleration constraint: {acceleration_constraint}")
     expanded = []
     for operation in operations:
         expanded.extend(
@@ -431,46 +468,30 @@ def timed_path(
         )
     for op in expanded:
         q = np.asarray(op["positions"], float)
-        if op["kind"] == "DRAW" and drawing_clock == "cubic_toppra":
-            points = [arm.robot.forward(joints, arm.flange_to_tcp)[:3, 3] for joints in q]
-            path = op.get("path")
-            if path is None:
-                path = make_path(q, points, interpolation="pchip", subdivisions=2)
+        if op["kind"] == "DRAW":
+            path = op["path"]
             result = retime_operation(
-                {"positions": q, "tcp_path_m": points},
+                path,
                 arm.robot,
                 arm.flange_to_tcp,
                 velocity,
                 acceleration,
                 drawing_speed,
-                0.2,
-                sample_output=False,
-                path=path,
-                continuous_acceleration=acceleration_constraint == "cubic_bernstein",
                 grid_samples=grid_samples,
                 grid_midpoints=grid_midpoints,
-                solver=solver,
                 grid_ramps=grid_ramps,
             )
-            timed = {
-                "positions": q,
-                "duration_s": result["duration_s"],
-                "pieces": clock_polynomials(
-                    path,
-                    np.array(result["path_clock"]["s"]),
-                    np.array(result["path_clock"]["speeds"]),
-                ),
-                "diagnostic": {
+            diagnostics.append(
+                {
                     "stroke_id": op.get("stroke_id"),
                     "time_scale_correction": result["time_scale_correction"],
                     "retiming_method": result["retiming_method"],
-                    "retiming_fallback_reason": result["retiming_fallback_reason"],
                     "bounds": result["bounds"],
-                    "acceleration_constraint": acceleration_constraint,
-                },
-            }
-            pieces, result = timed["pieces"], timed
-            diagnostics.append(timed["diagnostic"])
+                }
+            )
+            pieces = clock_polynomials(
+                path, np.array(result["path_clock"]["s"]), np.array(result["path_clock"]["speeds"])
+            )
             for start, duration, polynomials in pieces:
                 normalized = [p(Polynomial([0, duration])) for p in polynomials]
                 first = np.array([p(0) for p in normalized])

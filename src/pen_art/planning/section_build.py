@@ -269,16 +269,8 @@ class SectionBuild:
             chain_strokes=True,
         )
         timing = dict(load_frame_config()["timing"])
-        # The scanned clock already holds the tip under its speed limit over
-        # every interval, by the tangent bound it is rescaled against. The
-        # audit therefore checks joint limits and does not bound drawing tip
-        # speed a second time (decided 2026-10-13).
         timing.update(
-            retiming_grid_ramps=True,
-            retiming_grid_samples=0,
-            retiming_grid_midpoints=False,
-            retiming_solver="scan",
-            audit_drawing_tip_speed=False,
+            retiming_grid_ramps=True, retiming_grid_samples=0, retiming_grid_midpoints=False
         )
         self.planner = CellPlanner(
             run, profile, settings, monotonic() + maximum_seconds, timing_override=timing
@@ -390,69 +382,20 @@ class SectionBuild:
         )
 
     def check_forward_timing(self, row, clock):
-        """Qualify timing independently before persisting a complete state."""
-        from .clock_path import polynomial_tcp_speed_bound, tcp_tangent_bound
+        """Qualify timing independently before persisting a complete state.
+
+        The scanned clock already holds the tip under its speed limit over
+        every interval, by the tangent bound it is rescaled against, so the
+        drawing tip speed is not bounded a second time (decided 2026-10-13).
+        """
+        from .clock_path import check_clock_limits
         from .process_clock import audit_process_clock
 
         audit_process_clock(
             clock, row, self.planner.process, self.cooling, self.transform, require_release=True
         )
-        store = self.planner.path_certificates
-        context = self.planner.path_certificate_context(self.arm.identity, kinematic=True)
-        if store.get(context, clock.record(), "joint_speed") is not None:
-            return
-        drawing_proof = store.get(context, clock.record(), "drawing_speed")
-        for edge in clock.edges:
-            if drawing_proof is not None and edge.kind == "DRAW":
-                continue
-            if monotonic() >= self.planner.deadline:
-                raise TimeoutError("Forward timing qualification deadline")
-            duration = edge.end_s - edge.start_s
-            limit = (
-                self.planner.process["nominal_speed_m_s"]
-                if edge.kind == "DRAW"
-                else self.planner.timing["travel_speed_m_s"]
-            )
-            if edge.coefficients is not None:
-                piece = edge.piece()
-                ranges = piece.ranges(0, 1)
-                if np.any(ranges[:, 0] < self.arm.robot.lower - 1e-9) or np.any(
-                    ranges[:, 1] > self.arm.robot.upper + 1e-9
-                ):
-                    raise ValueError("Forward polynomial exceeds joint limits")
-                first, second = piece.derivatives(0, 1)
-                velocity, acceleration = first / duration, second / duration**2
-                speed = (
-                    0.0
-                    if edge.kind == "DRAW"
-                    and not self.planner.timing.get("audit_drawing_tip_speed", True)
-                    else polynomial_tcp_speed_bound(
-                        edge, self.arm, limit, deadline=self.planner.deadline
-                    )
-                )
-            else:
-                dq = abs(edge.q1 - edge.q0)
-                velocity, acceleration = 1.875 * dq / duration, 10 / np.sqrt(3) * dq / duration**2
-                speed = 1.875 * tcp_tangent_bound(self.arm, edge.q0, edge.q1) / duration
-            if (
-                np.any(
-                    velocity
-                    > self.arm.robot.velocity * self.planner.timing["velocity_fraction"] + 1e-8
-                )
-                or np.any(
-                    acceleration
-                    > np.asarray(self.planner.timing["joint_acceleration_rad_s2"]) + 1e-8
-                )
-                or speed > limit + 1e-8
-            ):
-                raise ValueError("Forward clock exceeds checked speed or acceleration")
-        if drawing_proof is None and any(edge.kind == "DRAW" for edge in clock.edges):
-            store.admit(context, clock.record(), "drawing_speed", {"status": "CHECKED"})
-        store.admit(
-            context,
-            clock.record(),
-            "joint_speed",
-            {"status": "CHECKED", "checked_edges": len(clock.edges)},
+        check_clock_limits(
+            self.planner, self.arm, clock, clock.record(), drawing_tip_speed=False
         )
 
     def travel_clock(self, scene, q0, q1, kind="TRAVEL"):

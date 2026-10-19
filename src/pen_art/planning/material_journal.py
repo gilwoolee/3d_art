@@ -31,16 +31,12 @@ def write_journal(path, operations):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     arrays, descriptors, offset = [], [], 0
-    for operation in operations:
-        if operation[0] == 'turn':
-            descriptors.append(list(operation))
-        else:
-            rows = operation[1]
-            values = np.asarray([[*r['start'], *r['end'], r['radius_m']] for r in rows],
-                                dtype='<f8').reshape(-1, 7)
-            arrays.append(values)
-            descriptors.append(['add', offset, len(values), [r['name'] for r in rows]])
-            offset += len(values)
+    for _, rows in operations:
+        values = np.asarray([[*r['start'], *r['end'], r['radius_m']] for r in rows],
+                            dtype='<f8').reshape(-1, 7)
+        arrays.append(values)
+        descriptors.append(['add', offset, len(values), [r['name'] for r in rows]])
+        offset += len(values)
     data_path = path.with_suffix('.npy')
     # Two workers can journal identical deposits (strokes that lay nothing new
     # share one key) at the same moment; each writes its own temporary file.
@@ -62,9 +58,7 @@ def load_journal(path):
         raise ValueError('Malformed capsule array')
     operations, end = [], 0
     for entry in manifest['operations']:
-        if entry[0] == 'turn':
-            operations.append(tuple(entry))
-        elif entry[0] == 'add':
+        if entry[0] == 'add':
             _, offset, count, names = entry
             if offset != end or count != len(names) or offset + count > len(values):
                 raise ValueError('Malformed capsule journal prefix')
@@ -75,6 +69,20 @@ def load_journal(path):
     if end != len(values) or not np.isfinite(values).all():
         raise ValueError('Incomplete or nonfinite capsule journal')
     return operations
+
+
+def cached_journal(cache, folder, key):
+    """The journal ``key`` in ``folder``, checked against its key. ``cache`` (an
+    OrderedDict) keeps the last four loaded."""
+    if key not in cache:
+        operations = load_journal(Path(folder) / f"{key}.json")
+        if deposit_key(operations) != key:
+            raise ValueError("Changed material journal")
+        cache[key] = operations
+        while len(cache) > 4:
+            cache.popitem(last=False)
+    cache.move_to_end(key)
+    return cache[key]
 
 
 def _distance_to_segment(points, first, last):
@@ -93,8 +101,8 @@ def merge_deposits(operations, budget_m):
     the run's largest radius plus the largest distance of any member endpoint
     from the new centre line; a capsule's centre line lies no further from that
     line than its endpoints do, so every member is enclosed. A run ends where
-    this growth would exceed ``budget_m``, at a gap, or at a table turn. The
-    result only ever over-covers the journaled material.
+    this growth would exceed ``budget_m`` or at a gap. The result only ever
+    over-covers the journaled material.
     """
     if not np.isfinite(budget_m) or budget_m <= 0:
         raise ValueError("Deposit merging needs a positive radius budget")
@@ -131,12 +139,8 @@ def merge_deposits(operations, budget_m):
         merged.append(("add", output))
         rows.clear()
 
-    for operation in operations:
-        if operation[0] == "turn":
-            flush()
-            merged.append(tuple(operation))
-        else:
-            rows.extend(operation[1])
+    for _, added in operations:
+        rows.extend(added)
     flush()
     return merged
 
@@ -150,26 +154,22 @@ def _merged(planner, operations):
 
 
 def deposit_key(operations):
-    """Bind deposited geometry and turn order, independently of segment names."""
+    """Bind deposited geometry and its order, independently of segment names."""
     state = hashlib.sha256(b"material-operations-v1")
-    for operation in operations:
-        if operation[0] == "turn":
-            state.update(b"turn" + bytes([operation[1], operation[2]]))
-        else:
-            rows = operation[1]
-            state.update(b"add" + len(rows).to_bytes(8, "little"))
-            state.update(
-                np.asarray(
-                    [[*row["start"], *row["end"], row["radius_m"]] for row in rows], dtype="<f8"
-                ).tobytes()
-            )
+    for _, rows in operations:
+        state.update(b"add" + len(rows).to_bytes(8, "little"))
+        state.update(
+            np.asarray(
+                [[*row["start"], *row["end"], row["radius_m"]] for row in rows], dtype="<f8"
+            ).tobytes()
+        )
     return state.hexdigest()
 
 
 def deposit_difference(first, second):
     """Largest endpoint/radius difference between two deposit journals, or None."""
-    first = [row for operation in first if operation[0] == "add" for row in operation[1]]
-    second = [row for operation in second if operation[0] == "add" for row in operation[1]]
+    first = [row for _, rows in first for row in rows]
+    second = [row for _, rows in second for row in rows]
     if len(first) != len(second):
         return None
     if not first:
@@ -199,23 +199,23 @@ class MaterialPrefix:
         self.scene = MaterialScene()
         self.chain, self.counts = [], []
 
-    def _apply(self, element):
-        for operation in self.load(element[0]):
-            for row in operation[1]:
+    def _apply(self, key):
+        for _, rows in self.load(key):
+            for row in rows:
                 self.scene.add(row["start"], row["end"], row["radius_m"], row["name"])
-        self.chain.append(element)
+        self.chain.append(key)
         self.counts.append(len(self.scene.objects))
 
     def scene_for(self, chain):
-        chain = [tuple(element) for element in chain]
+        """The material of the deposit journals named by ``chain``, in order."""
         common = 0
         while (
             common < min(len(chain), len(self.chain)) and chain[common] == self.chain[common]
         ):
             common += 1
         if common == len(self.chain):
-            for element in chain[common:]:
-                self._apply(element)
+            for key in chain[common:]:
+                self._apply(key)
             return self.scene
         base = self.scene.prefix(self.counts[common - 1]) if common else MaterialScene()
         if common == len(chain):
@@ -223,6 +223,6 @@ class MaterialPrefix:
         self.rebuilds += 1
         self.scene = base
         del self.chain[common:], self.counts[common:]
-        for element in chain[common:]:
-            self._apply(element)
+        for key in chain[common:]:
+            self._apply(key)
         return self.scene

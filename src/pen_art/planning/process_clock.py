@@ -74,12 +74,10 @@ def derive_deposition_events(path, action, cooling_s, transform):
     return events
 
 
-def action_ready_times(path, action, cooling_s):
-    """Relative material availability; legacy clocks retain conservative semantics."""
+def action_ready_times(path):
+    """When each node of a timed drawing is ready to build on, from its start."""
     if path.metadata.get("process_clock_policy") != PROCESS_CLOCK_POLICY:
-        nodes = {visit["node"] for visit in action.get("junction_visits", [])}
-        nodes.update(action[key] for key in ("start", "end") if key in action)
-        return {node: path.duration_s + cooling_s for node in nodes}
+        raise ValueError("Clock has no material readiness")
     result = {}
     for event in path.metadata["deposition_events"]:
         node, ready = event["node"], event["ready_at_s"]
@@ -197,7 +195,7 @@ def audit_process_clock(path, action, process, cooling_s, transform, *, require_
         elif edge.kind == "DRAW" and not feeding:
             raise ValueError("Drawing with feed off")
         elif edge.kind in ("VERTEX_COOL", "WITHDRAW") and feeding:
-            raise ValueError("Cooling, withdrawal or table movement while feeding")
+            raise ValueError("Cooling or withdrawal while feeding")
     if feeding != bool(path.metadata.get("chained_out")):
         raise ValueError("Process clock finishes with the wrong feed state for its successor")
     draws = [edge for edge in path.edges if edge.kind == "DRAW"]

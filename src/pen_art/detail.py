@@ -332,7 +332,7 @@ class PlannerCheck:
         from pen_art.cell import prepare_cell
         from pen_art.cell_config import load_frame_config
         from pen_art.planning.cell_planner import CellPlanner
-        from pen_art.planning.plate import FixedPlate
+        from pen_art.planning.scene import FixedPlate
         from pen_art.planning.section_build import prepare_candidates
 
         settings = dict(load_frame_config()["planning"])

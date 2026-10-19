@@ -62,7 +62,7 @@ def tracked_drawing_path(arm, drawing, deadline, *, require_fixed_orientation=Fa
     original_q, original_targets = original_q[keep], original_targets[keep]
     points = np.array([arm.robot.forward(q, arm.flange_to_tcp)[:3, 3] for q in original_q])
     for subdivisions in (2, 4, 8):
-        spline = make_path(original_q, points, interpolation="pchip", subdivisions=subdivisions)
+        spline = make_path(original_q, points, subdivisions=subdivisions)
         q = refine_samples(original_q, subdivisions)
         targets = refine_samples(original_targets, subdivisions)
         pieces = [
@@ -146,7 +146,7 @@ def member_drawing_path(arm, drawing, members, schedule, deadline):
             if index not in reached:
                 reached[index] = arm.robot.forward(q[index], arm.flange_to_tcp)[:3, 3]
         points = np.array([reached[index] for index in kept])
-        spline = make_path(q[kept], points, interpolation="pchip", breaks=schedule(points))
+        spline = make_path(q[kept], points, breaks=schedule(points))
         worst, worst_angle, added = 0.0, 0.0, False
         pieces = []
         for i, width in enumerate(np.diff(spline.cspl.x)):
@@ -310,9 +310,7 @@ class CellPlanner:
         self.optimize_contact_geometry = (
             not verification_raw if optimize_contact_geometry is None else optimize_contact_geometry
         )
-        self.path_certificates = PathCertificateStore(
-            self.run / "path_certificates", enabled=not verification_raw
-        )
+        self.path_certificates = PathCertificateStore(self.run / "path_certificates")
         self.verification_stats, self.verification_seconds = Counter(), Counter()
         self._path_model_contexts, self._obstacle_context_refs = {}, {}
 
@@ -650,8 +648,6 @@ class CellPlanner:
         """
         arm = self.collision_arm(identity)
         task = drawing["stroke_id"]
-        if self.timing.get("drawing_clock") != "cubic_toppra":
-            raise ValueError("Geometry-first planning needs the cubic_toppra drawing clock")
         fixed_required = self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}
         transform = np.asarray(self.profile["world_from_build"])
         vertex_cooling = float(self.process.get("vertex_cooling_s", 1.0))
@@ -928,15 +924,12 @@ class CellPlanner:
             np.array(self.timing["joint_acceleration_rad_s2"]),
             self.process["nominal_speed_m_s"],
             self.timing["travel_speed_m_s"],
-            drawing_clock=self.timing.get("drawing_clock", "quintic_stop_at_geometric_knots"),
-            acceleration_constraint=self.timing.get("acceleration_constraint", "interpolated"),
             grid_samples=self.timing.get("retiming_grid_samples", 101),
             grid_midpoints=self.timing.get("retiming_grid_midpoints", True),
-            solver=self.timing.get("retiming_solver", "toppra"),
             grid_ramps=self.timing.get("retiming_grid_ramps", False),
         )
 
-    def _process_events(self, path, task, table_index):
+    def _process_events(self, path, task):
         transform = np.asarray(self.profile["world_from_build"])
         path.metadata["deposition_events"] = derive_deposition_events(
             path, self.actions[task], self.settings["assumed_cooling_s"], transform
@@ -945,7 +938,7 @@ class CellPlanner:
             event["ready_at_s"] for event in path.metadata["deposition_events"]
         )
 
-    def time_local_drawing(self, identity, geometric, task, table_index):
+    def time_local_drawing(self, identity, geometric, task):
         """Time an accepted geometric action and prove its sweep is unchanged.
 
         Raises ``TimingParameterizationError`` when no clock exists, and
@@ -961,7 +954,7 @@ class CellPlanner:
             {key: value for key, value in geometric.metadata.items() if key != "parameterization"}
         )
         path.metadata["same_sweep"] = guard
-        self._process_events(path, task, table_index)
+        self._process_events(path, task)
         return path
 
     def validate_interval(self, state, new, end, *, deposit_only=False, journal=None):
@@ -985,14 +978,14 @@ class CellPlanner:
     def _validate_interval(self, state, new, end, *, deposit_only=False, journal=None):
         """Check one scheduling interval while its material grows.
 
-        ``deposit_only`` runs the identical turn and deposition sequence but no
+        ``deposit_only`` runs the identical deposition sequence but no
         collision or orientation check, and grants no certificate. ``journal``
         receives those material operations in order, so another process can
         rebuild the same scene before this interval's verdict exists.
         """
         motions = {m.proposal.arm: m for m in state.active + new}
-        # An untimed path has no seconds: cooling and indexed-clock audits wait
-        # for its timing pass. Every geometric check below is unchanged.
+        # An untimed path has no seconds: cooling audits wait for its timing
+        # pass. Every geometric check below is unchanged.
         untimed = {
             m.proposal.payload.metadata.get("parameterization") == "geometric"
             for m in motions.values()
@@ -1002,8 +995,8 @@ class CellPlanner:
         untimed = True in untimed
         # Reuse only the clipped contact geometry within this call. Tool,
         # static obstacles, radii and deadline are fixed here; every joint
-        # edge still receives fresh arm and tip checks. Deposition or an
-        # indexed turn changes the scene token. Raw replay rebuilds each time.
+        # edge still receives fresh arm and tip checks. Deposition changes the
+        # scene token. Raw replay rebuilds each time.
         contact_validators = {}
         certificate_records, invariant_hits, invariant_proofs = {}, set(), {}
         deposition_enclosures = {identity: {} for identity in motions}

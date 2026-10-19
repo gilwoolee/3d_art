@@ -1,89 +1,21 @@
-"""Source-preserving construction sections shared by planning and replay."""
+"""Source-preserving construction sections shared by planning and replay, and
+the audits that every source interval is drawn exactly once."""
 
+from collections import Counter
 from copy import deepcopy
 
 import numpy as np
 
-from ..curves import curve_interval, curve_length
+from ..curves import curve_length
 from ..io import artifact
-from ..provenance import shared_source_bindings
 
 
-def split_member_for_restart(graph, member_id, fraction):
-    """Split one cubic exactly, creating a stop and subsequent real rejoin.
-
-    The new node is material deposited by the first section, not an external
-    support. Ordinary prefix stiffness and cooled-anchor checks remain required.
-    Source aliases retain both physical pieces before receiving completion credit.
-    """
-    if not np.isfinite(fraction) or not 0 < fraction < 1:
-        raise ValueError("Restart fraction must lie strictly inside a member")
-    result = deepcopy(graph)
-    matches = [edge for edge in result["edges"] if edge["id"] == member_id]
-    if len(matches) != 1 or len(matches[0]["segments"]) != 1:
-        raise ValueError("Restart splitting requires one uniquely identified cubic member")
-    edge = matches[0]
-    node_id = f"{member_id}-restart-{fraction:.12g}"
-    member_ids = [node_id + "-before", node_id + "-after"]
-    if node_id in {node["id"] for node in result["nodes"]} or set(member_ids) & {
-        item["id"] for item in result["edges"]
-    }:
-        raise ValueError("Restart boundary already exists")
-    left, right = curve_interval(edge, 0, fraction), curve_interval(edge, fraction, 1)
-    result["nodes"].append(
-        {
-            "id": node_id,
-            "position": left[-1][-1],
-            # The split must not introduce an independent substrate anchor.
-            "ground": False,
-            "origin": "deposited_restart_point",
-        }
-    )
-    lo, hi = edge.get("source_interval", [0.0, 1.0])
-    middle = lo + fraction * (hi - lo)
-    pieces = []
-    for index, (segments, start, end, interval) in enumerate(
-        [
-            (left, edge["start"], node_id, [lo, middle]),
-            (right, node_id, edge["end"], [middle, hi]),
-        ]
-    ):
-        piece = {
-            **edge,
-            "id": member_ids[index],
-            "start": start,
-            "end": end,
-            "segments": segments,
-            "parent_curve": edge.get("parent_curve", member_id),
-            "source_interval": interval,
-        }
-        piece.pop("shared_sources", None)
-        piece["length_m"] = curve_length(piece)
-        if index == 0:
-            piece["stop_after"] = True
-        pieces.append(piece)
-    bindings = shared_source_bindings(graph)
-    for binding in bindings:
-        binding["members"] = [
-            replacement
-            for original in binding["members"]
-            for replacement in (member_ids if original == member_id else [original])
-        ]
-    result["source_aliases"] = bindings
-    index = result["edges"].index(edge)
-    result["edges"][index : index + 1] = pieces
-    result.setdefault("restart_boundaries", []).append(
-        {"member": member_id, "fraction": fraction, "node": node_id, "pieces": member_ids}
-    )
-    return result
-
-
-def section_actions(graph, *, reference=False, group_sources=True):
+def section_actions(graph, *, group_sources=True):
     """Keep a connected source curve together without inventing anchors.
 
     Material junctions, original zigzag vertices and cubic subdivision points
-    remain bookkeeping boundaries, not pen stops. Only a real discontinuity or
-    an explicit restart splits the ordinary source grouping.
+    remain bookkeeping boundaries, not pen stops. Only a real discontinuity
+    splits the ordinary source grouping.
     """
     nodes = {node["id"]: node for node in graph["nodes"]}
     groups = [[edge] for edge in graph["edges"]]
@@ -97,7 +29,6 @@ def section_actions(graph, *, reference=False, group_sources=True):
             for edge in sorted(source_edges, key=lambda row: row.get("source_interval", [0])[0]):
                 if current and (
                     current[-1]["end"] != edge["start"]
-                    or current[-1].get("stop_after", False)
                     or not np.allclose(
                         current[-1]["segments"][-1][-1],
                         edge["segments"][0][0],
@@ -111,7 +42,7 @@ def section_actions(graph, *, reference=False, group_sources=True):
                     current = []
                 current.append(edge)
             groups.append(current)
-    actions, previous_sources = [], {}
+    actions = []
     for index, group in enumerate(groups):
         edge = group[0]
         row = deepcopy(edge)
@@ -135,10 +66,9 @@ def section_actions(graph, *, reference=False, group_sources=True):
             source_intervals=[
                 member.get("source_interval", [0.0, len(member["segments"])]) for member in group
             ],
-            stage="framework" if reference else edge.get("stage", "artistic"),
+            stage=edge.get("stage", "artistic"),
             closed=edge["start"] == group[-1]["end"],
             length_m=sum(curve_length(member) for member in group),
-            depends_on=[],
         )
         visits = [{"node": row["start"], "distance_m": 0.0, "segment_boundary": 0}]
         distance, boundary = 0.0, 0
@@ -149,24 +79,6 @@ def section_actions(graph, *, reference=False, group_sources=True):
                 {"node": member["end"], "distance_m": distance, "segment_boundary": boundary}
             )
         row["junction_visits"] = visits
-        previous = previous_sources.get(row["parent_curve"])
-        if previous is not None:
-            row["separation_before"] = (
-                "explicit_restart"
-                if previous.get("stop_after", False)
-                else "disconnected_nodes"
-                if previous["end"] != edge["start"]
-                else "disconnected_geometry"
-                if not np.allclose(
-                    previous["segments"][-1][-1], edge["segments"][0][0], atol=1e-10, rtol=0
-                )
-                else "stage_change"
-                if previous.get("stage") != edge.get("stage")
-                else "strand_diameter_change"
-                if previous["diameter_m"] != edge["diameter_m"]
-                else "explicit_member_grouping"
-            )
-        previous_sources[row["parent_curve"]] = group[-1]
         row["priority"] = edge.get(
             "order_hint", max(nodes[row[k]]["position"][2] for k in ("start", "end"))
         )
@@ -257,35 +169,99 @@ def replay_sections(actions, graph, *, cooling_s=2.0):
         done.add(row["id"])
         members.update(row["members"])
         previous_end = row["end_s"]
-        path = ClockPath.from_record(row["trajectory"]) if "trajectory" in row else None
-        if path is not None and path.metadata.get("process_clock_policy") == PROCESS_CLOCK_POLICY:
-            events = path.metadata.get("deposition_events", [])
-            expected = list(row.get("junction_visits", []))
-            start_visit = path.metadata.get("source_start_visit", 0)
-            if start_visit:
-                unique = expected[:-1]
-                expected = unique[start_visit:] + unique[:start_visit] + [unique[start_visit]]
-            if path.metadata.get("source_reverse", False):
-                expected = expected[::-1]
-            draw_times = [edge.end_s for edge in path.edges if edge.kind == "DRAW"]
-            draw_times += [edge.start_s for edge in path.edges if edge.kind == "DRAW"]
-            if len(events) != len(expected):
-                raise ValueError("Material clock omits source junctions")
-            for event, visit in zip(events, expected, strict=True):
-                if (
-                    event["node"] != visit["node"]
-                    or not any(abs(event["deposited_at_s"] - time) < 1e-8 for time in draw_times)
-                    or abs(event["ready_at_s"] - event["deposited_at_s"] - cooling_s) > 1e-8
-                ):
-                    raise ValueError("Invalid source deposition/readiness clock")
-            relative = action_ready_times(path, row, cooling_s)
-            if row["stage"] == "framework":
-                framework_ready = max(framework_ready, row["start_s"] + max(relative.values()))
-            for key, time in relative.items():
-                ready[key] = min(ready.get(key, float("inf")), row["start_s"] + time)
-        else:
-            if row["stage"] == "framework":
-                framework_ready = max(framework_ready, row["end_s"] + cooling_s)
-            for key in visits | {row["start"], row["end"]}:
-                ready[key] = min(ready.get(key, float("inf")), row["end_s"] + cooling_s)
+        path = ClockPath.from_record(row["trajectory"])
+        if path.metadata.get("process_clock_policy") != PROCESS_CLOCK_POLICY:
+            raise ValueError("Section clock has no material readiness")
+        events = path.metadata.get("deposition_events", [])
+        expected = list(row.get("junction_visits", []))
+        start_visit = path.metadata.get("source_start_visit", 0)
+        if start_visit:
+            unique = expected[:-1]
+            expected = unique[start_visit:] + unique[:start_visit] + [unique[start_visit]]
+        if path.metadata.get("source_reverse", False):
+            expected = expected[::-1]
+        draw_times = [edge.end_s for edge in path.edges if edge.kind == "DRAW"]
+        draw_times += [edge.start_s for edge in path.edges if edge.kind == "DRAW"]
+        if len(events) != len(expected):
+            raise ValueError("Material clock omits source junctions")
+        for event, visit in zip(events, expected, strict=True):
+            if (
+                event["node"] != visit["node"]
+                or not any(abs(event["deposited_at_s"] - time) < 1e-8 for time in draw_times)
+                or abs(event["ready_at_s"] - event["deposited_at_s"] - cooling_s) > 1e-8
+            ):
+                raise ValueError("Invalid source deposition/readiness clock")
+        relative = action_ready_times(path)
+        if row["stage"] == "framework":
+            framework_ready = max(framework_ready, row["start_s"] + max(relative.values()))
+        for key, time in relative.items():
+            ready[key] = min(ready.get(key, float("inf")), row["start_s"] + time)
     return {"status": "STAGED_ANCHORS_VERIFIED", "completed_sections": len(done)}
+
+
+def shared_source_bindings(graph):
+    """Return one credit per source interval that several members share.
+
+    A shared interval is credited only after all its members are deposited.
+    """
+    grouped = {}
+    for edge in graph["edges"]:
+        for alias in edge.get("shared_sources", []):
+            key = (alias["parent_curve"], *alias["source_interval"])
+            binding = grouped.setdefault(
+                key,
+                {
+                    "parent_curve": alias["parent_curve"],
+                    "source_interval": alias["source_interval"],
+                    "stage": edge.get("stage", "framework"),
+                    "members": [],
+                },
+            )
+            binding["members"].append(edge["id"])
+    return list(grouped.values())
+
+
+def audit_source_provenance(actions, graph):
+    """Check primary and shared source coverage against the bound material graph."""
+    edges = graph["edges"]
+    expected_members = {edge["id"] for edge in edges}
+    if len(expected_members) != len(edges):
+        raise ValueError("Duplicate graph member IDs")
+    owners = {}
+    counts = Counter()
+    for index, action in enumerate(actions):
+        for member in action["members"]:
+            counts[member] += 1
+            owners[member] = (index, action)
+    if set(counts) != expected_members or any(count != 1 for count in counts.values()):
+        raise ValueError("Source provenance requires every physical member exactly once")
+    bindings = shared_source_bindings(graph)
+    credits = []
+    for binding in bindings:
+        members = binding["members"]
+        if not members or len(set(members)) != len(members) or not set(members) <= expected_members:
+            raise ValueError("Shared source refers to missing or duplicate physical members")
+        _, last = max((owners[member] for member in members), key=lambda item: item[0])
+        credit = {**binding, "credited_after_section": last["id"]}
+        if "end_s" in last:
+            credit["deposition_complete_s"] = last["end_s"]
+        credits.append(credit)
+    expected = [
+        {
+            "parent_curve": edge.get("parent_curve", edge["id"]),
+            "source_interval": edge.get("source_interval", [0, len(edge["segments"])]),
+        }
+        for edge in edges
+    ]
+    coverage = coverage_audit([*actions, *bindings], [*expected, *bindings])
+    return {
+        "status": "SOURCE_PROVENANCE_VERIFIED",
+        "coverage": {
+            "status": coverage["status"],
+            "sources": coverage["sources"],
+            "represented_intervals": coverage["sections"],
+        },
+        "physical_sections": len(actions),
+        "physical_members": len(expected_members),
+        "shared_intervals": credits,
+    }
