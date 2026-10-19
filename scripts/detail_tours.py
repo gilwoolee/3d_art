@@ -15,7 +15,7 @@ Rules the detail follows:
 * It is drawn after the frame. The planner lets the pen tip run along existing
   wire; only the nose behind the tip (estimated tapered nose, 3 mm and up)
   must keep ``--margin`` from it, and must stay above the bed.
-* One stroke keeps one turntable position (90 degree steps; the pen body leans
+* One stroke keeps one face of the object (one of four sides; the pen body leans
   toward the robot), so a stroke stays on one face of the object. Its tilt
   may change along the stroke (0-60 degrees here); the chosen tilt profile
   changes as little as possible.
@@ -47,8 +47,8 @@ TILTS = (0, 15, 30, 45, 60)
 # Measured on planned detail runs (pumpkin, ghost, 2026-10-14): each detail
 # tour costs about 20 s besides drawing (travel into a tilted pose 9-11 s,
 # approach and withdrawal 6-7 s, waits and join about 4 s); detail draws at
-# about 10 mm/s; a 90 degree turntable step takes about 12 s.
-SECONDS_PER_STROKE, DRAW_SPEED, SECONDS_PER_TURN = 20.0, 0.010, 12.0
+# about 10 mm/s.
+SECONDS_PER_STROKE, DRAW_SPEED = 20.0, 0.010
 
 
 # --- geometry helpers ------------------------------------------------------------
@@ -282,7 +282,7 @@ def cubic_pieces(p, spacing=0.003):
 class PlannerCheck:
     """Ask the planner's own samplers whether the arm can draw a line.
 
-    At the line's turntable position, a tilt must pass the planner's pen
+    On the line's face, with the pen leaning toward it, a tilt must pass the planner's pen
     screen against the frame (start, middle, end), give a drawing path with
     the whole arm (IK along the line, self and fixed obstacles), keep the
     planner's posture limit, and allow an approach and a withdrawal. When no
@@ -290,11 +290,11 @@ class PlannerCheck:
     millimetres off the end that cannot be approached or left.
     """
 
-    def __init__(self, frame_source, framework, profile_path, cell_dir, seconds=5.0):
+    def __init__(self, frame_source, framework, profile_path, cell_dir, faces, seconds=5.0):
         from pen_art.cell import prepare_cell
         from pen_art.planning.cell_planner import CellPlanner
+        from pen_art.planning.plate import FixedPlate
         from pen_art.planning.section_build import prepare_candidates
-        from pen_art.planning.turntable import IndexedTurntable
 
         settings = dict(yaml.safe_load(Path("configs/fabrication.yaml").read_text())["planning"])
         shutil.rmtree(cell_dir, ignore_errors=True)
@@ -305,22 +305,25 @@ class PlannerCheck:
         # The whole arm, not only the pen: planning screens the pen, and the
         # final replay rejects tilted poses where the arm folds into itself.
         self.arm = self.planner.arms[self.identity]
-        self.table = IndexedTurntable.from_profile(self.planner.profile)
+        self.table = FixedPlate.from_profile(self.planner.profile)
+        # World azimuth each face of the object looks toward; the pen leans
+        # toward the face it draws on.
+        self.faces = faces
         self.frame = [np.asarray(e["segments"][0])[[0, -1]] for e in framework["edges"]]
         self.scenes, self.seconds = {}, seconds
 
-    def scene(self, index):
+    def scene(self):
         from pen_art.curves import transform_points
         from pen_art.planning.scene import MaterialScene
 
-        if index not in self.scenes:
-            world = self.table.build_transform(index)
+        if "frame" not in self.scenes:
+            world = self.table.build_transform()
             scene = MaterialScene()
             for k, seg in enumerate(self.frame):
                 a, b = transform_points(seg, world)
                 scene.add(a, b, WIRE_R, f"frame/{k}")
-            self.scenes[index] = scene
-        return self.scenes[index]
+            self.scenes["frame"] = scene
+        return self.scenes["frame"]
 
     def check(self, p, index, hints, clear=None):
         """(tilts that work, where to cut: None, "start", "end" or a sample index).
@@ -336,7 +339,8 @@ class PlannerCheck:
         from pen_art.planning.cell_motion import drawing_alternatives, fixed_rotation_families
 
         planner, arm = self.planner, self.arm
-        world = self.table.build_transform(index)
+        world = self.table.build_transform()
+        lean = float(self.faces[index])
         stroke = {
             "id": "check",
             "start": "s",
@@ -362,14 +366,14 @@ class PlannerCheck:
         for tilt in tried:
             screened = [
                 f
-                for f in fixed_rotation_families(arm, world, [tilt])
+                for f in fixed_rotation_families(arm, world, [tilt], lean_azimuth_deg=lean)
                 if all(
                     pen_clear(
                         planner,
                         arm,
                         points[i],
                         f["rotations"],
-                        self.scene(index),
+                        self.scene(),
                         planner.margin + 2e-6,
                     )
                     for i in (0, len(points) // 2, -1)
@@ -395,7 +399,7 @@ class PlannerCheck:
                     if cut is None and failed is not None:
                         cut = int(round(failed / max(1, len(points) - 1) * (len(p) - 1)))
                     continue
-                result = self.in_and_out(drawing, index)
+                result = self.in_and_out(drawing)
                 if result is True:
                     works.append(tilt)
                     break
@@ -411,7 +415,7 @@ class PlannerCheck:
                 break
         return works, (None if works else cut)
 
-    def in_and_out(self, drawing, index, posture_deg_per_mm=0.8):
+    def in_and_out(self, drawing, posture_deg_per_mm=0.8):
         """True, or what failed: a sample index (posture), "start" or "end"."""
         from time import monotonic
 
@@ -428,7 +432,7 @@ class PlannerCheck:
             return int(np.argmax(over))
         if np.degrees(np.abs(q[-1] - q[0])).max() > posture_deg_per_mm * (step.sum() * 1000 + 1):
             return int(np.argmax(swing))
-        scene = self.scene(index)
+        scene = self.scene()
         after = scene.copy()
         for k, (a, b) in enumerate(zip(tips[:-1], tips[1:], strict=True)):
             after.add(a, b, WIRE_R, f"own/{k}")
@@ -459,7 +463,7 @@ def main():
         "--profile",
         type=Path,
         required=True,
-        help="cell profile: build placement, robot base and turntable",
+        help="cell profile: build plate, robot base and pen",
     )
     parser.add_argument("--max-strokes", type=int, default=80)
     parser.add_argument(
@@ -508,7 +512,8 @@ def main():
     build = np.asarray(profile["world_from_build"])[:2, 3]
     base = np.asarray(profile["arms"][0]["world_from_base"])[:2, 3]
     robot_az = np.degrees(np.arctan2(*(base - build)[::-1]))
-    # Build azimuth of the face that looks at the robot at each turntable position.
+    # Four faces of the object: the one looking at the robot, then each
+    # quarter turn round. A line keeps to one face; the pen leans toward it.
     sectors = [(robot_az - 90 * k + 180) % 360 - 180 for k in range(4)]
 
     def sector_of(az):
@@ -690,8 +695,8 @@ def main():
         pick = next(
             (
                 (k, a)
-                # Stay on the face of the tour picked last, so the drawing
-                # order turns the turntable as few times as possible.
+                # Stay on the face of the tour picked last, so the arm moves
+                # round the object as little as possible.
                 for k in sorted(
                     remaining,
                     key=lambda k: (
@@ -819,6 +824,7 @@ def main():
             framework,
             detail_profile(args.profile, args.profile.parent / f"{target.name}_check_profile.yaml"),
             target.parent / f"{target.name}_check_cell",
+            sectors,
         )
         queue, ready, checks = list(ready), [], 0
         while queue:
@@ -854,11 +860,7 @@ def main():
     for entry in sorted(ready, key=lambda e: -length(e["p"])):
         L = length(entry["p"])
         strokes = len(keep) + 1
-        minutes = (
-            (total + L) / DRAW_SPEED
-            + SECONDS_PER_STROKE * strokes
-            + SECONDS_PER_TURN * min(strokes, 12)
-        ) / 60
+        minutes = ((total + L) / DRAW_SPEED + SECONDS_PER_STROKE * strokes) / 60
         if total + L <= args.detail and minutes <= args.minutes:
             keep.append(entry)
             total += L
@@ -929,7 +931,8 @@ def main():
                     "source_interval": [a, b],
                     "stage": "artistic",
                     "order_hint": 20000 + rank,
-                    "turntable_index": int(sec),
+                    "face": int(sec),
+                    "pen_lean_azimuth_deg": float(sectors[sec]),
                     "pen_tilt_candidates_deg": hints,
                 }
             )
@@ -937,7 +940,7 @@ def main():
             {
                 "id": tid,
                 "length_m": length(p),
-                "turntable_index": int(sec),
+                "face": int(sec),
                 "contacts": len(contacts),
                 "tilt_deg": tilt.tolist(),
                 "lines": names_of(tours, start, items[k][0][0]),
@@ -981,19 +984,12 @@ def main():
     screen = analyze_structure(graph, read_json(source / "fabrication_config.json")["structure"])
     write_json(target / "structural_screen.json", screen)
     detail = sum(r["length_m"] for r in rows)
-    turns = sum(
-        1
-        for a, b in zip(rows[:-1], rows[1:], strict=True)
-        if a["turntable_index"] != b["turntable_index"]
-    )
-    minutes = (
-        detail / DRAW_SPEED + SECONDS_PER_STROKE * len(rows) + SECONDS_PER_TURN * (turns + 1)
-    ) / 60
+    minutes = (detail / DRAW_SPEED + SECONDS_PER_STROKE * len(rows)) / 60
     write_json(
         target / "detail_tours.json",
         {
             "tours": rows,
-            "turntable_sector_azimuth_deg": sectors,
+            "face_azimuth_deg": sectors,
             "estimated_added_minutes": minutes,
             "settings": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
         },
@@ -1014,7 +1010,7 @@ def main():
     print(f"lines {len(chosen)} ({used:.2f} m) -> {len(pieces)} pieces -> {len(tours)} tours")
     print(f"ordering cut {cut_out / 1000:.2f} m; {dropped} tours never touch the frame")
     print(f"detail {detail:.2f} m in {len(rows)} strokes (median {median:.0f} mm)")
-    print(f"{len(fused)} fused contacts, {turns} turntable changes, about {minutes:.1f} min more")
+    print(f"{len(fused)} fused contacts, about {minutes:.1f} min more")
     print(f"tilt samples {counts}; {steady}/{len(rows)} strokes keep one tilt")
     print(f"structure pass {screen['modeled_pass']} sag {sag:.3f} mm {screen.get('failure', '')}")
 

@@ -10,14 +10,15 @@ from .axis_corridor import orientation_lattice, pen_clear
 from .axis_repair import repair_drawing_axes
 from .cell_motion import (
     DEFAULT_PEN_TILTS_DEG,
+    DEFAULT_SETTINGS,
     anchored_strokes,
     drawing_alternatives,
     fixed_rotation_families,
     outward_rotation_families,
     radial_pen_rotations,
 )
-from .clock_path import ClockEdge, ClockPath
-from .turntable import IndexedTurntable, index_angle
+from .clock_path import ClockPath
+from .plate import FixedPlate
 
 
 def at_index(path, index):
@@ -33,7 +34,7 @@ def at_index(path, index):
 class IndexedMotions:
     def __init__(self, build):
         self.build = build
-        self.table = IndexedTurntable.from_profile(build.planner.profile)
+        self.table = FixedPlate.from_profile(build.planner.profile)
         self.round = 0
 
 
@@ -60,90 +61,35 @@ class IndexedMotions:
         )
         return False
 
-    def scene(self, ids, index):
-        scene = self.build.scene(ids)
-        return self.table.reposition(scene, index_angle(self.table.home_index), index_angle(index))
+    def scene(self, ids, index=0):
+        return self.build.scene(ids)
 
     def transition(self, scene, start, start_index, end, end_index):
-        from .section_build import combine_clocks
+        """A pen-off travel between two drawings; the plate never turns."""
+        if start_index != end_index:
+            raise ValueError("A fixed build plate has one position")
+        return at_index(self.build.travel_clock(scene, start, end), start_index)
 
-        build = self.build
-        if start_index == end_index:
-            return at_index(build.travel_clock(scene, start, end), start_index)
-        travel = build.travel_clock(scene, start, build.initial)
-        if travel is False:
-            return False
-        paths = [at_index(travel, start_index)]
-        q = build.initial
-        # Accepted local actions already wait until release readiness before
-        # withdrawal. The incoming travel also counts as elapsed cooling time;
-        # adding a new full cooling delay here would charge the same deposit twice.
-        current = start_index
-        for target in self.table.steps(start_index, end_index):
-            parked_arm = replace(
-                build.planner.collision_arm(build.arm.identity),
-                collision=build.planner.collision_tip_model(build.arm.identity),
-            )
-            check = self.table.check_parked_turn(
-                scene,
-                current,
-                target,
-                parked_arm,
-                q,
-                build.planner.obstacles,
-                margin_m=build.planner.margin,
-                deadline=build.planner.deadline,
-            )
-            if check["status"] != "CERTIFIED_TURNTABLE_INTERVAL":
-                return False
-            duration = self.table.move_duration()
-            paths.append(
-                ClockPath(
-                    [
-                        ClockEdge(
-                            0,
-                            duration,
-                            q,
-                            q,
-                            "INDEX_TURN",
-                            None,
-                            table_index=current,
-                            table_to_index=target,
-                        ),
-                        ClockEdge(
-                            duration,
-                            duration + self.table.settling_s,
-                            q,
-                            q,
-                            "TABLE_SETTLE",
-                            None,
-                            table_index=target,
-                        ),
-                    ]
-                )
-            )
-            scene = self.table.reposition(scene, index_angle(current), index_angle(target))
-            current = target
-        travel = build.travel_clock(scene, q, end)
-        if travel is False:
-            return False
-        paths.append(at_index(travel, end_index))
-        return combine_clocks(*paths)
-
-    def drawings(self, row, available, q, index, scene, *, chain=None, prefer_start=None):
+    def drawings(
+        self, row, available, q, index, scene, *, chain=None, prefer_start=None, retry=0
+    ):
         """Sampled drawings of ``row`` at table position ``index``.
 
         ``chain`` is the predecessor's end: ``node``, joint position ``q`` and
         ``rotation``. Only drawings that start there, keep that pen
         orientation and begin at exactly that joint position are offered, so
         the pair is drawn without lifting. ``prefer_start`` tries that start
-        node first (a loop that ends where the next stroke begins).
+        node first (a loop that ends where the next stroke begins). Each
+        ``retry`` samples a path twice as fine and starts with the other pen
+        roll, for a stroke whose path missed the accuracy check. A stroke may
+        name ``pen_lean_azimuth_deg``: its pen body then leans toward that
+        world azimuth (detail drawn on the far side of the object).
         """
         if chain is not None:
             yield from self._chained(row, chain, index)
             return
         if prefer_start is not None and prefer_start in available and len(available) > 1:
-            yield from self.drawings(row, {prefer_start}, q, index, scene)
+            yield from self.drawings(row, {prefer_start}, q, index, scene, retry=retry)
             available = set(available) - {prefer_start}
         build, planner = self.build, self.build.planner
         transform = self.table.build_transform(index)
@@ -157,7 +103,13 @@ class IndexedMotions:
         policy = planner.profile.get("drawing_orientation_policy", "fixed")
         fixed = policy in {"fixed", "fixed_axis"}
         families = list(
-            fixed_rotation_families(build.arm, transform, tilts)
+            fixed_rotation_families(
+                build.arm,
+                transform,
+                tilts,
+                (np.pi, 0.0) if retry % 2 else (0.0, np.pi),
+                lean_azimuth_deg=row.get("pen_lean_azimuth_deg"),
+            )
             if fixed
             else outward_rotation_families(build.arm, points, transform, tilts)
         )
@@ -204,7 +156,10 @@ class IndexedMotions:
             planner.obstacles,
             deadline=min(planner.deadline, monotonic() + min(120, 30 * 2 ** min(self.round, 8))),
             seeds=[q, build.initial],
-            settings={"maximum_subdivision_depth": 20},
+            settings={
+                "maximum_subdivision_depth": 20,
+                "maximum_chord_m": DEFAULT_SETTINGS["maximum_chord_m"] / 2**retry,
+            },
             clearance_m=planner.margin,
             rotations=choices[: min(len(choices), 12 * 2 ** min(self.round, 8))],
             orientation_policy=policy,

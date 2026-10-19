@@ -205,11 +205,7 @@ def _printed_volume(planner):
 
     points = np.array([node["position"] for node in planner.graph["nodes"]])
     radius = max(edge["diameter_m"] for edge in planner.graph["edges"]) / 2 + 0.001
-    transforms = (
-        [np.asarray(planner.profile["world_from_build"])]
-        if planner.turntable is None
-        else [planner.turntable.build_transform(index) for index in range(4)]
-    )
+    transforms = [np.asarray(planner.profile["world_from_build"])]
     axis = transforms[0][:3, 3]
     world = np.vstack([transform_points(points, transform) for transform in transforms])
     reach = float(np.linalg.norm(world[:, :2] - axis[:2], axis=1).max()) + radius
@@ -345,53 +341,40 @@ def _replay_cell_body(
             if pen_proofs and not row.get("auxiliary", False)
             else None
         )
-        if planner.turntable is not None:
-            from ..curves import flatten_curve, transform_points
-            from .source_coverage import audit_source_curve
-            from .turntable import audit_indexed_clock
+        from ..curves import flatten_curve, transform_points
+        from .plate import audit_plate_clock
+        from .source_coverage import audit_source_curve
 
-            result.update(
-                audit_indexed_clock(
-                    planner.turntable,
-                    path,
-                    np.asarray(initial[row["arm"]]),
-                    planner.settings["assumed_cooling_s"],
-                )
+        if not row.get("auxiliary", False):
+            result.update(audit_plate_clock(path))
+            points, _ = flatten_curve(planner.actions[row["stroke_id"]], 0.00005, 0.003)
+            source_points = transform_points(
+                points, np.asarray(planner.profile["world_from_build"])
             )
-            if not row.get("auxiliary", False):
-                index = row["table_index"]
-                if any(edge.table_index != index for edge in path.edges if edge.kind == "DRAW"):
-                    raise ValueError("Drawing index differs from the source reference frame")
-                points, _ = flatten_curve(planner.actions[row["stroke_id"]], 0.00005, 0.003)
-                source_points = transform_points(points, planner.turntable.build_transform(index))
-                coverage_context = {
-                    "invariants": invariant_context,
-                    "source_points_m": source_points,
-                }
-                coverage = (
-                    None
-                    if store is None
-                    else store.get(coverage_context, row["trajectory"], "source_coverage")
-                )
-                if coverage is not None:
-                    proofs.append("source_coverage")
-                if coverage is None:
-                    coverage = audit_source_curve(planner.arms[row["arm"]], [path], source_points)
-                    if coverage["status"] == "BOUNDED" and store is not None:
-                        store.admit(
-                            coverage_context, row["trajectory"], "source_coverage", coverage
-                        )
-                if coverage["status"] != "BOUNDED":
-                    raise ValueError("Indexed drawing misses its material-relative source")
+            coverage_context = {
+                "invariants": invariant_context,
+                "source_points_m": source_points,
+            }
+            coverage = (
+                None
+                if store is None
+                else store.get(coverage_context, row["trajectory"], "source_coverage")
+            )
+            if coverage is not None:
+                proofs.append("source_coverage")
+            if coverage is None:
+                coverage = audit_source_curve(planner.arms[row["arm"]], [path], source_points)
+                if coverage["status"] == "BOUNDED" and store is not None:
+                    store.admit(
+                        coverage_context, row["trajectory"], "source_coverage", coverage
+                    )
+            if coverage["status"] != "BOUNDED":
+                raise ValueError("Indexed drawing misses its material-relative source")
         if path.metadata.get("process_clock_policy") == PROCESS_CLOCK_POLICY and not row.get(
             "auxiliary", False
         ):
             action = planner.actions[row["stroke_id"]]
-            transform = (
-                planner.turntable.build_transform(row["table_index"])
-                if planner.turntable is not None
-                else np.asarray(planner.profile["world_from_build"])
-            )
+            transform = np.asarray(planner.profile["world_from_build"])
             if path.metadata.get("source_reverse", False) != row.get(
                 "reverse", False
             ) or path.metadata.get("source_start_visit", 0) != row.get("start_visit", 0):
@@ -642,13 +625,6 @@ def _replay_cell_body(
         tuple((n, 0) for n in planner.ground),
         payload=MaterialScene(),
     )
-    if planner.turntable is not None:
-        if (
-            saved.get("turntable") != planner.profile["turntable"]
-            or saved.get("initial_table_index") != planner.turntable.home_index
-        ):
-            raise ValueError("Turntable profile or initial index does not match the plan")
-        state.payload.table_index = planner.turntable.home_index
     output = artifact(
         "verification",
         status="RUNNING",
@@ -685,14 +661,7 @@ def _replay_cell_body(
         ],
         limitations=[
             *saved["limitations"],
-            *(
-                []
-                if planner.turntable is not None
-                else [
-                    "Cartesian reference tracking uses the planner's preparation audit; "
-                    "it is not recomputed here",
-                ]
-            ),
+
         ],
     )
     published = [-np.inf]
@@ -755,7 +724,6 @@ def _replay_cell_body(
 
     moves, pen_proof_rows = [], {}
     previous = {identity: (0.0, q) for identity, q in initial.items()}
-    previous_index = saved.get("initial_table_index", 0)
     for position, (row, path) in enumerate(zip(ordered, paths, strict=True)):
         if monotonic() >= planner.deadline:
             return budget_result()
@@ -764,11 +732,6 @@ def _replay_cell_body(
             audit = audit_action(row, path, tick) if audits is None else audits[position]
         except TimeoutError:
             return budget_result()
-        if planner.turntable is not None:
-            if audit["initial_index"] != previous_index:
-                raise ValueError("Discontinuous indexed action sequence")
-            previous_index = audit["final_index"]
-            output["indexed_turns"] = output.get("indexed_turns", 0) + audit["turns"]
         start, end = row["start_s"], row["end_s"]
         if (
             not np.isfinite([start, end]).all()
@@ -969,13 +932,6 @@ def _replay_cell_body(
                 raise ValueError("Parallel replay requires one sequential arm channel")
             states.append((replace(dry, payload=None), table_index))
             owners.append(dry.active + new)
-            for motion in owners[-1]:
-                for edge in motion.proposal.payload.edges:
-                    if (
-                        edge.kind == "INDEX_TURN"
-                        and dry.time_s - 1e-9 <= motion.start_s + edge.start_s < b - 1e-9
-                    ):
-                        table_index = edge.table_to_index
             dry = advance(dry, new, b, None)
         # Planning proved each action's pen clear of the cell and of the wire
         # of the actions before it. Accept that for the leading actions whose
@@ -1004,9 +960,7 @@ def _replay_cell_body(
             intervals=intervals,
             states=states,
             root=journal_root,
-            prefix=lambda: MaterialPrefix(
-                planner.turntable, lambda key: _parallel_journal(journal_root, key)
-            ),
+            prefix=lambda: MaterialPrefix(lambda key: _parallel_journal(journal_root, key)),
         )
         # A second fork, so workers inherit the interval states computed above.
         pools[-1].shutdown(wait=True, cancel_futures=True)
@@ -1092,7 +1046,7 @@ def _replay_cell_body(
             if merging and not failed:
                 # The material every later check received, not the last check's own.
                 whole = MaterialPrefix(
-                    planner.turntable, lambda key: _parallel_journal(journal_root, key)
+                    lambda key: _parallel_journal(journal_root, key)
                 ).scene_for([[key, None] for key in keys])
                 expected, capsules = whole.geometry_prefix(), len(whole.objects)
         finally:
@@ -1136,8 +1090,6 @@ def _replay_cell_body(
                 "geometry_sha256": state.payload.geometry_prefix()[0].hex(),
             }
         )
-        if planner.turntable is not None:
-            output["final_table_index"] = state.table_index
         full = (
             saved.get("full_schedule", False) or saved["status"] == "COORDINATED_GEOMETRIC_PREVIEW"
         )
@@ -1148,7 +1100,6 @@ def _replay_cell_body(
                 not np.allclose(dict(state.configurations)[i], q, atol=1e-8, rtol=0)
                 for i, q in initial.items()
             )
-            or (planner.turntable is not None and state.table_index != planner.turntable.home_index)
         ):
             output.update(
                 status="REPLAY_REJECTED", failures=[{"status": "INCOMPLETE_OR_NOT_PARKED"}]

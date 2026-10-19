@@ -443,6 +443,40 @@ git add -A && git commit -m "Fixed build plate instead of the turntable; detail 
 
 ---
 
+### Task 5a: Detail as few long strokes (no fixed sides)
+
+Decided by the user after Task 5: join detail lines into as few strokes as
+possible. The four fixed "faces" in the detail generator are left over from
+the turntable's quarter turns and go.
+
+**Files:**
+- Modify: `scripts/detail_tours.py` (moves to `src/pen_art/detail.py` in Task 8)
+
+**Interfaces:**
+- Lines are grouped by a shared pen lean: each group gets one lean azimuth
+  (any direction) and one tilt that clear all its lines against the frame,
+  and becomes one stroke, its lines joined end to end by connecting runs
+  that lie on the surface. Line order and joining ends minimize connecting
+  wire (nearest neighbour, then 2-opt). Connecting wire counts toward the
+  2 m detail budget. Stroke rows carry `pen_lean_azimuth_deg`; `face` goes.
+- One pen orientation per stroke still holds: a group never needs the pen
+  to change lean or tilt while drawing.
+
+- [ ] **Step 1: Replace the four faces with free lean grouping and joining**
+
+- [ ] **Step 2: Ghost detail end to end** (as Task 5 Step 4)
+
+Expected: `FULL_BUILD_VERIFIED`; detail lift-offs below Task 5's 13 detail
+strokes; record strokes, lift-offs, detail metres and added minutes.
+
+- [ ] **Step 3: Tests, lint; commit**
+
+```bash
+git add -A && git commit -m "Detail as few long strokes, each with its own free pen lean"
+```
+
+---
+
 ### Task 6: Two config files and `pen-art cell`
 
 **Files:**

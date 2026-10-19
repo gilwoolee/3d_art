@@ -196,7 +196,7 @@ def audit_process_clock(path, action, process, cooling_s, transform, *, require_
             feeding = edge.kind == "PEN_START_WAIT"
         elif edge.kind == "DRAW" and not feeding:
             raise ValueError("Drawing with feed off")
-        elif edge.kind in ("VERTEX_COOL", "WITHDRAW", "INDEX_TURN") and feeding:
+        elif edge.kind in ("VERTEX_COOL", "WITHDRAW") and feeding:
             raise ValueError("Cooling, withdrawal or table movement while feeding")
     if feeding != bool(path.metadata.get("chained_out")):
         raise ValueError("Process clock finishes with the wrong feed state for its successor")

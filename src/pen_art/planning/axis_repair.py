@@ -968,11 +968,7 @@ def repair_drawing_axes(planner, drawing, material, *, progress=None, refine=Tru
     if drawing.get("orientation_policy") == "outward_radial":
         from .cell_motion import radial_pen_rotations
 
-        transform = (
-            planner.turntable.build_transform(drawing.get("table_index", 0))
-            if planner.turntable is not None
-            else np.asarray(planner.profile["world_from_build"])
-        )
+        transform = np.asarray(planner.profile["world_from_build"])
         preferred_axes = -radial_pen_rotations(
             arm,
             targets,

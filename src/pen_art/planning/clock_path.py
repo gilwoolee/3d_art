@@ -279,23 +279,12 @@ class ClockPath:
                 row.get("table_index"),
                 row.get("table_to_index"),
             )
-            if edge.table_index is not None:
-                from .turntable import index_angle
-
-                index_angle(edge.table_index)
-                if edge.table_to_index is not None:
-                    index_angle(edge.table_to_index)
-                    if (
-                        edge.kind != "INDEX_TURN"
-                        or abs(edge.table_index - edge.table_to_index) != 1
-                        or not np.allclose(edge.q0, edge.q1, atol=1e-12, rtol=0)
-                        or edge.coefficients is not None
-                    ):
-                        raise ValueError("Indexing requires one quarter-turn and a stationary arm")
-                elif edge.kind == "INDEX_TURN":
-                    raise ValueError("Turntable action has no destination index")
-            elif edge.table_to_index is not None or edge.kind == "INDEX_TURN":
-                raise ValueError("Turntable action has no starting index")
+            if (
+                edge.table_index not in (None, 0)
+                or edge.table_to_index is not None
+                or edge.kind in ("INDEX_TURN", "TABLE_SETTLE")
+            ):
+                raise ValueError("A fixed build plate never turns")
             if (
                 not np.isfinite([edge.start_s, edge.end_s]).all()
                 or edge.end_s <= edge.start_s

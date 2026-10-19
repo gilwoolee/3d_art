@@ -27,15 +27,15 @@ def setup(tmp_path):
     planner = object.__new__(CellPlanner)
     planner.profile = {
         "world_from_build": np.eye(4).tolist(),
-        "environment": {"table_size_m": [4, 4, .1], "platform_size_m": [.1, .1],
-                        "table_z_m": -1},
+        "environment": {"table_size_m": [4, 4, .1], "plate_size_m": [.1, .1],
+                        "plate_top_z_m": 0, "table_z_m": -1},
     }
     planner.arms = {"arm": SimpleNamespace(
         collision=model, robot=model.robot, tool=SimpleNamespace(metadata={}),
         flange_to_tcp=np.eye(4),
     )}
     planner.tip_models = {"arm": model}
-    planner.turntable, planner.actions = None, {}
+    planner.actions = {}
     planner.settings = {"maximum_subdivision_depth": 12}
     planner.timing, planner.process, planner.transit = {}, {}, {}
     planner.margin, planner.deadline = .001, monotonic() + 20

@@ -1238,25 +1238,36 @@ def eulerize_frame(graph, budget_m, structure=None, bow_m=0.003):
     if connectors and total + added > budget_m:
         left += [{"node": n, "reason": "wire budget"} for a, b, _ in connectors for n in (a, b)]
         connectors, added = [], 0.0
+    hint = min(e.get("order_hint", 0) for e in bed_edges) if bed_edges else 0
     for number, (a, b, path) in enumerate(connectors):
-        graph["edges"].append(
-            {
-                "id": f"euler-{number:03}",
-                "start": a,
-                "end": b,
-                "role": "framework",
-                "origin": "euler_connector",
-                "required": True,
-                "diameter_m": diameter,
-                "segments": _straight_pieces(path),
-                "length_m": float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum()),
-                "process_status": "not_checked",
-                "parent_curve": f"euler-{number:03}",
-                "source_interval": [0, len(path) - 1],
-                "stage": "framework",
-                "order_hint": min(e.get("order_hint", 0) for e in bed_edges),
-            }
-        )
+        # A chain of straight members, like every other wire, through new
+        # nodes on the bed.
+        ids = [a]
+        for k, point in enumerate(path[1:-1]):
+            ids.append(f"euler-{number:03}-n{k:03}")
+            graph["nodes"].append({"id": ids[-1], "position": point.tolist(), "ground": True})
+            nodes[ids[-1]] = np.asarray(point, float)
+        ids.append(b)
+        for k, (start, end) in enumerate(zip(ids[:-1], ids[1:], strict=True)):
+            piece = path[k : k + 2]
+            graph["edges"].append(
+                {
+                    "id": f"euler-{number:03}-m{k:03}",
+                    "start": start,
+                    "end": end,
+                    "role": "framework",
+                    "origin": "euler_connector",
+                    "required": True,
+                    "diameter_m": diameter,
+                    "segments": _straight_pieces(piece),
+                    "length_m": float(np.linalg.norm(piece[1] - piece[0])),
+                    "process_status": "not_checked",
+                    "parent_curve": f"euler-{number:03}",
+                    "source_interval": [k, k + 1],
+                    "stage": "framework",
+                    "order_hint": hint,
+                }
+            )
     left += [
         {"node": node, "reason": "above the bed"}
         for node in sorted(odd)

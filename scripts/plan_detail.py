@@ -64,7 +64,7 @@ def drop_tours(source, target, tours):
 
 
 def group_faces(source, target):
-    """Draw the detail one turntable face at a time, turning a quarter each time.
+    """Draw the detail one face of the object at a time, going round it.
 
     Keeps the generator's order within a face. Tours on different faces seldom
     meet each other's pen nose; the planner checks it either way.
@@ -73,7 +73,7 @@ def group_faces(source, target):
     art = [e for e in graph["edges"] if e.get("stage") == "artistic"]
     tours = {}
     for e in art:
-        hint = tours.setdefault(e["parent_curve"], [e["order_hint"], e["turntable_index"]])
+        hint = tours.setdefault(e["parent_curve"], [e["order_hint"], e.get("face", 0)])
         hint[0] = min(hint[0], e["order_hint"])
     first = min(tours.values())[1] if tours else 0
     ranked = sorted(tours, key=lambda t: ((tours[t][1] - first) % 4, tours[t][0]))

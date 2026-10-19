@@ -10,11 +10,11 @@ world_from_build:
 - - 0
   - 1
   - 0
-  - -0.15
+  - 0.0
 - - 0
   - 0
   - 1
-  - 0.22
+  - 0.1
 - - 0
   - 0
   - 0
@@ -25,16 +25,14 @@ environment:
   - 4.0
   - 4.0
   - 0.1
-  platform_size_m:
-  - 0.19
-  - 0.19
+  # A printer build plate (Bambu Lab X1/P1/A1 size) on a stand: its top is
+  # 10 cm above the table, which keeps the arm away from its singular poses
+  # near the table.
+  plate_size_m:
+  - 0.256
+  - 0.256
+  plate_top_z_m: 0.1
   clearance_m: 0.001
-  platform_top_z_m: 0.2
-  build_riser:
-    type: cylinder
-    height_m: 0.02
-    calibrated: false
-    radius_m: 0.074
 arms:
 - id: arm
   robot_urdf: ../../research/planning_cell/robot.urdf
@@ -197,54 +195,3 @@ drawing_pen_tilt_candidates_deg:
 parking_assumptions:
 - Provisional collision-screened parked posture; TCP at world (0.45,-0.30,0.45)m.
 - Home relocation is a model setup assumption; no hardware motion is commanded.
-turntable:
-  mode: indexed_90
-  calibrated: false
-  world_from_axis:
-  - - 1
-    - 0
-    - 0
-    - 0.45
-  - - 0
-    - 1
-    - 0
-    - -0.15
-  - - 0
-    - 0
-    - 1
-    - 0.2
-  - - 0
-    - 0
-    - 0
-    - 1
-  axis_from_build_zero:
-  - - 1
-    - 0
-    - 0
-    - 0
-  - - 0
-    - 1
-    - 0
-    - 0
-  - - 0
-    - 0
-    - 1
-    - 0.02
-  - - 0
-    - 0
-    - 0
-    - 1
-  home_index: 0
-  velocity_rad_s: 0.25
-  acceleration_rad_s2: 0.25
-  settling_s: 1.0
-  plate_radius_m: 0.12
-  plate_thickness_m: 0.01
-  housing_radius_m: 0.09
-  housing_height_m: 0.18
-  load_acceleration_limit_m_s2: 0.1
-  assumptions:
-  - Provisional dimensions and actuator limits; no hardware calibration.
-  - Model rigidly attached to horizontal plate; completed strands cooled before rotation.
-  - Rotation load screened with conservative acceleration bound; physical adhesion
-    unverified.

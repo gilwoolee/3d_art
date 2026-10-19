@@ -10,11 +10,11 @@ world_from_build:
 - - 0
   - 1
   - 0
-  - -0.15
+  - 0.0
 - - 0
   - 0
   - 1
-  - 0.22
+  - 0.1
 - - 0
   - 0
   - 0
@@ -25,18 +25,14 @@ environment:
   - 4.0
   - 4.0
   - 0.1
-  platform_size_m:
-  - 0.19
-  - 0.19
+  # A printer build plate (Bambu Lab X1/P1/A1 size) on a stand: its top is
+  # 10 cm above the table, which keeps the arm away from its singular poses
+  # near the table.
+  plate_size_m:
+  - 0.256
+  - 0.256
+  plate_top_z_m: 0.1
   clearance_m: 0.001
-  platform_top_z_m: 0.2
-  build_riser:
-    type: box
-    size_m:
-    - 0.08
-    - 0.08
-    height_m: 0.02
-    calibrated: false
 arms:
 - id: arm
   robot_urdf: ../../research/planning_cell/robot.urdf

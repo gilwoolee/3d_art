@@ -34,8 +34,11 @@ DEFAULT_SETTINGS = {
 }
 
 
-def pen_rotation(arm, world_from_build, roll=0.0, tilt_deg=0.0):
+def pen_rotation(arm, world_from_build, roll=0.0, tilt_deg=0.0, lean_azimuth_deg=None):
     """Fixed inward tip axis, keeping the pen body on its robot's side.
+
+    With ``lean_azimuth_deg`` the pen body leans toward that world azimuth
+    instead, so the arm can draw the side of the object facing away from it.
 
     Zero tilt keeps the nozzle vertical in the shared world, even on a tilted base.
     Horizontal bases preserve their existing downward orientation exactly.
@@ -52,6 +55,9 @@ def pen_rotation(arm, world_from_build, roll=0.0, tilt_deg=0.0):
     if length < 1e-9 and tilt_deg != 0:
         raise ValueError("Inward pen tilt requires a base offset from the build center")
     angle = np.deg2rad(tilt_deg)
+    if lean_azimuth_deg is not None:
+        heading = np.deg2rad(lean_azimuth_deg)
+        inward, length = -np.array([np.cos(heading), np.sin(heading)]), 1.0
     z = (
         np.array([0.0, 0.0, -1.0])
         if tilt_deg == 0
@@ -70,7 +76,12 @@ DEFAULT_PEN_TILTS_DEG = (70.0, 80.0)
 
 
 def fixed_rotation_families(
-    arm, world_from_build, tilt_degrees=DEFAULT_PEN_TILTS_DEG, roll_angles=(0.0, np.pi)
+    arm,
+    world_from_build,
+    tilt_degrees=DEFAULT_PEN_TILTS_DEG,
+    roll_angles=(0.0, np.pi),
+    *,
+    lean_azimuth_deg=None,
 ):
     """Choose a complete TCP frame before drawing, then keep it unchanged."""
     for tilt in dict.fromkeys(float(value) for value in tilt_degrees):
@@ -80,7 +91,7 @@ def fixed_rotation_families(
                 "fixed_orientation": True,
                 "pen_tilt_deg": tilt,
                 "roll_rad": float(roll),
-                "rotations": pen_rotation(arm, world_from_build, roll, tilt),
+                "rotations": pen_rotation(arm, world_from_build, roll, tilt, lean_azimuth_deg),
             }
 
 

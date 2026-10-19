@@ -4,11 +4,11 @@
         [--feature 0.008] [--coil-width M] [--template PROFILE]
 
 The default template is the cell all current frames were planned in
-(``configs/profiles/frame_template.yaml``); only the riser radius changes.
+(``configs/profiles/frame_template.yaml``).
 
 Writes ``runs/geomfirst_NAME_source`` (the frame within the 10 m wire budget,
-longest side up to 150 mm) and ``runs/geomfirst_profiles/NAME.yaml``: the
-template profile with the build riser sized to the frame's footprint. Plan
+longest side up to 150 mm) and ``runs/geomfirst_profiles/NAME.yaml``, a copy
+of the template profile. Plan
 the frame with ``TAG=gfNN scripts/plan_frame.sh NAME SOURCE PROFILE`` and keep
 the run as the detail harness's ``--frame-run``.
 """
@@ -16,7 +16,6 @@ the run as the detail harness's ``--frame-run``.
 import argparse
 from pathlib import Path
 
-import numpy as np
 import yaml
 
 from pen_art.io import read_json
@@ -46,16 +45,13 @@ def main():
     prepare_framework(source, run, args.template)
 
     graph = read_json(source / "stroke_graph.json")
-    ground = np.array([n["position"] for n in graph["nodes"] if n["ground"]])
-    radius = float(np.linalg.norm(ground[:, :2], axis=1).max()) + 0.003
-    profile["environment"]["build_riser"]["radius_m"] = round(radius, 3)
     out = Path(f"runs/geomfirst_profiles/{args.name}.yaml")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(yaml.safe_dump(profile, sort_keys=False))
     screen = read_json(source / "structural_screen.json")
     wire = sum(e["length_m"] for e in graph["edges"])
     print(f"{source}: {wire:.2f} m frame, structure pass {screen['modeled_pass']}")
-    print(f"{out}: build riser radius {radius * 1000:.0f} mm")
+    print(f"{out}: cell profile")
 
 
 if __name__ == "__main__":

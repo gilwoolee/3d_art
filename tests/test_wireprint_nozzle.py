@@ -170,6 +170,8 @@ def test_slice_height_follows_the_nozzle_on_a_cube_and_a_solidified_fork():
     assert 0 < info["added_m"] < 0.5
     connectors = [edge for edge in graph["edges"] if edge.get("origin") == "euler_connector"]
     assert connectors and all(clear_of_other_wire(edge, graph) for edge in connectors)
+    # Every wire, connectors included, is one straight member between two nodes.
+    assert all(len(edge["segments"]) == 1 for edge in graph["edges"])
     # The bed is drawn as one stroke that ends where the walls begin.
     actions = section_actions(graph)["actions"]
     bed = [row for row in actions if row["parent_curve"] == "base-trail"]

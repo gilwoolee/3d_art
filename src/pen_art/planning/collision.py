@@ -598,16 +598,15 @@ class ArmLinksModel:
 
 
 def work_surfaces(center_xy, height, width, depth, table_z=0.0, table_size=(4.0, 4.0, 0.1)):
-    if height < 0 or min(width, depth, *table_size) <= 0:
+    """The table, and the build plate with its stand as one block ``height`` tall."""
+    if height <= 0 or min(width, depth, *table_size) <= 0:
         raise ValueError("Invalid work-surface dimensions")
     transform = np.eye(4)
-    # At zero height the top stays on the table, rather than floating 3 mm above it.
-    thickness = max(height, 0.006)
-    transform[:3, 3] = [*center_xy, table_z + height - thickness / 2]
-    platform = placed(fcl.Box(width, depth, thickness), transform)
+    transform[:3, 3] = [*center_xy, table_z + height / 2]
+    plate = placed(fcl.Box(width, depth, height), transform)
     transform = np.eye(4)
     transform[2, 3] = table_z - table_size[2] / 2
     # FCL 0.7's mesh/halfspace distance query can crash. A finite, explicitly
     # sized table uses supported mesh/box distance queries instead.
     table = placed(fcl.Box(*table_size), transform)
-    return {"table": table, "platform": platform}
+    return {"table": table, "plate": plate}

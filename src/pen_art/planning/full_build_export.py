@@ -111,18 +111,6 @@ def export_sections(build, witnesses, returned, *, release_witnesses=False):
                 "end_s": clock + path.duration_s,
                 "trajectory": path.record(),
                 "auxiliary": False,
-                **(
-                    {
-                        "table_index": path.metadata["drawing_table_index"],
-                        "extrusion_mode": (
-                            "varying_axis"
-                            if path.metadata.get("tracking_orientation_constraint") == "free"
-                            else "fixed_axis"
-                        ),
-                    }
-                    if planner.turntable is not None
-                    else {}
-                ),
             }
         )
         availability = action_ready_times(path, section, build.cooling)
@@ -199,30 +187,12 @@ def export_sections(build, witnesses, returned, *, release_witnesses=False):
             checked_intervals=0,
             settings_artifact=settings,
             initial_positions={build.arm.identity: build.initial.tolist()},
-            **(
-                {
-                    "initial_table_index": planner.turntable.home_index,
-                    "turntable": planner.profile["turntable"],
-                }
-                if planner.turntable is not None
-                else {}
-            ),
             initial_pose_repairs=planner.initial_pose_repairs,
             lift_offs=getattr(build, "lift_offs", None),
             minimum_trails=getattr(build, "minimum_trails", None),
             limitations=[
                 "Simulation only",
                 "Pen, cooling, material and joint behavior uncalibrated",
-                *(
-                    [
-                        "Fixed-axis and varying-axis deposition assume a pen that can extrude "
-                        "at every planned orientation; material flow behavior is uncalibrated. "
-                        "The plate remains fixed for each stroke; TCP tracking and rigid "
-                        "collision clearance are checked continuously."
-                    ]
-                    if planner.turntable is not None
-                    else []
-                ),
             ],
             failures=[],
         ),

@@ -142,13 +142,9 @@ def sampled_operation(kind, positions, robot, offset, step, **metadata):
     }
 
 
-def local_contact_surfaces(
-    contact_z, table_z, platform_z, radius, *, riser_z=None, riser_name="build_riser"
-):
+def local_contact_surfaces(contact_z, plate_z, table_z, radius):
     """Surfaces intersecting the permitted local contact region, in robot Z."""
-    surfaces = [("platform", platform_z), ("table", table_z)]
-    if riser_z is not None:
-        surfaces.append((riser_name, riser_z))
+    surfaces = [("plate", plate_z), ("table", table_z)]
     return [name for name, height in surfaces if abs(contact_z - height) <= radius]
 
 

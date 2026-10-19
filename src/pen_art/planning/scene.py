@@ -86,10 +86,10 @@ class MaterialScene:
         self._enclosure = None
 
     def geometry_prefix(self, count=None):
-        """Bind an immutable world-space capsule prefix and turntable state.
+        """Bind an immutable world-space capsule prefix.
 
         FCL objects are immutable after insertion. Repositioned material must
-        be represented by a new scene, as for indexed turntable transforms.
+        be represented by a new scene.
         """
         count = len(self.objects) if count is None else count
         if not isinstance(count, int) or not 0 <= count <= len(self.objects):

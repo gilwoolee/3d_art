@@ -139,37 +139,16 @@ class MaterialOnlyCollisionModel:
 
 
 
-def static_shapes(profile, table):
+def static_shapes(profile):
     environment = profile["environment"]
-    shapes = {"table": {"type": "Box", "side": environment["table_size_m"]}}
-    if table is not None:
-        shapes.update(
-            platform={
-                "type": "Cylinder",
-                "radius": table.plate_radius_m,
-                "lz": table.plate_thickness_m,
-            },
-            turntable_housing={
-                "type": "Cylinder",
-                "radius": table.housing_radius_m,
-                "lz": table.housing_height_m,
-            },
-        )
-    else:
-        height = (
-            environment.get("platform_top_z_m", profile["world_from_build"][2][3])
-            - environment["table_z_m"]
-        )
-        shapes["platform"] = {
+    return {
+        "table": {"type": "Box", "side": environment["table_size_m"]},
+        "plate": {
             "type": "Box",
-            "side": [*environment["platform_size_m"], max(height, 0.006)],
-        }
-    riser = environment.get("build_riser")
-    if riser is not None:
-        shapes["build_riser"] = (
-            {"type": "Box", "side": [*riser["size_m"], riser["height_m"]]}
-            if riser["type"] == "box"
-            else {"type": "Cylinder", "radius": riser["radius_m"], "lz": riser["height_m"]}
-        )
-    return shapes
+            "side": [
+                *environment["plate_size_m"],
+                environment["plate_top_z_m"] - environment["table_z_m"],
+            ],
+        },
+    }
 

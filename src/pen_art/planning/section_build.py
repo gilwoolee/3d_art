@@ -396,13 +396,8 @@ class SectionBuild:
         from .clock_path import polynomial_tcp_speed_bound, tcp_tangent_bound
         from .process_clock import audit_process_clock
 
-        transform = self.transform
-        if self.planner.turntable is not None:
-            transform = self.planner.turntable.build_transform(
-                clock.metadata["drawing_table_index"]
-            )
         audit_process_clock(
-            clock, row, self.planner.process, self.cooling, transform, require_release=True
+            clock, row, self.planner.process, self.cooling, self.transform, require_release=True
         )
         store = self.planner.path_certificates
         context = self.planner.path_certificate_context(self.arm.identity, kinematic=True)

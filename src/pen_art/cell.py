@@ -5,7 +5,6 @@ import re
 import shutil
 from collections import Counter
 from dataclasses import dataclass
-from os.path import relpath
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +13,6 @@ import yaml
 from .io import artifact, now, read_json, sha256, stage_update, write_json
 from .kinematics import rigid_transform
 from .planning.collision import RobotCollisionModel, work_surfaces
-from .planning.fixture import riser_object
 from .planning.tool import load_tool
 from .robot import SerialArm
 
@@ -103,65 +101,34 @@ def load_cell(path):
             visual_path,
         )
     world_from_build = rigid_transform(profile["world_from_build"], "world-from-build")
-    # The current table/platform model assumes Z-up horizontal work surfaces.
+    # The object stands on a build plate on a stand on the table. The plate
+    # and its stand are one solid block from the table up to the plate top.
     if not np.allclose(world_from_build[:3, 2], [0, 0, 1], atol=1e-9, rtol=0):
-        raise ValueError("Current cell requires a horizontal build platform")
+        raise ValueError("The build plate must be horizontal")
     environment = profile["environment"]
     values = [
         environment["table_z_m"],
         *environment["table_size_m"],
-        *environment["platform_size_m"],
+        *environment["plate_size_m"],
+        environment["plate_top_z_m"],
         environment["clearance_m"],
     ]
     if not np.isfinite(values).all() or environment["clearance_m"] < 0:
         raise ValueError("Invalid cell environment dimensions or clearance")
-    plate_top = float(environment.get("platform_top_z_m", world_from_build[2, 3]))
+    if not np.isclose(world_from_build[2, 3], environment["plate_top_z_m"]):
+        raise ValueError("The build origin must lie on the top of the plate")
+    if environment["plate_top_z_m"] <= environment["table_z_m"]:
+        raise ValueError("The plate top must be above the table")
     obstacles = work_surfaces(
         world_from_build[:2, 3],
-        plate_top - environment["table_z_m"],
-        *environment["platform_size_m"],
+        environment["plate_top_z_m"] - environment["table_z_m"],
+        *environment["plate_size_m"],
         environment["table_z_m"],
         environment["table_size_m"],
     )
-    if "turntable" in profile:
-        from .planning.turntable import IndexedTurntable
-
-        turntable = IndexedTurntable.from_profile(profile)
-        obstacles.pop("platform")
-        obstacles.update(turntable.obstacles())
-    elif "build_riser" in environment:
-        riser = environment["build_riser"]
-        if not np.isclose(world_from_build[2, 3] - plate_top, riser["height_m"]):
-            raise ValueError("Riser must bridge plate top and build surface")
-        obstacles["build_riser"] = riser_object(riser, world_from_build)[0]
     return profile, arms, obstacles
 
 
-def prepare_object_profile(source, output, *, footprint, width_m):
-    """Write a fresh, source-bound profile with a centered object-footprint riser."""
-    source, output = Path(source).resolve(), Path(output).resolve()
-    if output.exists():
-        raise ValueError("Use a fresh object profile path")
-    profile = yaml.safe_load(source.read_text())
-    for arm in profile["arms"]:
-        for key in ("robot_urdf", "robot_manifest", "robot_visual"):
-            arm[key] = relpath((source.parent / arm[key]).resolve(), output.parent)
-        for body in (arm.get("tool_geometry") or {}).get("bodies", []):
-            shape = body["shape"]
-            if shape["type"] == "mesh":
-                shape["path"] = relpath((source.parent / shape["path"]).resolve(), output.parent)
-    riser = {"type": footprint, "height_m": 0.020, "calibrated": False}
-    if footprint == "box":
-        riser["size_m"] = [width_m, width_m]
-    elif footprint == "cylinder":
-        riser["radius_m"] = width_m / 2
-    else:
-        raise ValueError("Object footprint must be box or cylinder")
-    riser_object(riser, profile["world_from_build"])
-    profile["environment"]["build_riser"] = riser
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(yaml.safe_dump(profile, sort_keys=False))
-    return profile
 
 
 def sync_source_visuals(output, source_run, include_graph=True):
@@ -390,7 +357,6 @@ def prepare_cell(profile_path, output, source_run, source_variant="original"):
         inputs=inputs,
         world_from_build=profile["world_from_build"],
         environment=profile["environment"],
-        **({"turntable": profile["turntable"]} if "turntable" in profile else {}),
         placement_confirmed=profile.get("placement_confirmed", False),
         limitations=[
             "Base placement, robot variants and pen offsets are provisional",

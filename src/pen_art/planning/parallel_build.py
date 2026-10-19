@@ -29,7 +29,6 @@ from ..io import read_json, write_json
 from .replay_checkpoint import IMPLEMENTATION, digest
 from .scene import MaterialScene
 from .schedule import MotionProposal, ScheduledMotion
-from .turntable import index_angle
 
 POLICY = "parallel-forward-v1"
 HOME = "home"
@@ -75,52 +74,28 @@ class MaterialPrefix:
     """Rebuild the material preceding an action from journaled deposits.
 
     One append-only scene is kept per process. A longer chain extends it; a
-    shorter or diverging one shares its leading capsules, unless a table turn
-    has moved them since. Turns and insertions repeat the validator's own
-    sequence, so the result is the scene sequential checking would hold.
+    shorter or diverging one shares its leading capsules. Insertions repeat
+    the validator's own sequence, so the result is the scene sequential
+    checking would hold.
     """
 
-    def __init__(self, table, load):
-        self.table, self.load = table, load
+    def __init__(self, load):
+        self.load = load
         self.rebuilds = 0
         self.reset()
 
-    def _empty(self):
-        scene = MaterialScene()
-        # A fixed-base cell has no table; its material never turns.
-        scene.table_index = 0 if self.table is None else self.table.home_index
-        return scene
-
     def reset(self):
-        self.scene = self._empty()
-        self.chain, self.counts, self.epochs, self.epoch = [], [], [], 0
-
-    def _turn(self, scene, target):
-        current = scene.table_index
-        for step in self.table.steps(current, target):
-            scene = self.table.reposition(scene, index_angle(current), index_angle(step))
-            current = step
-        return scene
+        self.scene = MaterialScene()
+        self.chain, self.counts = [], []
 
     def _apply(self, element):
-        key, index = element
-        if index is not None and index != self.scene.table_index:
-            self.scene = self._turn(self.scene, index)
-            self.epoch += 1
-        for operation in self.load(key):
-            if operation[0] == "turn":
-                self.scene = self.table.reposition(
-                    self.scene, index_angle(operation[1]), index_angle(operation[2])
-                )
-                self.epoch += 1
-            else:
-                for row in operation[1]:
-                    self.scene.add(row["start"], row["end"], row["radius_m"], row["name"])
+        for operation in self.load(element[0]):
+            for row in operation[1]:
+                self.scene.add(row["start"], row["end"], row["radius_m"], row["name"])
         self.chain.append(element)
         self.counts.append(len(self.scene.objects))
-        self.epochs.append(self.epoch)
 
-    def scene_for(self, chain, final_index=None):
+    def scene_for(self, chain):
         chain = [tuple(element) for element in chain]
         common = 0
         while (
@@ -130,32 +105,16 @@ class MaterialPrefix:
         if common == len(self.chain):
             for element in chain[common:]:
                 self._apply(element)
-            scene = self.scene
-        else:
-            # Shorter or diverging. Leading capsules are reusable only while no
-            # later turn has repositioned them.
-            if not common:
-                base = self._empty()
-            elif self.epochs[common - 1] == self.epoch:
-                base = self.scene.prefix(self.counts[common - 1])
-            else:
-                base = None
-            if base is not None and common == len(chain):
-                scene = base  # Serve a pure prefix; keep the longer scene held.
-            else:
-                self.rebuilds += 1
-                if base is None:
-                    self.reset()
-                    common = 0
-                else:
-                    self.scene = base
-                    del self.chain[common:], self.counts[common:], self.epochs[common:]
-                for element in chain[common:]:
-                    self._apply(element)
-                scene = self.scene
-        if final_index is not None and final_index != scene.table_index:
-            scene = self._turn(scene, final_index)
-        return scene
+            return self.scene
+        base = self.scene.prefix(self.counts[common - 1]) if common else MaterialScene()
+        if common == len(chain):
+            return base  # Serve a pure prefix; keep the longer scene held.
+        self.rebuilds += 1
+        self.scene = base
+        del self.chain[common:], self.counts[common:]
+        for element in chain[common:]:
+            self._apply(element)
+        return self.scene
 
 
 class ForwardSchedule:
@@ -564,9 +523,7 @@ def _deposits(root, key):
 
 def _prefix(context):
     if "prefix" not in _WORKER:
-        _WORKER["prefix"] = MaterialPrefix(
-            context["model"].table, lambda key: _deposits(context["root"], key)
-        )
+        _WORKER["prefix"] = MaterialPrefix(lambda key: _deposits(context["root"], key))
     return _WORKER["prefix"]
 
 
@@ -614,29 +571,22 @@ def _propose(context, spec, seconds):
     index = spec["index"]
     row, completed = context["order"][index], _completed(context, index)
     empty = MaterialScene()
-    empty.table_index = model.table.home_index
     available = build.state(completed, build.initial, empty).ready_nodes()
-    # The planner's own sampler, one table index per ordinal. It screens the
-    # nozzle against the predicted preceding material. A stroke may name the
-    # turntable position it was made for (detail drawn after the frame). It is
-    # drawn there or not at all: another position costs two quarter turns for
-    # one short stroke.
+    # The planner's own sampler. It screens the nozzle against the predicted
+    # preceding material. Each retry (``ordinal``) samples a finer path and
+    # the other pen roll, for a stroke that missed the path-accuracy check.
     chain_from = spec.get("chain_from")
     if chain_from is not None:
         # Carry on from the predecessor's end: same node, joint position, pen
         # orientation and table position, with the pen still down.
-        table_index, available = chain_from["table_index"], {chain_from["node"]}
-    elif "turntable_index" in row and spec["ordinal"] > 0:
-        return {"status": "NO_CANDIDATE", "failure": {"reason": "named turntable position"}}
-    else:
-        first = row.get("turntable_index", model.table.home_index)
-        table_index = (first + spec["ordinal"]) % 4
+        available = {chain_from["node"]}
+    table_index = 0
 
-    scene = _prefix(context).scene_for(spec["chain"], final_index=table_index)
+    scene = _prefix(context).scene_for(spec["chain"])
     started = perf_counter()
     for drawing in model.drawings(
         row, available, build.initial, table_index, scene,
-        chain=chain_from, prefer_start=spec.get("prefer_start"),
+        chain=chain_from, prefer_start=spec.get("prefer_start"), retry=spec["ordinal"],
     ):
         seconds["proposal"] += perf_counter() - started
         started = perf_counter()
@@ -699,7 +649,7 @@ def _check(context, spec, seconds):
     seconds["serialization"] += perf_counter() - started
     table_index, drawing = candidate["table_index"], candidate["drawing"]
     started = perf_counter()
-    scene = _prefix(context).scene_for(spec["chain"], final_index=table_index)
+    scene = _prefix(context).scene_for(spec["chain"])
     seconds["material_reconstruction"] += perf_counter() - started
     state = build.state(completed, build.initial, scene)
     move = candidate["move"]
@@ -792,9 +742,9 @@ def _timing_failure(build, row, clock):
 
 
 def _connect(context, spec, seconds):
+    from .plate import audit_plate_clock
     from .section_build import combine_clocks
     from .source_coverage import audit_source_curve
-    from .turntable import audit_indexed_clock
 
     build, model, planner = context["build"], context["model"], context["build"].planner
     index, home = spec["index"], context["model"].table.home_index
@@ -802,7 +752,7 @@ def _connect(context, spec, seconds):
     end, end_index = (build.initial, home) if spec["end"] is None else spec["end"]
     start, end = np.asarray(start, float), np.asarray(end, float)
     started = perf_counter()
-    scene = _prefix(context).scene_for(spec["chain"], final_index=start_index)
+    scene = _prefix(context).scene_for(spec["chain"])
     seconds["material_reconstruction"] += perf_counter() - started
     started = perf_counter()
     # A chained stroke begins exactly where its predecessor stopped.
@@ -854,7 +804,7 @@ def _connect(context, spec, seconds):
     untimed = _untimed(checked["clock"])
     if not untimed:
         try:
-            audit_indexed_clock(model.table, path, build.initial, build.cooling)
+            audit_plate_clock(path)
         except ValueError as error:
             return {
                 "status": "REJECTED",
@@ -899,10 +849,10 @@ def _time(context, spec, seconds):
     from ..timing import TimingParameterizationError
     from .geometric_path import same_sweep
     from .indexed_build import at_index
+    from .plate import audit_plate_clock
     from .section_build import combine_clocks
-    from .turntable import audit_indexed_clock
 
-    build, model, planner = context["build"], context["model"], context["build"].planner
+    build, planner = context["build"], context["build"].planner
     row = context["order"][spec["index"]]
     started = perf_counter()
     payload = _load(context["root"], spec["connected"])
@@ -961,7 +911,7 @@ def _time(context, spec, seconds):
                 {**covered, "derived_from": "same_sweep_of_untimed_path"},
             )
     try:
-        audit_indexed_clock(model.table, path, build.initial, build.cooling)
+        audit_plate_clock(path)
     except ValueError as error:
         return {"status": "REJECTED", "failure": {"status": "INDEXED_CLOCK", "detail": str(error)}}
     seconds["serialization"] += _store(

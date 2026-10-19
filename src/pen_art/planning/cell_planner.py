@@ -8,7 +8,6 @@ import hashlib
 import json
 from collections import Counter
 from copy import copy
-from dataclasses import replace
 from pathlib import Path
 from time import monotonic, perf_counter
 
@@ -354,13 +353,6 @@ class CellPlanner:
         if settings.get("collision_scope", "full_robot") not in {"full_robot", "pen_candidate"}:
             raise ValueError("Collision scope must be full_robot or pen_candidate")
         self.profile, self.arms, self.obstacles = load_cell(profile)
-        self.turntable = None
-        if "turntable" in self.profile:
-            from .turntable import IndexedTurntable
-
-            if len(self.arms) != 1:
-                raise ValueError("Indexed turntable requires one arm")
-            self.turntable = IndexedTurntable.from_profile(self.profile)
         self.cell = read_json(self.run / "cell_manifest.json")
         if self.profile != read_json(self.run / "cell_config.json"):
             raise ValueError("Cell configuration changed; rebuild the setup")
@@ -501,7 +493,7 @@ class CellPlanner:
                        sort_keys=True, default=str),
             self.margin,
             *(id(part) for part in (self.profile, self.actions, self.obstacles, arm.collision,
-                                    arm.tool.metadata, self.turntable)),
+                                    arm.tool.metadata)),
             tuple(sorted(self.obstacles)),
         )
         frozen = self.__dict__.setdefault("_frozen_contexts", {})
@@ -569,7 +561,7 @@ class CellPlanner:
             "profile": self.profile,
             "obstacles": obstacle_context(
                 self.obstacles,
-                static_shapes(self.profile, self.turntable),
+                static_shapes(self.profile),
                 self._obstacle_context_refs,
             ),
             "source_actions": self.actions,
@@ -586,7 +578,7 @@ class CellPlanner:
     def choose_initial_poses(self, source):
         """Select collision-free staged job starts, including the known tip.
 
-        An imported home posture may lie inside the raised platform. It cannot
+        An imported home posture may lie inside the build plate. It cannot
         be used as a collision-free path origin. Staging at the selected start
         is an explicit job precondition, not a fictitious transit through it.
         """
@@ -614,7 +606,6 @@ class CellPlanner:
             direction = arm.robot.world_from_base[:2, 3] - center[:2]
             direction /= np.linalg.norm(direction)
             # Keep an idle wrist away from the shared drawing volume. Near-tip
-            # staging at 10 cm cleared the platform but blocked the other arm.
             for distance in (0.30, 0.40, 0.16, 0.10):
                 target = np.eye(4)
                 target[:3, :3] = arm.robot.world_from_base[:3, :3] @ np.diag([-1.0, 1.0, -1.0])
@@ -725,16 +716,9 @@ class CellPlanner:
             self.settings["maximum_subdivision_depth"],
             local_contact_surfaces(
                 contact[2],
+                self.profile["world_from_build"][2][3],
                 self.profile["environment"]["table_z_m"],
-                self.profile["environment"].get(
-                    "platform_top_z_m", self.profile["world_from_build"][2][3]
-                ),
                 self.transit["contact_radius_m"],
-                riser_z=(
-                    self.profile["world_from_build"][2][3]
-                    if "build_riser" in self.profile["environment"]
-                    else None
-                ),
             ),
             deadline=self.deadline,
         )
@@ -1095,11 +1079,7 @@ class CellPlanner:
         task = drawing["stroke_id"]
         continuous = self.timing.get("drawing_clock") == "cubic_toppra"
         fixed_required = self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}
-        transform = (
-            self.turntable.build_transform(drawing.get("table_index", 0))
-            if self.turntable is not None
-            else np.asarray(self.profile["world_from_build"])
-        )
+        transform = np.asarray(self.profile["world_from_build"])
         vertex_cooling = float(self.process.get("vertex_cooling_s", 1.0))
         if not np.isfinite(vertex_cooling) or vertex_cooling < 0:
             raise ValueError("Vertex cooling must be finite and nonnegative")
@@ -1427,11 +1407,7 @@ class CellPlanner:
             ):
                 # Pose repair may refine source targets. Regenerate only nominal
                 # preference metadata; the accepted joint trajectory is unchanged.
-                transform = (
-                    self.turntable.build_transform(drawing.get("table_index", 0))
-                    if self.turntable is not None
-                    else np.asarray(self.profile["world_from_build"])
-                )
+                transform = np.asarray(self.profile["world_from_build"])
                 rotations = radial_pen_rotations(
                     arm,
                     drawing["tcp_targets_m"],
@@ -1509,11 +1485,7 @@ class CellPlanner:
         )
 
     def _process_events(self, path, task, table_index):
-        transform = (
-            self.turntable.build_transform(table_index)
-            if self.turntable is not None
-            else np.asarray(self.profile["world_from_build"])
-        )
+        transform = np.asarray(self.profile["world_from_build"])
         path.metadata["deposition_events"] = derive_deposition_events(
             path, self.actions[task], self.settings["assumed_cooling_s"], transform
         )
@@ -1631,9 +1603,9 @@ class CellPlanner:
                                 edge.q0, self.arms[identity].flange_to_tcp
                             )[:3, :3]
                         )
-        # A motion that lays no wire and turns no table leaves the scene as it is.
+        # A motion that lays no wire leaves the scene as it is.
         changes = any(
-            edge.kind in {"DRAW", "INDEX_TURN"}
+            edge.kind == "DRAW"
             for motion in motions.values()
             for edge in motion.proposal.payload.edges
         )
@@ -1644,16 +1616,6 @@ class CellPlanner:
             else state.payload.copy()
         )
         scene.clearance_query_enabled = enabled
-        if self.turntable is not None and not deposit_only and not untimed:
-            from .turntable import audit_indexed_clock
-
-            for motion in motions.values():
-                audit_indexed_clock(
-                    self.turntable,
-                    motion.proposal.payload,
-                    self.arms[motion.proposal.arm].initial_positions,
-                    self.settings["assumed_cooling_s"],
-                )
         spheres = str(self.settings.get("pen_check", "")).startswith("spheres")
         if spheres and len(self.arms) != 1:
             raise ValueError("The sphere pen check supports one arm")
@@ -1693,51 +1655,6 @@ class CellPlanner:
                         return np.zeros(len(q))
 
                 paths[identity] = (edge, position, deviation)
-            if self.turntable is not None:
-                identity = next(iter(self.arms))
-                edge, position, _ = paths[identity]
-                if edge is not None:
-                    if edge.table_index != scene.table_index:
-                        return None, {"status": "TABLE_INDEX_MISMATCH", "time_s": a}
-                    if edge.kind == "INDEX_TURN":
-                        if not untimed and any(
-                            ready > a + 1e-9 for _, ready in state.support_ready
-                        ):
-                            return None, {"status": "TABLE_TURN_BEFORE_COOLING", "time_s": a}
-                        motion = motions[identity]
-                        if (
-                            abs(a - motion.start_s - edge.start_s) > 1e-9
-                            or abs(b - motion.start_s - edge.end_s) > 1e-9
-                        ):
-                            return None, {"status": "PARTIAL_TURN_INTERVAL"}
-                        if not deposit_only:
-                            indexed_arm = replace(
-                                self.collision_arm(identity),
-                                collision=self.collision_tip_model(identity),
-                            )
-                            check = self.turntable.check_parked_turn(
-                                scene,
-                                edge.table_index,
-                                edge.table_to_index,
-                                indexed_arm,
-                                position(0),
-                                self.obstacles,
-                                margin_m=self.margin,
-                                maximum_depth=self.settings["maximum_subdivision_depth"],
-                                deadline=self.deadline,
-                            )
-                            if check["status"] != "CERTIFIED_TURNTABLE_INTERVAL":
-                                return None, {"phase": "TABLE_TURN", "time_s": a, **check}
-                        from .turntable import index_angle
-
-                        scene = self.turntable.reposition(
-                            scene, index_angle(edge.table_index), index_angle(edge.table_to_index)
-                        )
-                        if journal is not None:
-                            journal.append(("turn", edge.table_index, edge.table_to_index))
-                        if not deposit_only:
-                            self.checked_intervals += 1
-                        continue
             # Deposit conservative enclosures of BOTH growing strokes before
             # checking the interval. Future intervals are never installed early.
             pen_steps = {}
@@ -1872,16 +1789,9 @@ class CellPlanner:
                             self.settings["maximum_subdivision_depth"],
                             local_contact_surfaces(
                                 edge.contact[2],
+                                self.profile["world_from_build"][2][3],
                                 self.profile["environment"]["table_z_m"],
-                                self.profile["environment"].get(
-                                    "platform_top_z_m", self.profile["world_from_build"][2][3]
-                                ),
                                 self.transit["contact_radius_m"],
-                                riser_z=(
-                                    self.profile["world_from_build"][2][3]
-                                    if "build_riser" in self.profile["environment"]
-                                    else None
-                                ),
                             ),
                             deadline=self.deadline,
                             optimize_contact_geometry=reuse_contact,
