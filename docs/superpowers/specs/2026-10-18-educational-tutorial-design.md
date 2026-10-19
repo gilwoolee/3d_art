@@ -41,8 +41,10 @@ one command, the expected output for the ghost, and what to try changing.
    minutes.
 6. **View** the result in the browser viewer.
 
-Steps 2-4 run as one command (`plan`); the README still explains them as
-three stages.
+Steps 2, 3 and 4 are three separate commands, `plan-geometry`,
+`plan-timing` and `verify-full-robot` (decided by the user), so the learner
+runs and inspects each stage on its own. Each reads the previous stage's
+output from the run folder and writes its own.
 
 The ghost (`objs/cute_ghost/`) is the worked example in every step. A short
 "Concepts" section explains frame, stroke, turntable face, geometry-first
@@ -138,7 +140,10 @@ library when one is present and otherwise falls back to its own sampler
 ## The builder's calls (mine, open to the user's correction)
 
 - **Command form:** one entry point, `pen-art <step>`, with the steps
-  `cell`, `frame`, `plan`, `detail`, `view`.
+  `cell`, `frame`, `plan-geometry`, `plan-timing`, `verify-full-robot`
+  (these three names decided by the user), `detail`, `view`.
+- **Detail** stays one command: its rounds of planning and dropping strokes
+  run the same three stages internally.
 - **The 5 tests:** frame generator (slice heights), continuous collision
   check, timing sweeps exactly the checked path, verification reports a
   rejection, and a quarter turn of the turntable rejects a collision between
@@ -156,7 +161,10 @@ library when one is present and otherwise falls back to its own sampler
 ## Left to the builder
 
 - Internal module layout after the removal, and file names inside `runs/`.
-- Whether `plan` and `detail` share one implementation.
+- How to split today's single planning process (paths and timing together
+  in `section_build`) so that timing runs as its own command on a saved
+  untimed plan; verification (`cell_replay`) is already separate.
+- Whether `detail` reuses the three stage commands directly.
 - How `cell.yaml` values map onto the existing profile and collision model.
 
 ## Order of work
@@ -165,6 +173,7 @@ library when one is present and otherwise falls back to its own sampler
    library, other planning modes and unused code; keep the 5 tests green;
    check the ghost still plans to `FULL_BUILD_VERIFIED` at about 14.2 min.
 2. Merge the configs into `cell.yaml` and `frame.yaml`.
-3. One command per step.
+3. One command per step, with geometry, timing and verification split into
+   `plan-geometry`, `plan-timing` and `verify-full-robot`.
 4. Write the tutorial README with measured outputs.
 5. From a fresh clone: run the tutorial at 15 cm and at 8 cm.
