@@ -21,6 +21,7 @@ from ..timing import make_path, refine_samples
 from .clock_path import timed_path
 from .collision import QUERY_STATS, Body, RobotCollisionModel, placed
 from .geometric_path import geometric_path
+from .path_certificates import FrozenContext, MotionProofs, PathCertificateStore
 from .pen_spheres import PenSpheres, wire_arrays
 from .process_clock import (
     PROCESS_CLOCK_POLICY,
@@ -302,8 +303,6 @@ class CellPlanner:
                 ):
                     model.material_margins = self.tool_margins
         self.initial_pose_repairs = self.choose_initial_poses(source)
-        from .path_certificates import PathCertificateStore
-
         self.verification_raw = verification_raw
         self.optimize_contact_geometry = (
             not verification_raw if optimize_contact_geometry is None else optimize_contact_geometry
@@ -348,8 +347,6 @@ class CellPlanner:
         what can differ between calls; an unchanged one is returned as the same
         frozen object, whose hash the proof store then forms only once.
         """
-        from .path_certificates import FrozenContext
-
         context = self._path_certificate_context(identity, kinematic=kinematic, pen=pen)
         arm = self.arms[identity]
         signature = (
@@ -441,7 +438,7 @@ class CellPlanner:
         }
 
     def choose_initial_poses(self, source):
-        """Select collision-free staged job starts, including the known tip.
+        """Select a collision-free staged job start for the arm, including the known tip.
 
         An imported home posture may lie inside the build plate. It cannot
         be used as a collision-free path origin. Staging at the selected start
@@ -542,9 +539,9 @@ class CellPlanner:
             ),
         )
 
-    def lift_check(self, identity, scene, q):
+    def contact_check(self, identity, scene, contact, *, optimize_contact_geometry=None):
+        """The arm and tip check near a contact point; the tip may touch wire inside its ball."""
         arm = self.collision_arm(identity)
-        contact = arm.robot.forward(q, arm.flange_to_tcp)[:3, 3]
         return contact_validator(
             arm.robot,
             arm.collision,
@@ -564,7 +561,13 @@ class CellPlanner:
                 self.transit["contact_radius_m"],
             ),
             deadline=self.deadline,
+            optimize_contact_geometry=optimize_contact_geometry,
         )
+
+    def lift_check(self, identity, scene, q):
+        """The contact check around the tool point at ``q``, for approach and withdrawal."""
+        arm = self.collision_arm(identity)
+        return self.contact_check(identity, scene, arm.robot.forward(q, arm.flange_to_tcp)[:3, 3])
 
     def pen_sample_fractions(self, identity, position):
         """Fractions of an interval whose tool positions lie within the sampling distance."""
@@ -735,177 +738,65 @@ class CellPlanner:
         arm, scene = self.collision_arm(identity), state.payload
         task = drawing["stroke_id"]
         tracked = local["tracked"]
-        vertex_cooling, vertical_end = local["vertex_cooling"], local["vertical_end"]
         q = tracked["positions"]
-        approach_attempts = []
-        # A tilted pen can pull back along its own body axis, distinct from
-        # every world-up ray. The ray receives the same IK, tracking and
-        # collision checks.
-        approach_directions = [
-            (-arm.robot.forward(q[0], arm.flange_to_tcp)[:3, 2]).tolist(),
-            *self.transit["departure_directions"],
-        ]
-        if chained_in:
-            approach = np.asarray([q[0]])
-            approach_directions = []
-        for direction in approach_directions:
-            if monotonic() >= self.deadline:
-                self.failure(task, identity, "APPROACH", "TIME_BUDGET", attempts=approach_attempts)
+        approach = None
+        if not chained_in:
+            approach = self._approach(identity, scene, task, q[0])
+            if approach is None:
                 return None
-            lift = find_departure(
-                arm.robot,
-                arm.flange_to_tcp,
-                q[0],
-                {**self.transit, "departure_directions": [direction]},
-                self.lift_check(identity, scene, q[0]),
-                self.deadline,
-            )
-            approach_attempts.extend(lift["attempts"])
-            if lift["status"] == "SAMPLED_DRAWING_PATH":
-                approach = np.array(lift["positions"])[::-1]
-                break
-        else:
-            if not chained_in:
-                self.failure(
-                    task, identity, "APPROACH", "NO_CONNECTED_APPROACH", attempts=approach_attempts
-                )
-                return None
-        after = scene
+        withdraw = [q[-1]]
         if not chained_out:
-            # Withdrawal planning sees the wire this drawing lays.
-            after = scene.copy()
-            for number, row in enumerate(local["deposits"]):
-                after.add(
-                    row["start"], row["end"], row["radius_m"],
-                    f"prospective/{identity}/{task}/{number}",
-                )
-        withdraw = (
-            {"status": "SAMPLED_DRAWING_PATH", "positions": [q[-1]]}
-            if chained_out
-            else find_departure(
-                arm.robot,
-                arm.flange_to_tcp,
-                q[-1],
-                {
-                    **self.transit,
-                    "departure_directions": [
-                        (-arm.robot.forward(q[-1], arm.flange_to_tcp)[:3, 2]).tolist(),
-                        *self.transit["departure_directions"],
-                    ],
-                },
-                self.lift_check(identity, after, q[-1]),
-                self.deadline,
-            )
+            withdraw = self._withdrawal(identity, scene, task, local, q[-1])
+            if withdraw is None:
+                return None
+        operations = self._stroke_operations(
+            arm, drawing, local, approach, withdraw, chained_in=chained_in, chained_out=chained_out
         )
-        if withdraw["status"] != "SAMPLED_DRAWING_PATH":
-            self.failure(
-                task, identity, "WITHDRAW", withdraw["status"], attempts=withdraw["attempts"]
-            )
-            return None
-        start_contact, end_contact = [
-            arm.robot.forward(p, arm.flange_to_tcp)[:3, 3] for p in (q[0], q[-1])
-        ]
-        operations = [
-            {"kind": "TRAVEL", "positions": np.asarray([approach[0]])},
-            {"kind": "APPROACH", "positions": approach, "contact_m": start_contact},
-            {
-                "kind": "PEN_START_WAIT",
-                "positions": [q[0]],
-                "contact_m": start_contact,
-                "hold_s": self.process["start_lag_s"],
-            },
-            {
-                "kind": "JOIN",
-                "positions": [q[0]],
-                "contact_m": start_contact,
-                "hold_s": self.process["join_s"],
-            },
-            local["draw_operation"],
-            {
-                "kind": "PEN_STOP_WAIT",
-                "positions": [q[-1]],
-                "contact_m": end_contact,
-                "hold_s": self.process["stop_lag_s"],
-            },
-            {"kind": "WITHDRAW", "positions": withdraw["positions"], "contact_m": end_contact},
-        ]
-        release_cooling = float(drawing.get("release_cooling_s", 0.0))
-        if not np.isfinite(release_cooling) or release_cooling < 0:
-            raise ValueError("Release cooling must be finite and nonnegative")
-        if vertical_end:
-            release_cooling = max(release_cooling, vertex_cooling)
-        # Feed decay has already elapsed at the final point before this hold.
-        release_cooling = max(0.0, release_cooling - self.process["stop_lag_s"])
-        if release_cooling:
-            operations.insert(
-                -1,
-                {
-                    "kind": "WAIT",
-                    "positions": [q[-1]],
-                    "contact_m": end_contact,
-                    "hold_s": release_cooling,
-                },
-            )
-        if chained_in:
-            operations = [op for op in operations
-                          if op["kind"] not in {"TRAVEL", "APPROACH", "PEN_START_WAIT", "JOIN"}]
-        if chained_out:
-            start_lag, stop_lag = self.process["start_lag_s"], self.process["stop_lag_s"]
-            operations = [op for op in operations
-                          if op["kind"] not in {"PEN_STOP_WAIT", "WAIT", "WITHDRAW"}]
-            if vertical_end:
-                # A free riser top is held like any corner: feed off on
-                # arrival, restarted in time for the hold's end.
-                operations.extend(
-                    {"kind": kind, "positions": [q[-1]], "contact_m": end_contact, "hold_s": hold}
-                    for kind, hold in (
-                        ("PEN_STOP_WAIT", stop_lag),
-                        ("VERTEX_COOL", max(0.0, vertex_cooling - stop_lag - start_lag)),
-                        ("PEN_START_WAIT", start_lag),
-                    )
-                    if hold > 0
-                )
-        for operation in operations:
-            operation["stroke_id"] = task
         path = geometric_path(operations, arm)
         path.timing_operations = operations
+        preference = {}
         if drawing.get("orientation_policy") is not None:
-            path.metadata["orientation_preference"] = {
-                "policy": drawing["orientation_policy"],
-                "pen_tilt_deg": drawing.get("pen_tilt_deg"),
-                "preferred_pen_tilt_deg": drawing.get("preferred_pen_tilt_deg"),
-                "seed_preference": drawing.get("seed_orientation_preference"),
-                "roll_rad": drawing.get("roll_rad", 0.0),
-                "source_points_m": drawing["tcp_targets_m"],
-                "target_rotations": drawing.get("tcp_rotations"),
-                "constraint": "preferred_only_with_fresh_full_tool_collision_checks",
+            preference = {
+                "orientation_preference": {
+                    "policy": drawing["orientation_policy"],
+                    "pen_tilt_deg": drawing.get("pen_tilt_deg"),
+                    "preferred_pen_tilt_deg": drawing.get("preferred_pen_tilt_deg"),
+                    "seed_preference": drawing.get("seed_orientation_preference"),
+                    "roll_rad": drawing.get("roll_rad", 0.0),
+                    "source_points_m": drawing["tcp_targets_m"],
+                    "target_rotations": drawing.get("tcp_rotations"),
+                    "constraint": "preferred_only_with_fresh_full_tool_collision_checks",
+                },
+                "actual_pen_tilt": sampled_pen_tilt(arm, q),
             }
-            path.metadata["actual_pen_tilt"] = sampled_pen_tilt(arm, q)
         path.metadata.update(
-            chained_in=bool(chained_in),
-            chained_out=bool(chained_out),
-            collision_scope=self.collision_scope,
-            requires_full_robot_validation=self.collision_scope == "pen_candidate",
-            process_clock_policy=PROCESS_CLOCK_POLICY,
-            source_reverse=drawing.get("reverse", False),
-            source_start_visit=drawing.get("start_visit", 0),
-            vertex_feed_policy="stop_with_lag_then_restart",
-            vertex_cooling_s=vertex_cooling,
-            prospective_material_check="DEFERRED_TO_FULL_CLOCK",
+            {
+                **preference,
+                "chained_in": bool(chained_in),
+                "chained_out": bool(chained_out),
+                "collision_scope": self.collision_scope,
+                "requires_full_robot_validation": self.collision_scope == "pen_candidate",
+                "process_clock_policy": PROCESS_CLOCK_POLICY,
+                "source_reverse": drawing.get("reverse", False),
+                "source_start_visit": drawing.get("start_visit", 0),
+                "vertex_feed_policy": "stop_with_lag_then_restart",
+                "vertex_cooling_s": local["vertex_cooling"],
+                "prospective_material_check": "DEFERRED_TO_FULL_CLOCK",
+                "tracking_position_bound_m": tracked["position_error_bound_m"],
+                "tracking_orientation_constraint": tracked["orientation_constraint"],
+                "fixed_tcp_rotation": tracked["fixed_tcp_rotation"],
+                "tracking_orientation_bound_rad": tracked["orientation_error_bound_rad"],
+                "tracking_subdivisions": tracked["subdivisions"],
+                "tracking_status": "BOUNDED",
+            }
         )
-        path.metadata["tracking_position_bound_m"] = tracked["position_error_bound_m"]
-        path.metadata["tracking_orientation_constraint"] = tracked["orientation_constraint"]
-        path.metadata["fixed_tcp_rotation"] = tracked["fixed_tcp_rotation"]
-        path.metadata["tracking_orientation_bound_rad"] = tracked["orientation_error_bound_rad"]
-        path.metadata["tracking_subdivisions"] = tracked["subdivisions"]
-        path.metadata["tracking_status"] = "BOUNDED"
         proposal = MotionProposal(
             task,
             identity,
             drawing["variant"],
             path.duration_s,
             drawing["start_anchor"],
-            tuple(withdraw["positions"][-1]),
+            tuple(withdraw[-1]),
             path,
         )
         print(
@@ -913,6 +804,116 @@ class CellPlanner:
             flush=True,
         )
         return proposal
+
+    def _approach(self, identity, scene, task, q):
+        """Joint positions descending onto ``q``; None after recording a failure."""
+        arm = self.collision_arm(identity)
+        attempts = []
+        # A tilted pen can pull back along its own body axis, distinct from
+        # every world-up ray. The ray receives the same IK, tracking and
+        # collision checks.
+        directions = [
+            (-arm.robot.forward(q, arm.flange_to_tcp)[:3, 2]).tolist(),
+            *self.transit["departure_directions"],
+        ]
+        for direction in directions:
+            if monotonic() >= self.deadline:
+                self.failure(task, identity, "APPROACH", "TIME_BUDGET", attempts=attempts)
+                return None
+            lift = find_departure(
+                arm.robot,
+                arm.flange_to_tcp,
+                q,
+                {**self.transit, "departure_directions": [direction]},
+                self.lift_check(identity, scene, q),
+                self.deadline,
+            )
+            attempts.extend(lift["attempts"])
+            if lift["status"] == "SAMPLED_DRAWING_PATH":
+                return np.array(lift["positions"])[::-1]
+        self.failure(task, identity, "APPROACH", "NO_CONNECTED_APPROACH", attempts=attempts)
+        return None
+
+    def _withdrawal(self, identity, scene, task, local, q):
+        """Joint positions lifting off ``q`` clear of this drawing's own wire; None on failure."""
+        arm = self.collision_arm(identity)
+        after = scene.copy()
+        for number, row in enumerate(local["deposits"]):
+            after.add(
+                row["start"], row["end"], row["radius_m"],
+                f"prospective/{identity}/{task}/{number}",
+            )
+        withdraw = find_departure(
+            arm.robot,
+            arm.flange_to_tcp,
+            q,
+            {
+                **self.transit,
+                "departure_directions": [
+                    (-arm.robot.forward(q, arm.flange_to_tcp)[:3, 2]).tolist(),
+                    *self.transit["departure_directions"],
+                ],
+            },
+            self.lift_check(identity, after, q),
+            self.deadline,
+        )
+        if withdraw["status"] != "SAMPLED_DRAWING_PATH":
+            self.failure(
+                task, identity, "WITHDRAW", withdraw["status"], attempts=withdraw["attempts"]
+            )
+            return None
+        return withdraw["positions"]
+
+    def _stroke_operations(
+        self, arm, drawing, local, approach, withdraw, *, chained_in, chained_out
+    ):
+        """The stroke's operations: lead-in unless chained in, DRAW, hold and lift unless out."""
+        q = local["tracked"]["positions"]
+        vertex_cooling = local["vertex_cooling"]
+        start_lag, stop_lag = self.process["start_lag_s"], self.process["stop_lag_s"]
+        start_contact, end_contact = [
+            arm.robot.forward(p, arm.flange_to_tcp)[:3, 3] for p in (q[0], q[-1])
+        ]
+        release_cooling = float(drawing.get("release_cooling_s", 0.0))
+        if not np.isfinite(release_cooling) or release_cooling < 0:
+            raise ValueError("Release cooling must be finite and nonnegative")
+        if local["vertical_end"]:
+            release_cooling = max(release_cooling, vertex_cooling)
+        # Feed decay has already elapsed at the final point before this hold.
+        release_cooling = max(0.0, release_cooling - stop_lag)
+
+        def hold(kind, joints, contact, seconds):
+            return {"kind": kind, "positions": [joints], "contact_m": contact, "hold_s": seconds}
+
+        operations = []
+        if not chained_in:
+            operations += [
+                {"kind": "TRAVEL", "positions": np.asarray([approach[0]])},
+                {"kind": "APPROACH", "positions": approach, "contact_m": start_contact},
+                hold("PEN_START_WAIT", q[0], start_contact, start_lag),
+                hold("JOIN", q[0], start_contact, self.process["join_s"]),
+            ]
+        operations.append(local["draw_operation"])
+        if not chained_out:
+            operations.append(hold("PEN_STOP_WAIT", q[-1], end_contact, stop_lag))
+            if release_cooling:
+                operations.append(hold("WAIT", q[-1], end_contact, release_cooling))
+            operations.append({"kind": "WITHDRAW", "positions": withdraw, "contact_m": end_contact})
+        elif local["vertical_end"]:
+            # A free riser top is held like any corner: feed off on
+            # arrival, restarted in time for the hold's end.
+            operations.extend(
+                hold(kind, q[-1], end_contact, seconds)
+                for kind, seconds in (
+                    ("PEN_STOP_WAIT", stop_lag),
+                    ("VERTEX_COOL", max(0.0, vertex_cooling - stop_lag - start_lag)),
+                    ("PEN_START_WAIT", start_lag),
+                )
+                if seconds > 0
+            )
+        for operation in operations:
+            operation["stroke_id"] = drawing["stroke_id"]
+        return operations
 
     def _timed(self, operations, arm):
         return timed_path(
@@ -981,75 +982,90 @@ class CellPlanner:
         receives those material operations in order, so another process can
         rebuild the same scene before this interval's verdict exists.
         """
-        motions = {m.proposal.arm: m for m in state.active + new}
-        # An untimed path has no seconds: cooling audits wait for its timing
-        # pass. Every geometric check below is unchanged.
-        untimed = {
-            m.proposal.payload.metadata.get("parameterization") == "geometric"
-            for m in motions.values()
-        }
-        if True in untimed and (len(untimed) > 1 or len(self.arms) != 1):
-            raise ValueError("Untimed validation needs one arm and only untimed paths")
-        untimed = True in untimed
+        (identity,) = self.arms
+        # The arm runs one motion at a time and is parked between motions.
+        motion = {m.proposal.arm: m for m in state.active + new}.get(identity)
+        scope = "invariant_path" if self.collision_scope == "full_robot" else "pen_invariant_path"
+        proofs = None
+        if motion is not None and not deposit_only and not self.verification_raw:
+            proofs = MotionProofs(
+                self.path_certificates,
+                self.path_certificate_context(identity),
+                motion.proposal.payload.record(),
+                scope,
+                self.verification_stats,
+            )
+        invariant = None if proofs is None else proofs.invariant
+        oriented = proofs is not None and proofs.oriented
+        fixed_required = self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}
+        references = None
+        if fixed_required and not deposit_only and motion is not None:
+            path = motion.proposal.payload
+            if path.metadata.get("tracking_orientation_constraint") == "free":
+                return None, {"status": "FIXED_ORIENTATION_REQUIRED", "arm": identity}
+            if invariant is None and not oriented:
+                references = self._fixed_references(identity, path)
+        scene = self._interval_scene(state, motion)
+        spheres = str(self.settings.get("pen_check", "")).startswith("spheres")
+        edge_index = (
+            {} if motion is None
+            else {id(edge): index for index, edge in enumerate(motion.proposal.payload.edges)}
+        )
+        saved = (invariant or {}).get("deposition_enclosures", {})
         # Reuse only the clipped contact geometry within this call. Tool,
         # static obstacles, radii and deadline are fixed here; every joint
         # edge still receives fresh arm and tip checks. Deposition changes the
         # scene token. Raw replay rebuilds each time.
-        contact_validators = {}
-        certificate_records, invariant_hits, invariant_proofs = {}, set(), {}
-        deposition_enclosures = {identity: {} for identity in motions}
-        edge_indices = {
-            identity: {id(edge): index for index, edge in enumerate(motion.proposal.payload.edges)}
-            for identity, motion in motions.items()
-        }
-        store = None if deposit_only else self.path_certificates
-        full_scope = self.collision_scope == "full_robot"
-        invariant_scope = "invariant_path" if full_scope else "pen_invariant_path"
-        if store is not None and not self.verification_raw:
-            for identity, motion in motions.items():
-                context = self.path_certificate_context(identity)
-                record = motion.proposal.payload.record()
-                certificate_records[identity] = (context, record)
-                proof = store.get(context, record, invariant_scope)
-                if proof is not None:
-                    invariant_hits.add(identity)
-                    invariant_proofs[identity] = proof
-                    self.verification_stats[f"{invariant_scope}_hits"] += 1
-                else:
-                    self.verification_stats[f"{invariant_scope}_misses"] += 1
-        fixed_required = self.profile.get("drawing_orientation_policy") in {"fixed", "fixed_axis"}
-        orientation_hits = set()
-        if store is not None and not self.verification_raw:
-            for identity, (context, record) in certificate_records.items():
-                if store.get(context, record, "drawing_orientation") is not None:
-                    orientation_hits.add(identity)
-                    self.verification_stats["drawing_orientation_hits"] += 1
-        fixed_references = {}
-        if fixed_required and not deposit_only:
-            for identity, motion in motions.items():
-                path = motion.proposal.payload
-                if path.metadata.get("tracking_orientation_constraint") == "free":
-                    return None, {"status": "FIXED_ORIENTATION_REQUIRED", "arm": identity}
-                drawing_edges = [edge for edge in path.edges if edge.kind == "DRAW"]
-                strokes = {edge.stroke for edge in drawing_edges}
-                for edge in drawing_edges:
-                    key = (identity, edge.stroke)
-                    if key not in fixed_references:
-                        declared = (
-                            path.metadata.get("fixed_tcp_rotation") if len(strokes) == 1 else None
-                        )
-                        fixed_references[key] = (
-                            np.asarray(declared)
-                            if declared is not None
-                            else self.arms[identity].robot.forward(
-                                edge.q0, self.arms[identity].flange_to_tcp
-                            )[:3, :3]
-                        )
+        enclosures, contacts = {}, {}
+        for a, b in self._interval_cuts(state, motion, end):
+            if monotonic() >= self.deadline:
+                return None, {"status": "TIME_BUDGET"}
+            path = self._interval_path(state, motion, a, b)
+            edge, pen_steps = path[0], None
+            if edge is not None and edge.kind == "DRAW":
+                pen_steps = self._deposit_interval(
+                    scene, identity, motion, edge, path[1], a, b, edge_index[id(edge)],
+                    spheres=spheres, saved=saved, enclosures=enclosures, journal=journal,
+                )
+            if deposit_only:
+                continue
+            failure = self._check_interval(
+                scene, identity, motion, path, a, b, references=references,
+                reused=invariant is not None, contacts=contacts, spheres=spheres,
+                pen_steps=pen_steps,
+            )
+            if failure is not None:
+                return None, failure
+            self.checked_intervals += 1
+        # A partial scheduling interval cannot certify the full clock.
+        if proofs is not None and state.time_s <= motion.start_s and end >= motion.end_s:
+            self._admit_proofs(proofs, motion, fixed_required, enclosures)
+        return scene, None
+
+    def _fixed_references(self, identity, path):
+        """Each stroke's fixed pen rotation: the declared one, else the first DRAW pose's."""
+        arm = self.arms[identity]
+        drawing_edges = [edge for edge in path.edges if edge.kind == "DRAW"]
+        declared = (
+            path.metadata.get("fixed_tcp_rotation")
+            if len({edge.stroke for edge in drawing_edges}) == 1
+            else None
+        )
+        references = {}
+        for edge in drawing_edges:
+            if edge.stroke not in references:
+                references[edge.stroke] = (
+                    np.asarray(declared)
+                    if declared is not None
+                    else arm.robot.forward(edge.q0, arm.flange_to_tcp)[:3, :3]
+                )
+        return references
+
+    def _interval_scene(self, state, motion):
+        """The scene the interval grows: the state's own unless wire is laid or the mode differs."""
         # A motion that lays no wire leaves the scene as it is.
-        changes = any(
-            edge.kind == "DRAW"
-            for motion in motions.values()
-            for edge in motion.proposal.payload.edges
+        changes = motion is not None and any(
+            edge.kind == "DRAW" for edge in motion.proposal.payload.edges
         )
         enabled = not self.verification_raw
         scene = (
@@ -1058,261 +1074,233 @@ class CellPlanner:
             else state.payload.copy()
         )
         scene.clearance_query_enabled = enabled
-        spheres = str(self.settings.get("pen_check", "")).startswith("spheres")
-        if spheres and len(self.arms) != 1:
-            raise ValueError("The sphere pen check supports one arm")
+        return scene
+
+    def _interval_cuts(self, state, motion, end):
+        """Consecutive ``(a, b)`` cut at the motion's edge ends inside the interval."""
         boundaries = {state.time_s, end}
-        for motion in motions.values():
+        if motion is not None:
             boundaries.update(
                 motion.start_s + edge.end_s
                 for edge in motion.proposal.payload.edges
                 if state.time_s < motion.start_s + edge.end_s < end
             )
         boundaries = sorted(boundaries)
-        for a, b in zip(boundaries[:-1], boundaries[1:], strict=True):
-            if monotonic() >= self.deadline:
-                return None, {"status": "TIME_BUDGET"}
-            paths = {}
-            for identity in self.arms:
-                if identity in motions:
-                    motion = motions[identity]
-                    edge = motion.proposal.payload.edge_at((a + b) / 2 - motion.start_s)
-                    start = motion.start_s
+        return list(zip(boundaries[:-1], boundaries[1:], strict=True))
 
-                    def position(u, e=edge, s=start, left=a, right=b):
-                        return e.position(left + (right - left) * u - s)
+    def _interval_path(self, state, motion, a, b):
+        """The edge over ``[a, b]`` and the joints and their deviation over ``u`` in [0, 1].
 
-                    def deviation(x, y, e=edge, s=start, left=a, right=b):
-                        return e.deviation(
-                            left + (right - left) * x - s, left + (right - left) * y - s
-                        )
-                else:
-                    edge = None
-                    q = np.array(state.configuration)
+        A parked arm has no edge and stays at the state's configuration.
+        """
+        if motion is None:
+            q = np.array(state.configuration)
 
-                    def position(u, q=q):
-                        return q
+            def parked(u):
+                return q
 
-                    def deviation(x, y, q=q):
-                        return np.zeros(len(q))
+            def still(x, y):
+                return np.zeros(len(q))
 
-                paths[identity] = (edge, position, deviation)
-            # Deposit a conservative enclosure of the growing stroke before
-            # checking the interval. Future intervals are never installed early.
-            pen_steps = {}
-            for identity, (edge, _position, _) in paths.items():
-                if edge is not None and edge.kind == "DRAW":
-                    motion = motions[identity]
-                    name = f"material/{identity}/{edge.stroke}/{a:.12f}-{b:.12f}"
-                    interval_key = (
-                        f"{edge_indices[identity][id(edge)]}:"
-                        f"{float(a - motion.start_s).hex()}:"
-                        f"{float(b - motion.start_s).hex()}"
-                    )
-                    cached_capsules = (
-                        invariant_proofs.get(identity, {})
-                        .get("deposition_enclosures", {})
-                        .get(interval_key)
-                    )
-                    started = perf_counter()
-                    before = len(scene.segments)
-                    # The sphere check looks at the pen at these fractions of
-                    # the interval, each against the wire laid up to there, so
-                    # the wire is deposited in the same steps.
-                    steps = (
-                        self.pen_sample_fractions(identity, _position) if spheres else [0.0, 1.0]
-                    )
-                    marks = [before]
-                    if cached_capsules is not None:
-                        for capsule in cached_capsules:
-                            scene.add(
-                                capsule["start"],
-                                capsule["end"],
-                                capsule["radius_m"],
-                                name + capsule["suffix"],
-                            )
-                        laid = [
-                            int(c["suffix"][1:].split("/")[0]) if c["suffix"].startswith("@") else 0
-                            for c in cached_capsules
-                        ]
-                        marks.extend(
-                            before + sum(step <= j for step in laid)
-                            for j in range(len(steps) - 1)
-                        )
-                        self.verification_stats["deposition_intervals_reused"] += 1
-                        self.verification_stats["deposition_capsules_reused"] += len(
-                            cached_capsules
-                        )
-                        deposition_enclosures[identity][interval_key] = cached_capsules
-                    else:
-                        low, high = a - motion.start_s, b - motion.start_s
-                        for j, (first, second) in enumerate(
-                            zip(steps[:-1], steps[1:], strict=True)
-                        ):
-                            self.add_clock_edge(
-                                scene,
-                                identity,
-                                edge,
-                                name if j == 0 else f"{name}@{j}",
-                                low if j == 0 else low + (high - low) * first,
-                                high if j == len(steps) - 2 else low + (high - low) * second,
-                            )
-                            marks.append(len(scene.segments))
-                        deposition_enclosures[identity][interval_key] = [
-                            {
-                                "start": row["start"],
-                                "end": row["end"],
-                                "radius_m": row["radius_m"],
-                                "suffix": row["name"][len(name) :],
-                            }
-                            for row in scene.segments[before:]
-                        ]
-                    pen_steps[identity] = (steps, marks)
-                    if journal is not None:
-                        journal.append(("add", [dict(row) for row in scene.segments[before:]]))
-                    self.verification_seconds["deposition_enclosures"] += perf_counter() - started
-            if deposit_only:
-                continue
-            for identity, (edge, position, deviation) in paths.items():
-                arm = self.collision_arm(identity)
-                if edge is not None and edge.kind == "DRAW":
-                    if (fixed_required and identity not in invariant_hits
-                            and identity not in orientation_hits):
-                        started = perf_counter()
-                        motion = motions[identity]
-                        failure = fixed_clock_orientation_failure(
-                            arm,
-                            edge,
-                            fixed_references[(identity, edge.stroke)],
-                            a - motion.start_s,
-                            b - motion.start_s,
-                        )
-                        if failure is not None:
-                            return None, {**failure, "arm": identity, "time_s": a}
-                        self.verification_seconds["fixed_orientation"] += perf_counter() - started
-                if edge is not None and edge.contact is not None:
-                    # Keep the original stroke endpoint as the contact center,
-                    # rather than moving the exemption ball with the nozzle.
-                    contact_key = (
-                        identity,
-                        scene.geometry_prefix(),
-                        np.asarray(edge.contact, dtype=np.float64).tobytes(),
-                    )
-                    reuse_contact = self.optimize_contact_geometry
-                    prior = contact_validators.get(identity) if reuse_contact else None
-                    valid = prior[1] if prior is not None and prior[0] == contact_key else None
-                    if valid is None:
-                        started = perf_counter()
-                        valid = contact_validator(
-                            arm.robot,
-                            arm.collision,
-                            self.collision_tip_model(identity),
-                            arm.flange_to_tcp,
-                            scene,
-                            self.obstacles,
-                            edge.contact,
-                            self.transit["contact_radius_m"],
-                            arm.tool.tip_radius_m or self.transit["virtual_tip_radius_m"],
-                            self.margin,
-                            self.settings["maximum_subdivision_depth"],
-                            local_contact_surfaces(
-                                edge.contact[2],
-                                self.profile["world_from_build"][2][3],
-                                self.profile["environment"]["table_z_m"],
-                                self.transit["contact_radius_m"],
-                            ),
-                            deadline=self.deadline,
-                            optimize_contact_geometry=reuse_contact,
-                        )
-                        self.verification_seconds["contact_geometry_setup"] += (
-                            perf_counter() - started
-                        )
-                        self.verification_stats["contact_geometry_constructed"] += 1
-                        if reuse_contact:
-                            contact_validators[identity] = (contact_key, valid)
-                    else:
-                        self.verification_stats["contact_geometry_reused"] += 1
-                    if not valid(position(0), position(1)):
-                        return None, {
-                            "status": "CONTACT_PATH_REJECTED",
-                            "arm": identity,
-                            "time_s": a,
-                            "evidence": valid.failures[:2],
-                        }
-                elif edge is not None and edge.kind == "DRAW" and spheres:
-                    # The pen as a row of spheres against the wire, at both ends
-                    # of the interval and at poses no further apart than the
-                    # sampling distance. The cell's fixed obstacles keep the
-                    # continuous check.
-                    started = perf_counter()
-                    if identity not in invariant_hits:
-                        check = arm.collision.check_bounded_path(
-                            position,
-                            deviation,
-                            self.obstacles,
-                            self.margin,
-                            self.settings["maximum_subdivision_depth"],
-                            None,
-                            self.deadline,
-                        )
-                        if check["status"] != "CERTIFIED_MODELED_EDGE":
-                            return None, {"arm": identity, "time_s": a, **check}
-                    self.verification_seconds["pen_fixed_obstacles"] += perf_counter() - started
-                    started = perf_counter()
-                    failure = self.pen_wire_failure(identity, scene, position, *pen_steps[identity])
-                    self.verification_seconds["pen_spheres"] += perf_counter() - started
-                    if failure is not None:
-                        return None, {"arm": identity, "time_s": a, **failure}
-                else:
-                    model = (
-                        arm.collision
-                        if edge is not None and edge.kind == "DRAW"
-                        else self.collision_tip_model(identity)
-                    )
-                    if identity in invariant_hits:
-                        from .collision_context import MaterialOnlyCollisionModel
+            return None, parked, still
+        edge = motion.proposal.payload.edge_at((a + b) / 2 - motion.start_s)
+        start = motion.start_s
 
-                        model = MaterialOnlyCollisionModel(model)
-                        self.verification_stats[
-                            "static_intervals_reused"
-                            if full_scope
-                            else "pen_static_intervals_reused"
-                        ] += 1
-                    check = model.check_bounded_path(
-                        position,
-                        deviation,
-                        self.obstacles,
-                        self.margin,
-                        self.settings["maximum_subdivision_depth"],
-                        scene,
-                        self.deadline,
-                    )
-                    if check["status"] != "CERTIFIED_MODELED_EDGE":
-                        return None, {"arm": identity, "time_s": a, **check}
-            self.checked_intervals += 1
-        if store is not None and not self.verification_raw:
-            for identity, motion in motions.items():
-                # A partial scheduling interval cannot certify the full clock.
-                if state.time_s <= motion.start_s and end >= motion.end_s:
-                    context, record = certificate_records[identity]
-                    if (fixed_required and identity not in orientation_hits
-                            and any(edge.kind == "DRAW" for edge in motion.proposal.payload.edges)):
-                        store.admit(context, record, "drawing_orientation", {"status": "BOUNDED"})
-                    if identity not in invariant_hits:
-                        store.admit(
-                            context,
-                            record,
-                            invariant_scope,
-                            {
-                                "status": "CERTIFIED_MODELED_PATH"
-                                if full_scope
-                                else "CERTIFIED_PEN_MODELED_PATH",
-                                "scope": "self_static_and_fixed_orientation_only"
-                                if full_scope
-                                else "pen_static_and_fixed_orientation_only",
-                                "collision_scope": self.collision_scope,
-                                "material_checked_fresh": True,
-                                "deposition_enclosures": deposition_enclosures[identity],
-                            },
-                        )
-        return scene, None
+        def position(u):
+            return edge.position(a + (b - a) * u - start)
+
+        def deviation(x, y):
+            return edge.deviation(a + (b - a) * x - start, a + (b - a) * y - start)
+
+        return edge, position, deviation
+
+    def _deposit_interval(
+        self, scene, identity, motion, edge, position, a, b, index, *, spheres, saved,
+        enclosures, journal,
+    ):
+        """Lay a conservative enclosure of the wire drawn over ``[a, b]`` before its check.
+
+        Future intervals are never installed early. The sphere check looks at
+        the pen at fractions of the interval, each against the wire laid up to
+        there, so the wire is laid in the same steps. ``saved`` holds the
+        capsules a proof recorded. Returns the fractions and the wire count at each.
+        """
+        name = f"material/{identity}/{edge.stroke}/{a:.12f}-{b:.12f}"
+        interval_key = (
+            f"{index}:"
+            f"{float(a - motion.start_s).hex()}:"
+            f"{float(b - motion.start_s).hex()}"
+        )
+        cached = saved.get(interval_key)
+        started = perf_counter()
+        before = len(scene.segments)
+        steps = self.pen_sample_fractions(identity, position) if spheres else [0.0, 1.0]
+        marks = [before]
+        if cached is not None:
+            for capsule in cached:
+                scene.add(
+                    capsule["start"], capsule["end"], capsule["radius_m"], name + capsule["suffix"]
+                )
+            laid = [
+                int(c["suffix"][1:].split("/")[0]) if c["suffix"].startswith("@") else 0
+                for c in cached
+            ]
+            marks.extend(before + sum(step <= j for step in laid) for j in range(len(steps) - 1))
+            self.verification_stats["deposition_intervals_reused"] += 1
+            self.verification_stats["deposition_capsules_reused"] += len(cached)
+            enclosures[interval_key] = cached
+        else:
+            low, high = a - motion.start_s, b - motion.start_s
+            for j, (first, second) in enumerate(zip(steps[:-1], steps[1:], strict=True)):
+                self.add_clock_edge(
+                    scene,
+                    identity,
+                    edge,
+                    name if j == 0 else f"{name}@{j}",
+                    low if j == 0 else low + (high - low) * first,
+                    high if j == len(steps) - 2 else low + (high - low) * second,
+                )
+                marks.append(len(scene.segments))
+            enclosures[interval_key] = [
+                {
+                    "start": row["start"],
+                    "end": row["end"],
+                    "radius_m": row["radius_m"],
+                    "suffix": row["name"][len(name) :],
+                }
+                for row in scene.segments[before:]
+            ]
+        if journal is not None:
+            journal.append(("add", [dict(row) for row in scene.segments[before:]]))
+        self.verification_seconds["deposition_enclosures"] += perf_counter() - started
+        return steps, marks
+
+    def _check_interval(
+        self, scene, identity, motion, path, a, b, *, references, reused, contacts, spheres,
+        pen_steps,
+    ):
+        """Check ``[a, b]``: a drawing's fixed orientation, then contact, pen spheres or bounds.
+
+        ``references`` holds the fixed rotations still to prove (None: nothing
+        to prove); ``reused`` means a saved proof covers the static checks.
+        Returns the failure or None.
+        """
+        edge, position, deviation = path
+        arm = self.collision_arm(identity)
+        draws = edge is not None and edge.kind == "DRAW"
+        if draws and references is not None:
+            started = perf_counter()
+            failure = fixed_clock_orientation_failure(
+                arm, edge, references[edge.stroke], a - motion.start_s, b - motion.start_s
+            )
+            if failure is not None:
+                return {**failure, "arm": identity, "time_s": a}
+            self.verification_seconds["fixed_orientation"] += perf_counter() - started
+        if edge is not None and edge.contact is not None:
+            return self._check_contact(scene, identity, edge, position, a, contacts)
+        if draws and spheres:
+            return self._check_pen_spheres(
+                scene, identity, arm, position, deviation, a, pen_steps, reused
+            )
+        return self._check_bounded(scene, identity, arm, draws, position, deviation, a, reused)
+
+    def _check_contact(self, scene, identity, edge, position, a, contacts):
+        """Check an edge near its contact point, reusing the last contact geometry built."""
+        # Keep the original stroke endpoint as the contact center,
+        # rather than moving the exemption ball with the nozzle.
+        contact_key = (
+            identity,
+            scene.geometry_prefix(),
+            np.asarray(edge.contact, dtype=np.float64).tobytes(),
+        )
+        reuse_contact = self.optimize_contact_geometry
+        prior = contacts.get("last") if reuse_contact else None
+        valid = prior[1] if prior is not None and prior[0] == contact_key else None
+        if valid is None:
+            started = perf_counter()
+            valid = self.contact_check(
+                identity, scene, edge.contact, optimize_contact_geometry=reuse_contact
+            )
+            self.verification_seconds["contact_geometry_setup"] += perf_counter() - started
+            self.verification_stats["contact_geometry_constructed"] += 1
+            if reuse_contact:
+                contacts["last"] = (contact_key, valid)
+        else:
+            self.verification_stats["contact_geometry_reused"] += 1
+        if not valid(position(0), position(1)):
+            return {
+                "status": "CONTACT_PATH_REJECTED",
+                "arm": identity,
+                "time_s": a,
+                "evidence": valid.failures[:2],
+            }
+        return None
+
+    def _check_pen_spheres(self, scene, identity, arm, position, deviation, a, pen_steps, reused):
+        """Check a drawing edge's pen as spheres against wire, and continuously against the cell."""
+        # The pen as a row of spheres against the wire, at both ends
+        # of the interval and at poses no further apart than the
+        # sampling distance. The cell's fixed obstacles keep the
+        # continuous check.
+        started = perf_counter()
+        if not reused:
+            check = arm.collision.check_bounded_path(
+                position,
+                deviation,
+                self.obstacles,
+                self.margin,
+                self.settings["maximum_subdivision_depth"],
+                None,
+                self.deadline,
+            )
+            if check["status"] != "CERTIFIED_MODELED_EDGE":
+                return {"arm": identity, "time_s": a, **check}
+        self.verification_seconds["pen_fixed_obstacles"] += perf_counter() - started
+        started = perf_counter()
+        failure = self.pen_wire_failure(identity, scene, position, *pen_steps)
+        self.verification_seconds["pen_spheres"] += perf_counter() - started
+        if failure is not None:
+            return {"arm": identity, "time_s": a, **failure}
+        return None
+
+    def _check_bounded(self, scene, identity, arm, draws, position, deviation, a, reused):
+        """Check the interval's motion continuously; a saved proof leaves only the wire."""
+        model = arm.collision if draws else self.collision_tip_model(identity)
+        if reused:
+            from .collision_context import MaterialOnlyCollisionModel
+
+            model = MaterialOnlyCollisionModel(model)
+            self.verification_stats[
+                "static_intervals_reused"
+                if self.collision_scope == "full_robot"
+                else "pen_static_intervals_reused"
+            ] += 1
+        check = model.check_bounded_path(
+            position,
+            deviation,
+            self.obstacles,
+            self.margin,
+            self.settings["maximum_subdivision_depth"],
+            scene,
+            self.deadline,
+        )
+        if check["status"] != "CERTIFIED_MODELED_EDGE":
+            return {"arm": identity, "time_s": a, **check}
+        return None
+
+    def _admit_proofs(self, proofs, motion, fixed_required, enclosures):
+        """Save what checking the motion's whole clock proved."""
+        full_scope = self.collision_scope == "full_robot"
+        proofs.admit(
+            {
+                "status": "CERTIFIED_MODELED_PATH" if full_scope else "CERTIFIED_PEN_MODELED_PATH",
+                "scope": "self_static_and_fixed_orientation_only"
+                if full_scope
+                else "pen_static_and_fixed_orientation_only",
+                "collision_scope": self.collision_scope,
+                "material_checked_fresh": True,
+                "deposition_enclosures": enclosures,
+            },
+            orientation=fixed_required
+            and any(edge.kind == "DRAW" for edge in motion.proposal.payload.edges),
+        )

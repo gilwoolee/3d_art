@@ -199,3 +199,28 @@ class PathCertificateStore:
 
     def report(self):
         return {"counts": dict(self.stats), "seconds": dict(self.seconds)}
+
+
+class MotionProofs:
+    """The saved proofs one motion's interval check reuses, and admits when new.
+
+    ``invariant`` is the saved proof under ``scope`` or None; ``oriented``
+    says whether the drawing's fixed orientation is already proved.
+    """
+
+    def __init__(self, store, context, record, scope, stats):
+        self.store, self.context, self.record, self.scope = store, context, record, scope
+        self.invariant = store.get(context, record, scope)
+        stats[f"{scope}_misses" if self.invariant is None else f"{scope}_hits"] += 1
+        self.oriented = store.get(context, record, "drawing_orientation") is not None
+        if self.oriented:
+            stats["drawing_orientation_hits"] += 1
+
+    def admit(self, invariant, *, orientation=False):
+        """Save the orientation proof (when ``orientation``) and ``invariant``, unless held."""
+        if orientation and not self.oriented:
+            self.store.admit(
+                self.context, self.record, "drawing_orientation", {"status": "BOUNDED"}
+            )
+        if self.invariant is None:
+            self.store.admit(self.context, self.record, self.scope, invariant)

@@ -11,6 +11,22 @@ import numpy as np
 from .collision import placed
 
 
+def checked_sphere(bounding_sphere):
+    """A query's world-space ``(center, radius)`` checked finite and nonnegative, or None."""
+    if bounding_sphere is None:
+        return None
+    center, radius = bounding_sphere
+    center = np.asarray(center, dtype=float)
+    if (
+        center.shape != (3,)
+        or not np.isfinite(center).all()
+        or not np.isfinite(radius)
+        or radius < 0
+    ):
+        raise ValueError("Query bounding sphere must be finite and nonnegative")
+    return center, radius
+
+
 class FixedPlate:
     """The build plate: it lies on the table and never moves."""
 
@@ -110,22 +126,19 @@ class MaterialScene:
             raise ValueError("Material prefix must lie within the scene")
         return self._geometry_prefixes[count]
 
-    def prefix(self, count):
-        """Share the first capsules of an append-only scene, in insertion order."""
-        self.geometry_prefix(count)  # Validate before allocating a manager.
-        result = MaterialScene()
-        result.clearance_query_enabled = self.clearance_query_enabled
-        for index in range(count):
-            segment = {**self._physical_segments[index], "name": self.segments[index]["name"]}
-            result._append_object(self.objects[index], self.geometry_ids[index], segment)
-        return result
+    def share(self, start=0, stop=None):
+        """Share capsules ``start`` to ``stop`` of an append-only scene, in insertion order.
 
-    def suffix(self, start):
-        """Share unchanged capsules after a previously certified prefix."""
-        self.geometry_prefix(start)  # Validate before allocating a manager.
+        A prefix serves rebuilt material; a suffix after a certified prefix
+        serves the capsules a cached proof has not seen.
+        """
+        # Validate both ends before allocating a manager.
+        self.geometry_prefix(start)
+        stop = len(self.objects) if stop is None else stop
+        self.geometry_prefix(stop)
         result = MaterialScene()
         result.clearance_query_enabled = self.clearance_query_enabled
-        for index in range(start, len(self.objects)):
+        for index in range(start, stop):
             segment = {**self._physical_segments[index], "name": self.segments[index]["name"]}
             result._append_object(self.objects[index], self.geometry_ids[index], segment)
         return result
@@ -180,17 +193,7 @@ class MaterialScene:
         the query geometry. It only accelerates broadphase rejection; retained
         cells still use the original FCL box and strand distance queries.
         """
-        if bounding_sphere is not None:
-            center, radius = bounding_sphere
-            center = np.asarray(center, dtype=float)
-            if (
-                center.shape != (3,)
-                or not np.isfinite(center).all()
-                or not np.isfinite(radius)
-                or radius < 0
-            ):
-                raise ValueError("Query bounding sphere must be finite and nonnegative")
-            bounding_sphere = center, radius
+        bounding_sphere = checked_sphere(bounding_sphere)
         if not self.objects:
             return None
         if len(self.objects) >= 64:
@@ -223,17 +226,7 @@ class MaterialScene:
                 self.clearance_stats["exact_nearest_queries"] += 1
                 result = self.nearest(obj, deadline=deadline, bounding_sphere=bounding_sphere)
             else:
-                if bounding_sphere is not None:
-                    center, radius = bounding_sphere
-                    center = np.asarray(center, dtype=float)
-                    if (
-                        center.shape != (3,)
-                        or not np.isfinite(center).all()
-                        or not np.isfinite(radius)
-                        or radius < 0
-                    ):
-                        raise ValueError("Query bounding sphere must be finite and nonnegative")
-                    bounding_sphere = center, radius
+                bounding_sphere = checked_sphere(bounding_sphere)
                 result = self._nearest_spatial(
                     obj, deadline, bounding_sphere, clearance_limit=clearance
                 )
@@ -548,17 +541,7 @@ class ContactMaterialView(MaterialScene):
         self.clearance_stats["contact_view_setup_seconds"] += perf_counter() - started
 
     def nearest(self, obj, *, deadline=float("inf"), bounding_sphere=None):
-        if bounding_sphere is not None:
-            center, radius = bounding_sphere
-            center = np.asarray(center, dtype=float)
-            if (
-                center.shape != (3,)
-                or not np.isfinite(center).all()
-                or not np.isfinite(radius)
-                or radius < 0
-            ):
-                raise ValueError("Query bounding sphere must be finite and nonnegative")
-            bounding_sphere = center, radius
+        bounding_sphere = checked_sphere(bounding_sphere)
         return self._nearest_spatial(obj, deadline, bounding_sphere)
 
     def _nearest_spatial(self, obj, deadline, bounding_sphere=None, *, clearance_limit=None):

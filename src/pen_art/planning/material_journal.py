@@ -233,7 +233,7 @@ class MaterialPrefix:
             for key in chain[common:]:
                 self._apply(key)
             return self.scene
-        base = self.scene.prefix(self.counts[common - 1]) if common else MaterialScene()
+        base = self.scene.share(0, self.counts[common - 1]) if common else MaterialScene()
         if common == len(chain):
             return base  # Serve a pure prefix; keep the longer scene held.
         self.rebuilds += 1

@@ -269,7 +269,7 @@ class RobotCollisionModel:
                     if count == len(material.objects):
                         continue
                     if count not in suffixes:
-                        suffixes[count] = material.suffix(count)
+                        suffixes[count] = material.share(count)
                         suffixes[count].clearance_stats = material.clearance_stats
                     query_scene = suffixes[count]
                     self.material_cache_stats["suffix_capsules"] += len(query_scene.objects)
