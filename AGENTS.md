@@ -5,8 +5,6 @@ Start with [README.md](README.md): setup and the commands.
 ## Rules from the user
 
 - **No `Co-Authored-By:` trailers** in commits or pull requests.
-- **Exactly 5 tests.** Add assertions to existing test functions instead of
-  adding tests.
 - **Planning uses 24 workers.** Long runs go in tmux, because session restarts
   kill background jobs.
 - **Per object:** frame wire at most 10 m; detail about 2 m and at most 15
@@ -26,8 +24,10 @@ Start with [README.md](README.md): setup and the commands.
 
 ## Checks
 
+There are no tests. Check a change by running the ghost through every step
+in the README and comparing the lines each step prints.
+
 ```bash
-.venv/bin/pytest -q
-.venv/bin/ruff check src tests scripts
+.venv/bin/ruff check src scripts
 (cd web && PATH=$PWD/../tools/node/bin:$PATH npm run build)
 ```

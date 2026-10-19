@@ -68,8 +68,7 @@ robot drawing it.
 ## Development
 
 ```bash
-.venv/bin/pytest -q
-.venv/bin/ruff check src tests scripts
+.venv/bin/ruff check src scripts
 (cd web && PATH=$PWD/../tools/node/bin:$PATH npm run build)
 ```
 

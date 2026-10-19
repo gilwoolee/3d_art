@@ -53,5 +53,5 @@ export PATH="$root/tools/node/bin:$PATH"
 (cd web && npm ci && npm run build)
 
 mkdir -p runs
-echo "Done. Check with: .venv/bin/pytest -q"
+echo "Done. Next: .venv/bin/pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost"
 echo "Then follow the README: .venv/bin/pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost"

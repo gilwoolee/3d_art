@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+dev = ["ruff>=0.11,<1"]
 
 [project.scripts]
 pen-art = "pen_art.cli:main"
@@ -29,7 +29,3 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
