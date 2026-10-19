@@ -131,20 +131,6 @@ The geometry-first planner currently takes frame strokes from the motion
 library when one is present and otherwise falls back to its own sampler
 (`cold_fallback`); that sampler becomes the only path.
 
-## Turntable experiment (2026-10-18, ghost, no library, 24 workers)
-
-- Today the ghost frame uses face 0 for 40 of 41 strokes; detail uses faces
-  1-3 for 12 of 15 strokes, because detail tilts the pen toward the robot
-  only.
-- With the plate fixed and the pen upright, 40 of 41 frame strokes plan,
-  including whole rings around the ghost. One ring (`zigzag-10`, 8.4-9.4 cm
-  high) fails a path-accuracy check (1.28 mm from the line against a 0.3 mm
-  limit), not reach or collision; with the turntable the planner turned and
-  found a posture that passed. Without it, such a stroke needs a retry with
-  a finer path or another posture.
-- Detail with the plate fixed and the pen leaning toward the side it draws:
-  running; results to be added.
-
 ## Decisions
 
 - **Configs:** merge the 7 into `configs/cell.yaml` (plate size and
@@ -204,8 +190,10 @@ library when one is present and otherwise falls back to its own sampler
 2. Remove the turntable, the platform and the riser; the object stands on a
    plate on the table. Frame strokes stay upright; detail strokes lean the
    pen toward the side of the object they draw on, and the arm reaches
-   around. Check the ghost frame and detail plan to `FULL_BUILD_VERIFIED`
-   (see "Turntable experiment").
+   around. A stroke that fails the path-accuracy check from the robot's side
+   retries with a finer path or another posture (today the planner turned
+   the turntable instead). Check the ghost frame and detail plan to
+   `FULL_BUILD_VERIFIED`.
 3. Merge the configs into `cell.yaml` and `frame.yaml`.
 4. One command per step, with geometry, timing and verification split into
    `plan-geometry`, `plan-timing` and `verify-full-robot`.
