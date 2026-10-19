@@ -1,8 +1,7 @@
 # Agent instructions
 
 Start with [README.md](README.md): what the code does, setup, how to run, and
-a code map. Adding detail to a frame:
-[.claude/skills/detail-tours/SKILL.md](.claude/skills/detail-tours/SKILL.md).
+a code map.
 
 ## Rules from the user
 

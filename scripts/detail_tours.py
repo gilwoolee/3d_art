@@ -7,7 +7,7 @@ example one written by ``prepare_framework``). TARGET is written as a new
 source run: the frame plus detail tours, with ``stroke_graph.json``,
 ``construction_plan.json``, ``structural_screen.json`` and ``detail_tours.json``.
 
-Rules the detail follows (see .claude/skills/detail-tours/SKILL.md):
+Rules the detail follows:
 
 * It lies on the frame: lines sit 1 mm (one wire) outside the surface, so they
   rest on the frame wire the way a coil turn rests on the turn below. Points
@@ -23,9 +23,7 @@ Rules the detail follows (see .claude/skills/detail-tours/SKILL.md):
   end through short connecting runs on the surface into long tours.
 
 Detail lines come from slice creases (ridges and valleys found by slicing the
-mesh along x, y and z), an optional finer pass inside ``--fine-region``, and,
-with ``--liberty``, the Statue of Liberty's crown rays, crown band, torch flame
-and balcony and the book outline, which keep their designed shape.
+mesh along x, y and z) and an optional finer pass inside ``--fine-region``.
 """
 
 import argparse
@@ -36,9 +34,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 import yaml
-from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial import cKDTree
-from shapely.geometry import MultiPoint, Point, Polygon
 
 from pen_art.curves import curve_interval, curve_length
 from pen_art.io import read_json, write_json
@@ -187,84 +183,6 @@ def slice_creases(mesh, threshold_mm, arc=1.5, sample=0.25, step=0.75, reach=1.3
     return lines
 
 
-def liberty_features(mesh):
-    """Statue of Liberty crown, torch and book, in mm, keeping their designed shape."""
-    V = mesh.vertices * 1000
-
-    def rings(z):
-        s = mesh.section(plane_origin=[0, 0, z / 1000], plane_normal=[0, 0, 1])
-        return (
-            []
-            if s is None
-            else [Polygon(np.asarray(p)[:, :2] * 1000) for p in s.discrete if len(p) > 3]
-        )
-
-    def ring_near(z, xy):
-        return min(rings(z), key=lambda poly: poly.distance(Point(xy)) - poly.area * 1e-6)
-
-    def loop(poly, z, offset):
-        ring = np.asarray(poly.buffer(offset, quad_segs=4).simplify(0.3).exterior.coords)
-        return np.c_[ring, np.full(len(ring), z)]
-
-    out = []
-    head = ring_near(108, (-4.5, 0.5))
-    c = np.array(head.centroid.coords[0])
-    band = V[(V[:, 2] > 107) & (V[:, 2] < 125)]
-    r = np.linalg.norm(band[:, :2] - c, axis=1)
-    # Each crown ray crosses a shell around the head as a small blob; the
-    # raised arm passing the head crosses it as a big one.
-    shell = band[(r > 11) & (r < 12.5)]
-    labels = fcluster(linkage(shell, "single"), 1.0, "distance")
-    for k in np.unique(labels):
-        blob = shell[labels == k]
-        if len(blob) < 10 or np.ptp(blob, axis=0).max() > 4.0:
-            continue
-        mid = blob.mean(0)
-        d0 = (mid[:2] - c) / np.linalg.norm(mid[:2] - c)
-        rel = band[:, :2] - c
-        along = rel @ d0
-        side = np.linalg.norm(rel - along[:, None] * d0, axis=1)
-        ray = band[
-            (along > 11)
-            & (along < 17)
-            & (side < 2.5)
-            & (np.abs(band[:, 2] - mid[2]) < 0.6 * (along - 11) + 2.5)
-        ]
-        tip = ray[np.argmax(ray[:, :2] @ d0)]
-        d = (tip[:2] - c) / np.linalg.norm(tip[:2] - c)
-        out.append((f"crown-ray-{len(out)}", np.linspace(np.r_[c + d * 6.5, 112.0], tip, 8), False))
-    out.append(("crown-band", loop(ring_near(112, tuple(c)), 112.0, 1.5), False))
-    flame = V[V[:, 2] > 140.5]
-    xz = np.asarray(
-        MultiPoint(flame[:, [0, 2]])
-        .convex_hull.buffer(1.5, quad_segs=4)
-        .simplify(0.3)
-        .exterior.coords
-    )
-    out.append(
-        ("torch-flame", np.c_[xz[:, 0], np.full(len(xz), np.median(flame[:, 1])), xz[:, 1]], False)
-    )
-    out.append(("torch-balcony", loop(ring_near(138.0, (-19, -19)), 138.0, 2.0), False))
-    P = V[(V[:, 0] > 14) & (V[:, 2] > 56) & (V[:, 2] < 83)]
-    mean = P.mean(0)
-    _, _, W = np.linalg.svd(P - mean, full_matrices=False)
-    rect = np.asarray(
-        MultiPoint(
-            np.c_[(P - mean) @ W[0], (P - mean) @ W[1]]
-        ).minimum_rotated_rectangle.exterior.coords
-    )
-    h = (P - mean) @ W[2]
-    side = np.sign(W[2][0]) if abs(W[2][0]) > 0.2 else 1.0
-    lift = (h.max() if side > 0 else h.min()) + side * 1.0
-    corners = mean + rect[:, :1] * W[0] + rect[:, 1:] * W[1] + lift * W[2]
-    edges = [
-        np.linspace(a, b, 12, endpoint=False)
-        for a, b in zip(corners[:-1], corners[1:], strict=True)
-    ]
-    out.append(("book", np.vstack(edges + [corners[:1]]), False))
-    return out
-
-
 def dip(p, frame, tree, reach, spacing=0.006, width=0.002):
     """Bend a laid line onto nearby frame wire so it rests there.
 
@@ -294,8 +212,6 @@ def dip(p, frame, tree, reach, spacing=0.006, width=0.002):
 def candidate_lines(mesh, args):
     """(name, points m, importance, lay on surface) for every candidate detail line."""
     out = []
-    if args.liberty:
-        out += [(name, p / 1000, np.inf, push) for name, p, push in liberty_features(mesh)]
     # Shallower creases come later in importance; they fill in smooth objects.
     found = [line for th in args.crease_threshold for line in slice_creases(mesh, th)]
     for axis, t in found:
@@ -543,7 +459,7 @@ def main():
     parser.add_argument(
         "--profile",
         type=Path,
-        default=Path("runs/geomfirst_profiles/liberty_statue.yaml"),
+        required=True,
         help="cell profile: build placement, robot base and turntable",
     )
     parser.add_argument("--max-strokes", type=int, default=80)
@@ -582,9 +498,8 @@ def main():
         type=float,
         nargs=6,
         metavar=("X0", "X1", "Y0", "Y1", "Z0", "Z1"),
-        help="mm box for a finer crease pass (Liberty face: -11 2 -15 15 95 111)",
+        help="mm box for a finer crease pass",
     )
-    parser.add_argument("--liberty", action="store_true", help="add Liberty crown, torch and book")
     args = parser.parse_args()
 
     source, target = args.frame_source, args.target

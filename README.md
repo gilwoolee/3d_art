@@ -15,21 +15,19 @@ placement are not measured.
 ![The viewer on the ghost: picture, textured model, frame (green) and detail
 (orange), and the robot drawing it](docs/images/viewer_ghost.png)
 
-## Results
+## Example
 
-All plans are `FULL_BUILD_VERIFIED`. Print time is the plan's modeled duration;
-its waits and speeds are settings, not measurements.
+The ghost in `objs/cute_ghost/` is the example. The commands under **Usage**
+plan it on a 24-core machine; both plans are `FULL_BUILD_VERIFIED`. Print time
+is the plan's modeled duration: its waits and speeds are settings, not
+measurements.
 
-| Object | Wire: frame + detail | Strokes | Print time |
-| --- | ---: | ---: | ---: |
-| Liberty, cut at the feet | 4.9 m + 1.99 m | 90 | 18.6 min |
-| Ghost | 9.5 m + 1.98 m | 66 | 18.2 min |
-| Pumpkin | 9.6 m + 1.99 m | 57 | 18.5 min |
-| Palace | 7.0 m + 1.98 m | 172 | 24.6 min |
-| Palace, thinner layers on the pillars (frame only) | 9.9 m | 177 | 23.1 min |
+| Plan | Wire | Strokes | Print time | Planning time |
+| --- | ---: | ---: | ---: | ---: |
+| Frame | 9.9 m | 41 | 10.9 min | about 1.5 min |
+| Frame + detail | 9.9 m + 1.33 m | 56 | 17.6 min | about 12 min more |
 
-The meshes are in `objs/`. The planned runs are not in the repository; the
-commands below make them again.
+Planned runs are written to `runs/`, which is not in the repository.
 
 ## Setup
 
@@ -87,11 +85,9 @@ PYTHONPATH=src .venv/bin/python scripts/plan_detail.py runs/geomfirst_ghost_deta
 ```
 
 The final run is `runs/geomfirst_gf2_ghost_detail_rNN_w24`, after NN rounds of
-dropping. On the ghost these two commands take about 12 minutes and give
-1.33 m of detail and 6.6 more minutes of printing; the Palace takes over an
-hour. The results above used tuned options, which the
-[detail-tours guide](.claude/skills/detail-tours/SKILL.md) lists with the full
-procedure.
+dropping, and `runs/geomfirst_gf2_ghost_detail_detail.json` reports each round.
+`detail_tours.py --help` lists the options: crease depth, the longest
+connecting run, a box for a finer pass, and more.
 
 ## How the frame is built
 
@@ -153,7 +149,7 @@ pytest loads ROS's plugins and fails.
 | Plan and verify driver | `scripts/benchmark_parallel_build.py`, `scripts/plan_frame.sh` |
 | Detail | `scripts/detail_tours.py`, `scripts/plan_detail.py` |
 | Viewer | `src/pen_art/server.py`, `web/src/simple.ts`, `web/src/viewer.ts` |
-| Setup | `scripts/setup_machine.sh`, `scripts/pack_runs.sh` |
+| Setup | `scripts/setup_machine.sh`, `scripts/prepare_single_arm_cell.py` |
 
 ## License
 

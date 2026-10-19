@@ -210,9 +210,14 @@ async function show(runId: string) {
 
 async function start() {
   const runs = (await json<RunRow[]>('/api/runs')).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const wanted = new URLSearchParams(location.search).get('run');
+  // A run missing from runs/viewer_runs.json still opens by its address.
+  if (wanted && !runs.some(run => run.id === wanted)) {
+    const extra = await json<RunRow>(`/api/runs/${encodeURIComponent(wanted)}`).catch(() => undefined);
+    if (extra) runs.unshift(extra);
+  }
   const select = $<HTMLSelectElement>('#simple-run');
   select.innerHTML = runs.map(run => `<option value="${escape(run.id)}">${escape(run.id)}</option>`).join('');
-  const wanted = new URLSearchParams(location.search).get('run');
   if (wanted && runs.some(run => run.id === wanted)) select.value = wanted;
   select.onchange = () => show(select.value).catch(error => { $('#simple-status').textContent = String(error); });
   if (select.value) await show(select.value);

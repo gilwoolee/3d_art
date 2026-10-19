@@ -109,7 +109,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("source", type=Path)
     parser.add_argument("base_profile", type=Path)
-    parser.add_argument("output", help="run prefix, e.g. runs/geomfirst_gf90_liberty_detail")
+    parser.add_argument("output", help="run prefix, e.g. runs/geomfirst_gf2_ghost_detail")
     parser.add_argument("--frame-run", type=Path, required=True)
     parser.add_argument("--detail", type=float, default=2.0, help="m of detail at most")
     parser.add_argument("--minutes", type=float, default=15.0, help="added print time at most")
@@ -211,6 +211,13 @@ def main():
             break
         source = nxt
     final = rounds[-1]
+    if final["status"] == "FULL_BUILD_VERIFIED" and "detail_m" in final:
+        # The source is named "(not planned)"; name the verified run for the viewer.
+        run_file = Path(final["run"]) / "run.json"
+        run = read_json(run_file)
+        base = run["name"].split(" + ")[0]
+        run["name"] = f"{base} + {final['detail_m']:.2f} m detail (planned, verified)"
+        write_json(run_file, run)
     write_json(
         Path(f"{args.output}_detail.json"),
         {
