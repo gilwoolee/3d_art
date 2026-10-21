@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 units: m
 simulation_only: true
 placement_confirmed: false
@@ -33,8 +33,8 @@ environment:
   - 0.256
   plate_top_z_m: 0.1
   clearance_m: 0.001
-arms:
-- id: arm
+arm:
+  id: arm
   robot_urdf: robot.urdf
   robot_manifest: robot_manifest.json
   robot_visual: robot_reference.glb

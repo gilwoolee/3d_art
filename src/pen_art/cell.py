@@ -4,10 +4,11 @@
 plate and the pen. Everything else about the cell (the robot's posture and the
 collision model of the pen mount) is fixed in ``cell_template.yaml`` next to
 this module. ``configs/frame.yaml`` holds the frame generator and the process,
-timing and motion settings. A planning round gets its own copy of the cell
-(``prepare_cell``), which the planner checks has not changed.
+timing and motion settings. Planning rounds share mesh and robot files and
+retain a checked snapshot of their settings in ``prepare_cell``.
 """
 
+import os
 import re
 import shutil
 from copy import deepcopy
@@ -17,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from .io import artifact, now, read_json, sha256, write_json
+from .io import artifact, asset_path, now, read_json, reference_assets, sha256, write_json
 from .kinematics import rigid_transform
 from .planning.collision import RobotCollisionModel, work_surfaces
 from .planning.tool import load_tool
@@ -50,7 +51,7 @@ def expand_cell(cell, robot_dir="."):
         row[3] = float(value)
     profile["environment"]["plate_size_m"] = [float(v) for v in plate["size_m"]]
     profile["environment"]["plate_top_z_m"] = float(plate["top_z_m"])
-    arm = profile["arms"][0]
+    arm = profile["arm"]
     robot_dir = Path(robot_dir)
     arm.update(
         robot_urdf=str(robot_dir / "robot.urdf"),
@@ -79,7 +80,7 @@ def expand_cell(cell, robot_dir="."):
 
 
 def prepare_cell_model(
-    cell_path=CELL_CONFIG, output=CELL_DIR, repository="external/flexiv_description"
+    cell_path=CELL_CONFIG, output=CELL_DIR, repository=".cache/flexiv_description"
 ):
     """Build the robot model and write ``output/cell.yaml``, the profile planning uses."""
     from .robot import prepare_flexiv
@@ -89,9 +90,7 @@ def prepare_cell_model(
     prepare_flexiv(repository, output, variant=cell["robot"]["model"])
     target = output / "cell.yaml"
     target.write_text(yaml.safe_dump(expand_cell(cell), sort_keys=False))
-    _, arms, _ = load_cell(target)
-    if len(arms) != 1 or len(next(iter(arms.values())).robot.names) != 7:
-        raise ValueError("Expected one seven-joint arm")
+    load_cell(target)
     return target
 
 
@@ -132,8 +131,8 @@ class ArmInstance:
 def load_cell(path):
     path = Path(path).resolve()
     profile = yaml.safe_load(path.read_text())
-    if profile.get("schema_version") != 1 or profile.get("units") != "m":
-        raise ValueError("Cell requires schema_version 1 and meter units")
+    if profile.get("schema_version") != 2 or profile.get("units") != "m":
+        raise ValueError("Unsupported cell format: run `pen-art cell` to rebuild it in metres")
     if profile.get("simulation_only") is not True:
         raise ValueError("Cell planning currently supports simulation only")
     tilt = profile.get("drawing_pen_tilt_deg", 0.0)
@@ -144,40 +143,34 @@ def load_cell(path):
         or not 0 <= tilt < 90
     ):
         raise ValueError("Drawing pen tilt must be finite and in [0, 90) degrees")
-    specs = profile.get("arms")
-    if not isinstance(specs, list) or len(specs) != 1:
-        raise ValueError("Cell requires one arm")
-    arms = {}
-    for spec in specs:
-        identity = spec.get("id")
-        if not isinstance(identity, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+", identity):
-            raise ValueError("Arm IDs must be nonempty artifact-safe names")
-        if identity in arms:
-            raise ValueError("Duplicate arm ID")
-        urdf = (path.parent / spec["robot_urdf"]).resolve()
-        manifest_path = (path.parent / spec["robot_manifest"]).resolve()
-        visual_path = (path.parent / spec["robot_visual"]).resolve()
-        manifest = read_json(manifest_path)
-        if manifest["urdf_sha256"] != sha256(urdf):
-            raise ValueError(f"Robot manifest is stale: {identity}")
-        robot = WorldArm(SerialArm(urdf), spec["world_from_base"])
-        if len(robot.names) != 7 or robot.names != manifest["joint_names"]:
-            raise ValueError("Cell arm requires seven matching joints")
-        offset = rigid_transform(spec["flange_to_tcp"], "flange-to-TCP")
-        initial = np.asarray(spec.get("initial_positions", manifest["initial_positions"]), float)
-        robot.frames(initial)
-        tool = load_tool(spec["tool_geometry"], robot, offset)
-        arms[identity] = ArmInstance(
-            identity,
-            robot,
-            RobotCollisionModel(robot, tool.bodies),
-            offset,
-            initial,
-            tool,
-            urdf,
-            manifest_path,
-            visual_path,
-        )
+    spec = profile["arm"]
+    identity = spec.get("id")
+    if not isinstance(identity, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+", identity):
+        raise ValueError("Arm IDs must be nonempty artifact-safe names")
+    urdf = (path.parent / spec["robot_urdf"]).resolve()
+    manifest_path = (path.parent / spec["robot_manifest"]).resolve()
+    visual_path = (path.parent / spec["robot_visual"]).resolve()
+    manifest = read_json(manifest_path)
+    if manifest["urdf_sha256"] != sha256(urdf):
+        raise ValueError(f"Robot manifest is stale: {identity}")
+    robot = WorldArm(SerialArm(urdf), spec["world_from_base"])
+    if len(robot.names) != 7 or robot.names != manifest["joint_names"]:
+        raise ValueError("Cell arm requires seven matching joints")
+    offset = rigid_transform(spec["flange_to_tcp"], "flange-to-TCP")
+    initial = np.asarray(spec.get("initial_positions", manifest["initial_positions"]), float)
+    robot.frames(initial)
+    tool = load_tool(spec["tool_geometry"], robot, offset)
+    arm = ArmInstance(
+        identity,
+        robot,
+        RobotCollisionModel(robot, tool.bodies),
+        offset,
+        initial,
+        tool,
+        urdf,
+        manifest_path,
+        visual_path,
+    )
     world_from_build = rigid_transform(profile["world_from_build"], "world-from-build")
     # The object stands on a build plate on a stand on the table. The plate
     # and its stand are one solid block from the table up to the plate top.
@@ -204,20 +197,16 @@ def load_cell(path):
         environment["table_z_m"],
         environment["table_size_m"],
     )
-    return profile, arms, obstacles
+    return profile, arm, obstacles
 
 
 # What a planning round reads from the frame or detail it plans.
-SOURCE_FILES = (
-    "asset_manifest.json", "normalized.glb", "geometry.glb",
-    "stroke_graph.json", "construction_plan.json", "fabrication_config.json",
-)
-
+SOURCE_FILES = ("stroke_graph.json", "construction_plan.json")
 
 def prepare_cell(profile_path, output, source_run):
-    """A planning round in ``output``: the strokes of ``source_run`` and a copy of the cell."""
+    """Snapshot the round's strokes and settings, referencing shared mesh and robot assets."""
     profile_path, output, source_run = Path(profile_path), Path(output), Path(source_run)
-    profile, arms, obstacles = load_cell(profile_path)
+    profile, arm, obstacles = load_cell(profile_path)
     output.mkdir(parents=True, exist_ok=True)
     write_json(
         output / "run.json",
@@ -226,45 +215,47 @@ def prepare_cell(profile_path, output, source_run):
             "name": output.name,
             "created_at": now(),
             "updated_at": now(),
-            "cell_source_run": str(source_run.resolve()),
+            "cell_source_run": os.path.relpath(source_run.resolve(), output.resolve()),
             "stages": {},
         },
     )
     for name in SOURCE_FILES:
         shutil.copy2(source_run / name, output / name)
     write_json(output / "cell_config.json", profile)
-    files = ("asset_manifest.json", "normalized.glb", "geometry.glb", "cell_config.json")
-    inputs = {name: sha256(output / name) for name in files}
-    arm_rows = []
-    for identity, arm in arms.items():
-        resources = {}
-        for suffix, origin in (
-            ("robot.urdf", arm.urdf),
-            ("robot.json", arm.manifest_path),
-            ("robot.glb", arm.visual_path),
-        ):
-            filename = f"{identity}_{suffix}"
-            shutil.copy2(origin, output / filename)
-            inputs[filename] = sha256(output / filename)
-            resources[suffix] = filename
-        arm_rows.append(
-            {
-                "id": identity,
-                "world_from_base": arm.robot.world_from_base.tolist(),
-                "flange_to_tcp": arm.flange_to_tcp.tolist(),
-                "initial_positions": arm.initial_positions.tolist(),
-                "initial_tcp_world": arm.robot.forward(
-                    arm.initial_positions, arm.flange_to_tcp
-                ).tolist(),
-                "robot_manifest": resources["robot.json"],
-                "robot_visual": resources["robot.glb"],
-                "robot_urdf": resources["robot.urdf"],
-                "tool_model": arm.tool.metadata,
-                "initial_static_contacts": arm.collision.check(
-                    arm.initial_positions, obstacles, profile["environment"]["clearance_m"]
-                ),
-            }
-        )
+    source_manifest = read_json(source_run / "asset_manifest.json")
+    object_root = (source_run / source_manifest["object_root"]).resolve()
+    shared_cell = object_root / "cell"
+    shared_cell.mkdir(exist_ok=True)
+    resources, additions = {}, {}
+    for suffix, origin in (
+        ("robot.urdf", arm.urdf), ("robot.json", arm.manifest_path), ("robot.glb", arm.visual_path),
+    ):
+        filename = f"{arm.identity}_{suffix}"
+        target = shared_cell / filename
+        if not target.exists() or sha256(target) != sha256(origin):
+            shutil.copy2(origin, target)
+        additions[filename] = target
+        resources[suffix] = filename
+    reference_assets(source_run, output, additions)
+    files = (
+        "asset_manifest.json", "normalized.glb", "geometry.glb", "cell_config.json",
+        "construction_plan.json", "stroke_graph.json", "fabrication_config.json", *additions,
+    )
+    inputs = {name: sha256(asset_path(output, name)) for name in files}
+    arm_row = {
+        "id": arm.identity,
+        "world_from_base": arm.robot.world_from_base.tolist(),
+        "flange_to_tcp": arm.flange_to_tcp.tolist(),
+        "initial_positions": arm.initial_positions.tolist(),
+        "initial_tcp_world": arm.robot.forward(arm.initial_positions, arm.flange_to_tcp).tolist(),
+        "robot_manifest": resources["robot.json"],
+        "robot_visual": resources["robot.glb"],
+        "robot_urdf": resources["robot.urdf"],
+        "tool_model": arm.tool.metadata,
+        "initial_static_contacts": arm.collision.check(
+            arm.initial_positions, obstacles, profile["environment"]["clearance_m"]
+        ),
+    }
     result = artifact(
         "robot_cell_preview",
         status="CELL_SETUP_PREVIEW",
@@ -272,7 +263,8 @@ def prepare_cell(profile_path, output, source_run):
         executable=False,
         frame="world",
         units="m",
-        arms=arm_rows,
+        schema_version=2,
+        arm=arm_row,
         inputs=inputs,
         world_from_build=profile["world_from_build"],
         environment=profile["environment"],
@@ -283,15 +275,4 @@ def prepare_cell(profile_path, output, source_run):
         ],
     )
     write_json(output / "cell_manifest.json", result)
-    # The planner checks that none of these changed since.
-    names = ("cell_manifest.json", "construction_plan.json", "stroke_graph.json")
-    write_json(
-        output / "cell_drawing_variants.json",
-        artifact(
-            "cell_drawing_variants",
-            inputs={name: sha256(output / name) for name in names},
-            variants=[],
-            status="LAZY_SECTION_CANDIDATES",
-        ),
-    )
     return result

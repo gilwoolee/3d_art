@@ -1,11 +1,9 @@
 """Add surface detail to a WirePrint frame as a few long strokes drawn after it.
 
-    .venv/bin/python -m pen_art.detail FRAME_SOURCE TARGET [options]
-
-(``pen-art detail NAME`` runs this for an object.)
+``pen-art detail NAME`` calls ``generate_detail`` for an object.
 
 FRAME_SOURCE is the folder ``pen-art frame`` wrote; its ``framework_graph.json``
-is the frame. TARGET is written as a copy of it with the detail tours added to
+is the frame. TARGET references its assets, with the detail tours added to
 ``stroke_graph.json``, ``construction_plan.json`` and ``structural_screen.json``,
 and listed in ``detail_tours.json``.
 
@@ -28,7 +26,6 @@ Detail lines come from slice creases: ridges and valleys found by slicing the
 mesh along x, y and z.
 """
 
-import argparse
 import shutil
 from copy import deepcopy
 from functools import partial
@@ -41,7 +38,7 @@ from scipy.spatial import cKDTree
 
 from pen_art.curves import curve_interval, curve_length
 from pen_art.frame import write_strokes
-from pen_art.io import read_json, write_json
+from pen_art.io import asset_path, read_json, reference_assets, write_json
 from pen_art.planning.sections import section_actions
 
 WIRE_R = 0.0005
@@ -52,7 +49,8 @@ TILTS = (0, 15, 30, 45, 60)
 # about 10 mm/s.
 SECONDS_PER_STROKE, DRAW_SPEED = 20.0, 0.010
 # Exit status when no drawable detail was found; nothing is written.
-NO_DETAIL = 3
+class NoDetail(ValueError):
+    """No drawable detail was found; the frame can still be planned."""
 # Lines sit OFFSET (one wire) outside the surface; crease lines shorter than
 # MIN_LINE are ignored; line is collected until COLLECT times the detail wanted
 # is reachable; a line bends onto frame wire within DIP; pieces of one face are
@@ -139,8 +137,7 @@ def choose_detail(lines, detail_m, minutes, keep=(), dropped=(), most=None):
 
 
 def no_detail(why):
-    print(f"detail 0.00 m in 0 strokes: {why}")
-    raise SystemExit(NO_DETAIL)
+    raise NoDetail(why)
 
 
 # --- geometry helpers ------------------------------------------------------------
@@ -368,10 +365,10 @@ class PlannerCheck:
         shutil.rmtree(cell_dir, ignore_errors=True)
         prepare_cell(profile_path, cell_dir, frame_source)
         self.planner = CellPlanner(cell_dir, profile_path, settings, float("inf"))
-        self.identity = next(iter(self.planner.arms))
+        self.identity = self.planner.arm.identity
         # The whole arm, not only the pen: planning screens the pen, and the
         # final replay rejects tilted poses where the arm folds into itself.
-        self.arm = self.planner.arms[self.identity]
+        self.arm = self.planner.arm
         self.table = FixedPlate.from_profile(self.planner.profile)
         # World azimuth each face of the object looks toward; the pen leans
         # toward the face it draws on.
@@ -525,38 +522,22 @@ class PlannerCheck:
 
 
 # --- main ---------------------------------------------------------------------------
-def parse_args():
-    """The command line: frame source, target, cell profile and the detail budget."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("frame_source", type=Path)
-    parser.add_argument("target", type=Path)
-    parser.add_argument(
-        "--profile",
-        type=Path,
-        required=True,
-        help="cell profile: build plate, robot base and pen",
-    )
-    parser.add_argument(
-        "--crease-threshold",
-        type=float,
-        nargs="+",
-        default=[0.12, 0.08, 0.05],
-        help="mm a crease bulges or dents; several values add shallower creases",
-    )
-    parser.add_argument("--detail", type=float, default=2.0, help="m of detail at most")
-    parser.add_argument(
-        "--minutes", type=float, default=15.0, help="added print minutes at most (estimated)"
-    )
-    return parser.parse_args()
+def generate_detail(source, target, profile, *, detail=2.0, minutes=15.0,
+                    crease_threshold=(0.12, 0.08, 0.05)):
+    """Generate detail over a frame; return its tours or an explicit no-detail reason."""
+    settings = {"detail": detail, "minutes": minutes, "crease_threshold": crease_threshold}
+    try:
+        return _generate_detail(Path(source), Path(target), Path(profile), settings)
+    except NoDetail as error:
+        print(f"detail 0.00 m in 0 strokes: {error}")
+        return {"tours": [], "spares": [], "reason": str(error)}
 
 
-def main():
-    """Find detail lines, make drawable tours of them and write them over the frame."""
-    args = parse_args()
-    source, target = args.frame_source, args.target
-    mesh = trimesh.load(source / "normalized.glb", force="mesh")
+def _generate_detail(source, target, profile, settings):
+    """Find detail lines, make drawable tours and write them over the frame."""
+    mesh = trimesh.load(asset_path(source, "normalized.glb"), force="mesh")
     surface = Surface(mesh, OFFSET)
-    faces = face_azimuths(args.profile)
+    faces = face_azimuths(profile)
     framework = read_json(source / "framework_graph.json")
     frame = np.vstack([dense(np.asarray(e["segments"][0])[[0, -1]]) for e in framework["edges"]])
     frame_tree = cKDTree(frame)
@@ -564,9 +545,9 @@ def main():
     samples = frame_samples(framework)
     funnel = {}
 
-    candidates = find_lines(mesh, args.crease_threshold)
+    candidates = find_lines(mesh, settings["crease_threshold"])
     pieces, taken = lay_and_cut(
-        candidates, surface, frame, frame_tree, faces, clear, COLLECT * args.detail, funnel
+        candidates, surface, frame, frame_tree, faces, clear, COLLECT * settings["detail"], funnel
     )
     tours = join_tours(pieces, surface, clear, funnel)
     if not tours:
@@ -574,12 +555,13 @@ def main():
     ordered, cut_out = order_tours(tours, faces, funnel)
     ready, dropped = choose_tilts(ordered, samples[2])
     ready = planner_filter(
-        ready, args.profile, source, target, framework, faces, clear, samples[2], funnel
+        ready, profile, source, target, framework, faces, clear, samples[2], funnel
     )
-    pick_strokes(ready, args.detail, args.minutes, funnel)
+    pick_strokes(ready, settings["detail"], settings["minutes"], funnel)
     graph, rows, fused = build_graph(framework, ready, faces, samples)
-    rows, screen, minutes = write(source, target, graph, rows, faces, args)
+    rows, screen, minutes = write(source, target, graph, rows, faces, settings)
     report(funnel, taken, pieces, tours, cut_out, dropped, rows, fused, screen, minutes)
+    return read_json(target / "detail_tours.json")
 
 
 # --- faces and the nose screen -------------------------------------------------------
@@ -587,7 +569,7 @@ def face_azimuths(profile_path):
     """World azimuth of each of the object's four faces, the one facing the robot first."""
     profile = yaml.safe_load(profile_path.read_text())
     build = np.asarray(profile["world_from_build"])[:2, 3]
-    base = np.asarray(profile["arms"][0]["world_from_base"])[:2, 3]
+    base = np.asarray(profile["arm"]["world_from_base"])[:2, 3]
     robot_az = np.degrees(np.arctan2(*(base - build)[::-1]))
     # Four faces of the object: the one looking at the robot, then each
     # quarter turn round. A line keeps to one face; the pen leans toward it.
@@ -934,7 +916,7 @@ def planner_filter(ready, profile, source, target, framework, faces, clear, ftre
     # when the check is done.
     scratch = f"{target.parent.name}_{target.name}_check"
     check_profile = detail_profile(profile, profile.parent / f"{scratch}.yaml")
-    check_cell = target.parent / scratch
+    check_cell = target.parent / ".work" / scratch
     checker = PlannerCheck(source, framework, check_profile, check_cell, faces)
     queue, ready, checks = list(ready), [], 0
     while queue:
@@ -1109,7 +1091,7 @@ def build_graph(framework, ready, faces, samples):
 
 
 # --- output --------------------------------------------------------------------------
-def write(source, target, graph, rows, faces, args):
+def write(source, target, graph, rows, faces, settings):
     """Write the target run and ``detail_tours.json``; the drawn rows, screen and minutes."""
     spares = [r for r in rows if r.pop("spare")]
     rows = [r for r in rows if r not in spares]
@@ -1125,7 +1107,7 @@ def write(source, target, graph, rows, faces, args):
             "spares": spares,
             "face_azimuth_deg": faces,
             "estimated_added_minutes": minutes,
-            "settings": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
+            "settings": settings,
         },
     )
     return rows, screen, minutes
@@ -1151,13 +1133,14 @@ def report(funnel, taken, pieces, tours, cut_out, dropped, rows, fused, screen, 
 
 
 def write_detail_source(source, target, graph):
-    """``target``: a copy of the source run ``source`` with the stroke graph
+    """``target``: shared source assets with the selected stroke graph
     ``graph``, its strokes and its structural screen, which is returned."""
     if target.exists():
         shutil.rmtree(target)
-    shutil.copytree(source, target)
+    target.mkdir(parents=True)
+    reference_assets(source, target)
     construction = tilt_hints(section_actions(graph), graph)
-    material = read_json(source / "fabrication_config.json")["structure"]
+    material = read_json(asset_path(source, "fabrication_config.json"))["structure"]
     return write_strokes(target, graph, construction, material)
 
 
@@ -1176,7 +1159,3 @@ def tilt_hints(construction, graph):
 
 def names_of(tours, start, sample):
     return tours[int(np.searchsorted(start, sample, side="right") - 1)][3]
-
-
-if __name__ == "__main__":
-    main()

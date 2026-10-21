@@ -39,6 +39,6 @@ There are no tests. Check a change by running the ghost through every step
 in the README and comparing the lines each step prints.
 
 ```bash
-.venv/bin/ruff check src scripts
-(cd web && PATH=$PWD/../tools/node/bin:$PATH npm run build)
+.venv/bin/ruff check src
+(cd viewer && PATH=$PWD/../.cache/node/bin:$PATH npm run build)
 ```

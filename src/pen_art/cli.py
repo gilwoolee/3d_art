@@ -15,9 +15,8 @@ import argparse
 import os
 import re
 import shutil
-import subprocess
-import sys
 from collections import Counter
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import yaml
@@ -87,7 +86,7 @@ def frame(args):
     if args.coil_width is not None:
         wireprint["coil_maximum_width"] = args.coil_width
     extent = yaml.safe_load(profile.read_text())["build_volume_m"]
-    source = folder / "frame_source"
+    source = folder / "frame"
     try:
         prepare_mesh_within_wire(args.mesh, source, args.up, extent, config)
         prepare_framework(source)
@@ -118,35 +117,32 @@ def frame(args):
 
 
 def detail(args):
-    from .detail import NO_DETAIL
+    from .detail import generate_detail
 
     folder = _folder(args.name)
     fresh = folder / "detail-new"
     shutil.rmtree(fresh, ignore_errors=True)
-    command = [
-        sys.executable, "-m", "pen_art.detail", str(folder / "frame_source"), str(fresh),
-        "--profile", str(_cell()), "--detail", str(args.detail),
-        "--minutes", str(args.minutes),
-    ]
+    options = {"detail": args.detail, "minutes": args.minutes}
     if args.crease_threshold:
-        command += ["--crease-threshold", *map(str, args.crease_threshold)]
-    with open(folder / "detail.log", "w") as log:
-        result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False)
-    if result.returncode not in (0, NO_DETAIL):
+        options["crease_threshold"] = args.crease_threshold
+    try:
+        with open(folder / "detail.log", "w") as log, redirect_stdout(log), redirect_stderr(log):
+            found = generate_detail(folder / "frame", fresh, _cell(), **options)
+    except Exception as error:
         shutil.rmtree(fresh, ignore_errors=True)
-        raise SystemExit(f"detail {args.name} failed; see {folder / 'detail.log'}")
+        raise SystemExit(
+            f"detail {args.name} failed: {error}; see {folder / 'detail.log'}"
+        ) from error
     # New detail replaces the old, and every plan made with the old one goes.
-    for old in [folder / "detail", folder / "state.json", *folder.glob("round-*")]:
+    for old in [folder / "detail", folder / "state.json", folder / "plan", folder / ".work"]:
         if old.is_dir():
             shutil.rmtree(old)
         elif old.exists():
             old.unlink()
-    if result.returncode == NO_DETAIL:
-        why = (folder / "detail.log").read_text().strip().splitlines()[-1]
-        print(f"{why.replace('detail', f'detail {args.name}', 1)}; plan the frame alone")
+    if "reason" in found:
+        print(f"detail {args.name}: 0.00 m in 0 strokes ({found['reason']}); plan the frame alone")
         return
     fresh.rename(folder / "detail")
-    found = read_json(folder / "detail" / "detail_tours.json")
     tours, spares = found["tours"], found.get("spares", [])
     print(
         f"detail {args.name}: {sum(t['length_m'] for t in tours):.2f} m in {len(tours)} strokes, "

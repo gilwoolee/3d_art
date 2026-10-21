@@ -1,23 +1,23 @@
 #!/bin/bash
 # Set up a fresh clone on a new Linux x86-64 machine. Run from anywhere:
-#   scripts/setup_machine.sh
+#   ./setup.sh
 # Needs git, git-lfs, curl and uv (https://docs.astral.sh/uv/). Safe to re-run;
 # each step is skipped when already done. Steps:
-#   1. objs/ meshes and pictures from Git LFS
+#   1. examples/ meshes and pictures from Git LFS
 #   2. .venv (Python 3.12) with the planner and dev tools
-#   3. external/flexiv_description at the pinned commit, then the robot cell in
+#   3. .cache/flexiv_description at the pinned commit, then the robot cell in
 #      runs/cell from configs/cell.yaml (its URDF holds this machine's
 #      absolute paths, so it is made here, never copied)
-#   4. Node 24 in tools/node, the viewer's packages and build
+#   4. Node 24 in .cache/node, the viewer's packages and build
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 root=$PWD
 
 for tool in git git-lfs curl uv; do
   command -v "$tool" > /dev/null || { echo "missing: $tool" >&2; exit 1; }
 done
 
-echo "== 1. Git LFS files (objs/)"
+echo "== 1. Git LFS files (examples/)"
 git lfs install --local
 git lfs pull
 
@@ -26,24 +26,23 @@ echo "== 2. Python environment"
 uv pip install --python .venv/bin/python -e '.[dev]' -c requirements.lock
 
 echo "== 3. Robot description and cell"
+mkdir -p .cache
 # The pinned commit is FLEXIV_REVISION in src/pen_art/robot.py.
 flexiv=$(sed -n 's/^FLEXIV_REVISION = "\(.*\)"$/\1/p' src/pen_art/robot.py)
 [ -n "$flexiv" ] || { echo "no FLEXIV_REVISION in src/pen_art/robot.py" >&2; exit 1; }
-if [ ! -d external/flexiv_description ]; then
-  git clone https://github.com/flexivrobotics/flexiv_description.git external/flexiv_description
+if [ ! -d .cache/flexiv_description ]; then
+  git clone https://github.com/flexivrobotics/flexiv_description.git .cache/flexiv_description
 fi
-git -C external/flexiv_description checkout --quiet --detach "$flexiv"
-if [ ! -f runs/cell/robot.urdf ] || ! grep -q "$root/external" runs/cell/robot.urdf; then
-  .venv/bin/pen-art cell
-fi
+git -C .cache/flexiv_description checkout --quiet --detach "$flexiv"
+.venv/bin/pen-art cell
 
 echo "== 4. Node and the viewer"
 node_version=v24.21.0
 node_name=node-$node_version-linux-x64
-if [ ! -x tools/node/bin/node ]; then
-  mkdir -p tools
+if [ ! -x .cache/node/bin/node ]; then
+  mkdir -p .cache
   (
-    cd tools
+    cd .cache
     curl -fsSLO "https://nodejs.org/dist/$node_version/$node_name.tar.xz"
     curl -fsSL "https://nodejs.org/dist/$node_version/SHASUMS256.txt" | grep " $node_name.tar.xz\$" \
       | sha256sum -c -
@@ -51,8 +50,8 @@ if [ ! -x tools/node/bin/node ]; then
     ln -sfn "$node_name" node
   )
 fi
-export PATH="$root/tools/node/bin:$PATH"
-(cd web && npm ci && npm run build)
+export PATH="$root/.cache/node/bin:$PATH"
+(cd viewer && npm ci && npm run build)
 
 mkdir -p runs
-echo "Done. Next, as in the README: .venv/bin/pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost"
+echo "Done. Next, as in the README: .venv/bin/pen-art frame examples/ghost/cute_ghost.glb --name ghost"

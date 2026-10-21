@@ -1,6 +1,6 @@
 """The frame step: a mesh scaled into the build frame, then its wire frame.
 
-``pen-art frame`` writes ``runs/NAME/frame_source/``: the scaled mesh
+``pen-art frame`` writes ``runs/NAME/frame/``: the scaled mesh
 (``normalized.glb``, ``geometry.glb``, ``asset_manifest.json``), the settings
 (``fabrication_config.json``), the size settled on (``wire_budget.json``), the
 frame (``framework_graph.json``, ``stroke_graph.json``), its strokes
@@ -84,6 +84,11 @@ def prepare_mesh(mesh, source, source_up, max_extent_m):
         source / "asset_manifest.json",
         artifact(
             "asset_manifest",
+            schema_version=2,
+            object_root="..",
+            files={name: f"frame/{name}" for name in (
+                "normalized.glb", "geometry.glb", "fabrication_config.json",
+            )},
             source={"name": mesh.name, "sha256": sha256(mesh)},
             units="m",
             source_up=source_up,

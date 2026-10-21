@@ -1,9 +1,9 @@
 """The three planning stages: plan-geometry, plan-timing and verify-full-robot.
 
-An object's work lives in ``runs/NAME/``: the frame (``frame_source/``), the
-detail when there is one (``detail/``), one folder per planning round
-(``round-NN/``) and ``state.json``, which names the current round and records
-what each stage did. Each stage reads the previous stage's result from there
+An object's work lives in ``runs/NAME/``: the frame (``frame/``), the
+detail when there is one (``detail/``), selected results (``plan/``), retry
+diagnostics (``.work/``) and ``state.json``, which names the selected result and
+records what each stage did. Each stage reads the previous stage's result
 and refuses to run when it is missing or its inputs changed.
 
 * ``plan_geometry`` finds a collision-free path for every stroke, untimed. A
@@ -17,15 +17,15 @@ and refuses to run when it is missing or its inputs changed.
 
 import hashlib
 import json
+import os
 import shutil
-import subprocess
-import sys
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import yaml
 
 from .curves import curve_length
-from .io import read_json, sha256, write_json
+from .io import asset_path, read_json, sha256, write_json
 
 STATE = "state.json"
 # The frame.yaml sections read when the paths are planned and timed. The
@@ -49,21 +49,18 @@ def _save(folder, state):
 
 
 def _section_build(run, source, profile, workers, stage, log):
-    command = [
-        sys.executable, "-m", "pen_art.planning.section_build",
-        "--cell-source-run", str(source), "--run", str(run), "--profile", str(profile),
-        "--workers", str(workers), "--maximum-seconds", "7200", "--stage", stage,
-    ]
-    with open(log, "a") as out:
-        subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, check=False)
+    from .planning.section_build import build_round
+
+    with open(log, "a") as out, redirect_stdout(out), redirect_stderr(out):
+        report = build_round(run, source, profile, workers, stage)
     record = Path(run) / "run.json"
     if record.exists():
         named = read_json(record)
         named["name"] = Path(run).parent.name + (
-            ": frame and detail" if Path(source).name != "frame_source" else ": frame"
+            ": frame and detail" if Path(source).name != "frame" else ": frame"
         )
         write_json(record, named)
-    return read_json(Path(run) / "section_build.json")
+    return report
 
 
 def drop_strokes(source, target, tours):
@@ -96,6 +93,7 @@ def _inputs(source, profile, cell):
 
 def _check_build_volume(frame, cell):
     """The frame must have been made for the cell's build volume."""
+    asset_path(frame, "normalized.glb")  # Reject old asset formats before replacing any results.
     made = read_json(Path(frame) / "wire_budget.json")["requested_max_extent_m"]
     wanted = yaml.safe_load(Path(cell).read_text())["build_volume_m"]
     if abs(made - wanted) > 1e-9:
@@ -109,7 +107,7 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
     """Plan untimed paths for the frame, and the detail when ``detail/`` exists."""
     folder, profile = Path(folder), Path(profile)
     cell = profile
-    frame = folder / "frame_source"
+    frame = folder / "frame"
     if not (frame / "stroke_graph.json").exists():
         raise StageOrderError(f"no frame in {frame}: run `pen-art frame` first")
     _check_build_volume(frame, cell)
@@ -125,19 +123,27 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         lines = [(t["id"], t["length_m"]) for t in info["tours"] + info.get("spares", [])]
     # Written first, so an interrupted run never leaves a state naming a
     # round that is gone.
-    state = _save(folder, {"frame": str(frame), "cell": str(cell), "geometry": "RUNNING"})
-    for old in folder.glob("round-*"):
-        shutil.rmtree(old)
-    state.update(profile=str(profile))
+    state = _save(folder, {
+        "schema_version": 3, "frame": "frame",
+        "cell": os.path.relpath(cell, folder), "geometry": "RUNNING",
+    })
+    for old in (folder / "plan", folder / ".work"):
+        if old.exists():
+            shutil.rmtree(old)
+    work = folder / ".work"
+    work.mkdir()
+    state.update(profile=os.path.relpath(profile, folder))
     dropped, spares, chosen, source = [], [], [], frame
     if with_detail:
         # The detail within budget; the spares wait until a stroke is dropped.
         chosen = choose_detail(lines, *budget)
-        source = _detail_source(detail, folder / "round-00-source", lines, chosen)
+        source = _detail_source(detail, work / "source-00", lines, chosen)
         if source is None:
             return _save(folder, {**state, "geometry": "STRUCTURE_FAILS_WITHOUT_SPARE_DETAIL"})
     for number in range(maximum_rounds):
-        run = folder / f"round-{number:02d}"
+        run = folder / "plan"
+        if run.exists():
+            _archive_round(run, work / f"round-{number - 1:02d}")
         report = _section_build(
             run, source, profile, workers, "geometry", folder / "planning.log"
         )
@@ -173,15 +179,15 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         if added:
             log(f"  drawing spare detail instead: {', '.join(added)}")
         spares += added
-        following = _detail_source(detail, folder / f"round-{number + 1:02d}-source", lines, chosen)
+        following = _detail_source(detail, work / f"source-{number + 1:02d}", lines, chosen)
         if following is None:
             status = "STRUCTURE_FAILS_WITHOUT_DROPPED_DETAIL"
             break
         source = following
     state.update(
         geometry=status,
-        round=run.name,
-        source=str(source),
+        result=run.name,
+        source=os.path.relpath(source, folder),
         inputs=_inputs(source, profile, cell),
         dropped=dropped,
         spares=[name for name in spares if name in chosen],
@@ -189,6 +195,22 @@ def plan_geometry(folder, profile, workers=24, frame_only=False, maximum_rounds=
         minimum_trails=report.get("minimum_trails"),
     )
     return _save(folder, state)
+
+
+def _archive_round(run, archive):
+    """Move a failed geometry attempt, preserving its references and snapshot hashes."""
+    record = read_json(run / "run.json")
+    source = (run / record["cell_source_run"]).resolve()
+    manifest = read_json(run / "asset_manifest.json")
+    object_root = (run / manifest["object_root"]).resolve()
+    run.rename(archive)
+    record["cell_source_run"] = os.path.relpath(source, archive)
+    write_json(archive / "run.json", record)
+    manifest["object_root"] = os.path.relpath(object_root, archive)
+    write_json(archive / "asset_manifest.json", manifest)
+    cell = read_json(archive / "cell_manifest.json")
+    cell["inputs"]["asset_manifest.json"] = sha256(archive / "asset_manifest.json")
+    write_json(archive / "cell_manifest.json", cell)
 
 
 def _detail_source(detail, target, lines, chosen):
@@ -213,6 +235,8 @@ def _reason(failure):
 
 def _require(folder, stage, status):
     state = _state(folder)
+    if state and state.get("schema_version") != 3:
+        raise StageOrderError("Unsupported saved run: run `pen-art plan-geometry` again")
     command = "plan-geometry" if stage == "geometry" else "plan-timing"
     if state.get(stage) is None:
         raise StageOrderError(f"{folder}: run `pen-art {command}` first")
@@ -221,8 +245,9 @@ def _require(folder, stage, status):
             f"{folder}: `pen-art {command}` ended with {state[stage]} (see "
             f"{Path(folder) / 'planning.log'}); fix that and run it again"
         )
-    _check_build_volume(state["frame"], state["cell"])
-    if state["inputs"] != _inputs(state["source"], state["profile"], state["cell"]):
+    _check_build_volume(Path(folder) / state["frame"], Path(folder) / state["cell"])
+    current = _inputs(*(Path(folder) / state[name] for name in ("source", "profile", "cell")))
+    if state["inputs"] != current:
         raise StageOrderError(
             f"{folder}: the frame, the cell or the planning settings in configs/frame.yaml "
             "changed since `pen-art plan-geometry`: run it again"
@@ -252,11 +277,11 @@ def plan_timing(folder, workers=24):
     """Time the planned paths once. Nothing is added or removed here."""
     folder = Path(folder)
     state = _require(folder, "geometry", "GEOMETRY_PLANNED")
-    profile, source = Path(state["profile"]), Path(state["source"])
-    run = folder / state["round"]
+    profile, source = folder / state["profile"], folder / state["source"]
+    run = folder / state["result"]
     report = _section_build(run, source, profile, workers, "timing", folder / "planning.log")
     plan = read_json(run / "plan.json") if (run / "plan.json").exists() else {}
-    detail = detail_budget(run, source) if plan and source.name != "frame_source" else None
+    detail = detail_budget(run, source) if plan and source.name != "frame" else None
     state.update(
         timing=report["status"],
         print_minutes=plan.get("modeled_duration_s", 0) / 60 or None,
@@ -275,25 +300,18 @@ def verify_full_robot(folder, workers=24):
     """Replay the whole robot against everything built so far."""
     folder = Path(folder)
     state = _require(folder, "timing", "FULL_BUILD_PLANNED")
-    run = folder / state["round"]
-    command = [
-        sys.executable, "-m", "pen_art.planning.cell_replay",
-        "--run", str(run), "--config", state["profile"], "--workers", str(workers),
-        "--maximum-seconds", "7200",
-    ]
+    run = folder / state["result"]
+    from .planning.cell_replay import replay_cell
+
     (run / "verification.json").unlink(missing_ok=True)
-    with open(folder / "planning.log", "a") as out:
-        result = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, check=False)
-    # The verdict of this replay, never one left over from an earlier one. A
-    # replay that stopped with an error leaves the plan's own status behind.
-    verdict = (
-        read_json(run / "section_build.json")["status"]
-        if (run / "verification.json").exists()
-        else None
-    )
-    if verdict in (None, "FULL_BUILD_PLANNED") or (
-        result.returncode and verdict == "FULL_BUILD_VERIFIED"
-    ):
+    try:
+        with open(folder / "planning.log", "a") as out, redirect_stdout(out), redirect_stderr(out):
+            report = replay_cell(run, folder / state["profile"], 7200, workers=workers)
+        verdict = read_json(run / "section_build.json")["status"]
+        if report["status"] != "CERTIFIED_GEOMETRIC_REPLAY" and verdict == "FULL_BUILD_VERIFIED":
+            verdict = "VERIFICATION_ERROR"
+    except Exception as error:
+        print(f"verification failed: {error}")
         verdict = "VERIFICATION_ERROR"
     state["verification"] = verdict
     return _save(folder, state)

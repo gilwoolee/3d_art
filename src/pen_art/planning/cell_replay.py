@@ -1,6 +1,5 @@
 """Replay a saved plan with the complete robot model, from a clean start."""
 
-import argparse
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
@@ -12,7 +11,7 @@ from time import monotonic, perf_counter
 import numpy as np
 
 from ..curves import source_points, transform_points
-from ..io import artifact, read_json, sha256, stage_update, write_json
+from ..io import artifact, asset_path, read_json, sha256, stage_update, write_json
 from .cell_planner import CellPlanner
 from .clock_path import (
     POSTURE_LIMIT_DEG_PER_MM,
@@ -117,7 +116,7 @@ def _parallel_arm_check(index):
     obstacles = {**planner.obstacles, "printed_volume": _PARALLEL["envelope"]}
     depth, edges = planner.settings["maximum_subdivision_depth"], 0
     if "arm_links" not in _LOCAL:
-        arm = next(iter(planner.arms.values()))
+        arm = planner.arm
         _LOCAL["arm_links"] = ArmLinksModel(arm.collision, {body.name for body in arm.tool.bodies})
     model = _LOCAL["arm_links"]
     before, started = Counter(QUERY_STATS), perf_counter()
@@ -166,8 +165,10 @@ def load_plan(run, profile_path, maximum_seconds):
     """The saved plan bound to its inputs, a planner restoring the complete
     robot model and the plan's settings, and the arm's home position."""
     saved = read_json(run / PLAN)
+    if saved.get("schema_version") != 2:
+        raise ValueError("Unsupported plan format: run `pen-art plan-geometry` and timing again")
     for name, value in saved["inputs"].items():
-        if sha256(run / name) != value:
+        if sha256(asset_path(run, name)) != value:
             raise ValueError(f"Stale plan input: {name}")
     settings = read_json(run / saved["settings_artifact"])
     # Planning may deliberately defer robot collision checks. The replay
@@ -184,10 +185,8 @@ def load_plan(run, profile_path, maximum_seconds):
     planner.transit, planner.timing, planner.process = (
         settings[k] for k in ("transit", "timing", "process")
     )
-    initial = saved["initial_positions"]
-    if set(initial) != set(planner.arms) or len(initial) != 1:
-        raise ValueError("Saved initial poses do not match the one-arm cell")
-    (home,) = (tuple(q) for q in initial.values())
+    home = tuple(saved["initial_positions"])
+    planner.arm.robot.frames(home)
     return saved, planner, home
 
 
@@ -198,7 +197,7 @@ def audit_action(planner, row, path):
     clocks are accepted; they bind the path, kinematics, source and process
     settings. Collision, orientation, deposits and structure are still checked.
     """
-    arm = planner.arms[row["arm"]]
+    arm = planner.arm
     store = planner.path_certificates
     result = {"pen_proof": None}
     if not row.get("auxiliary", False):
@@ -422,7 +421,7 @@ def arm_motions(planner, ordered, parsed, home, report):
     ends and start where that one stopped. Raises on violation. Returns the
     motions and each drawing's pen proof, or None when time runs out.
     """
-    (identity,) = planner.arms
+    identity = planner.arm.identity
     output = report.output
     moves, pen_proofs = [], {}
     previous_end, previous_q = 0.0, home
@@ -621,7 +620,7 @@ def collision_replay(run, planner, intervals, states, accepted, drawings, worker
     final material, or None after a rejection.
     """
     output = report.output
-    journal_root = run / "verification_journals"
+    journal_root = run / ".work" / "verification_journals"
     rmtree(journal_root, ignore_errors=True)
     journal_root.mkdir(parents=True)
     _PARALLEL.update(
@@ -695,7 +694,7 @@ def collision_replay(run, planner, intervals, states, accepted, drawings, worker
             "geometry_sha256": whole.geometry_prefix().hex(),
         }
     finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)
         rmtree(journal_root, ignore_errors=True)
 
 
@@ -732,7 +731,7 @@ def _replay(run, profile_path, maximum_seconds, workers, pools):
     saved, planner, home = load_plan(run, profile_path, maximum_seconds)
     tasks = {task.identity: task for task in planner.tasks}
     sections, section_audits = audit_sections(planner, saved)
-    material = read_json(run / "fabrication_config.json")["structure"]
+    material = read_json(asset_path(run, "fabrication_config.json"))["structure"]
     deposited = members_before(sections)
     screens = saved_screens(run, material, sections, deposited)
     section_audits["structural_screens_accepted"] = len(screens)
@@ -790,13 +789,15 @@ def replay_cell(run, profile_path, maximum_seconds=300, *, workers=1):
     stage_update(
         run, "validation", "running", artifact=VERIFICATION, message="Replaying the saved plan"
     )
+    _LOCAL.clear()
     pools = []
     try:
         try:
             output = _replay(run, profile_path, maximum_seconds, workers, pools)
         finally:
             for pool in pools:
-                pool.shutdown(wait=False, cancel_futures=True)
+                pool.shutdown(wait=True, cancel_futures=True)
+            _LOCAL.clear()
         passed = output["status"] == "CERTIFIED_GEOMETRIC_REPLAY"
         stage_update(
             run,
@@ -852,21 +853,3 @@ def replay_cell(run, profile_path, maximum_seconds=300, *, workers=1):
         write_json(path, output)
         stage_update(run, "validation", "failed", artifact=VERIFICATION, message=str(error))
         raise
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", type=Path, required=True)
-    parser.add_argument("--config", type=Path, required=True, help="The cell profile planned with")
-    parser.add_argument("--maximum-seconds", type=float, default=300)
-    parser.add_argument("--workers", type=int, default=1, help="Parallel interval checks")
-    args = parser.parse_args()
-    if args.workers < 1:
-        parser.error("--workers needs at least one worker")
-    result = replay_cell(args.run, args.config, args.maximum_seconds, workers=args.workers)
-    print(result["status"], result["completed_strokes"], result["checked_intervals"])
-    return 0 if result["status"] == "CERTIFIED_GEOMETRIC_REPLAY" else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

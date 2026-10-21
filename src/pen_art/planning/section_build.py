@@ -1,8 +1,8 @@
-"""Plan one round: untimed paths for every stroke (``--stage geometry``), then
-their timing (``--stage timing``). ``pen-art plan-geometry`` and ``plan-timing``
-run this."""
+"""Plan one round: untimed paths, then their timing through ``build_round``.
 
-import argparse
+``pen-art plan-geometry`` and ``plan-timing`` call this stage function.
+"""
+
 from dataclasses import replace
 from pathlib import Path
 from time import monotonic
@@ -11,7 +11,7 @@ import numpy as np
 
 from ..cell import load_frame_config, prepare_cell
 from ..curves import source_points
-from ..io import artifact, read_json, sha256, write_json
+from ..io import artifact, asset_path, read_json, sha256, write_json
 from ..structure import analyze_structure
 from .cell_planner import CellPlanner
 from .clock_path import ClockPath, timed_path
@@ -47,12 +47,10 @@ class SectionBuild:
             run, profile, settings, monotonic() + maximum_seconds, timing_override=timing
         )
         self.planner.geometry_first = True
-        if len(self.planner.arms) != 1:
-            raise ValueError("Section builds require exactly one arm")
-        self.arm = next(iter(self.planner.arms.values()))
+        self.arm = self.planner.arm
         self.initial = self.arm.initial_positions.copy()
         self.actions = self.planner.actions
-        self.material = read_json(self.run / "fabrication_config.json")["structure"]
+        self.material = read_json(asset_path(self.run, "fabrication_config.json"))["structure"]
         self.transform = np.asarray(self.planner.profile["world_from_build"])
         if not np.allclose(self.transform[:3, :3], np.eye(3)):
             raise ValueError("Structural gravity assumes an upright build frame")
@@ -62,7 +60,7 @@ class SectionBuild:
         self.search_metadata = {}
         self.checkpoint_binding = {
             "inputs": {
-                name: sha256(self.run / name)
+                name: sha256(asset_path(self.run, name))
                 for name in (
                     "cell_manifest.json",
                     "stroke_graph.json",
@@ -232,39 +230,15 @@ def combine_clocks(*paths):
     return clock
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--cell-source-run",
-        type=Path,
-        required=True,
-        help="Bind a fresh run to a generated frame source run",
-    )
-    parser.add_argument("--run", type=Path, required=True)
-    parser.add_argument("--profile", type=Path, required=True)
-    parser.add_argument("--maximum-seconds", type=float, default=3600)
-    parser.add_argument("--workers", type=int, default=24)
-    parser.add_argument(
-        "--stage",
-        choices=("geometry", "timing"),
-        required=True,
-        help="geometry: untimed paths only; timing: time the saved paths and export",
-    )
-    args = parser.parse_args()
-    if args.workers < 1:
-        parser.error("--workers needs at least one worker")
-    if not (args.run / "run.json").exists():
-        prepare_cell(args.profile, args.run, args.cell_source_run)
-    build = SectionBuild(args.run, args.profile, args.maximum_seconds)
+def build_round(run, source, profile, workers, stage, maximum_seconds=7200):
+    """Prepare one round, run its geometry or timing stage and return its report."""
+    run = Path(run)
+    if not (run / "run.json").exists():
+        prepare_cell(profile, run, source)
+    build = SectionBuild(run, profile, maximum_seconds)
     try:
-        build.run_build(args.workers, args.stage)
+        build.run_build(workers, stage)
     except Exception as error:
         build.report("ERROR", error={"type": type(error).__name__, "message": str(error)})
         raise
-    print(read_json(args.run / "section_build.json")["status"], flush=True)
-    status = read_json(args.run / "section_build.json")["status"]
-    return 0 if status in {"FULL_BUILD_PLANNED", "GEOMETRY_PLANNED"} else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return read_json(run / "section_build.json")

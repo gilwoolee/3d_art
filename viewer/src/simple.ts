@@ -6,7 +6,7 @@ import { Viewer, type CellArmView, type Curve, type RobotRig } from './viewer';
 interface RunRow { id: string; name: string; updated_at: string }
 interface RunDetail extends RunRow { artifacts: string[] }
 interface CellManifest {
-  arms: (Omit<CellArmView, 'rig' | 'url'> & { robot_manifest: string; robot_visual: string })[];
+  arm: Omit<CellArmView, 'rig' | 'url'> & { robot_manifest: string; robot_visual: string };
   world_from_build: number[][];
   environment: { plate_top_z_m: number; table_z_m: number; plate_size_m: number[] };
 }
@@ -17,7 +17,7 @@ interface PlanAction { arm: string; stroke_id: string; start_s: number; end_s: n
 interface Plan {
   actions: PlanAction[]; modeled_duration_s: number; requested_strokes: number;
   lift_offs?: { before: string; reason: string }[]; minimum_trails?: number | null;
-  initial_positions?: Record<string, number[]>;
+  initial_positions: number[];
 }
 
 // The arm's joints at ``time``: a piece's polynomial, or a smooth blend between its ends.
@@ -88,14 +88,14 @@ async function show(runId: string) {
   if (current !== request) return;
   const has = (file: string) => run.artifacts.includes(file);
 
-  // 0. The object's original picture from objs/, when there is one.
+  // 0. The object's original picture from examples/, when there is one.
   const photo = $<HTMLImageElement>('#simple-photo');
   photo.hidden = false;
-  photo.onload = () => { if (current === request) $('#simple-photo-note').textContent = 'Picture from objs/.'; };
+  photo.onload = () => { if (current === request) $('#simple-photo-note').textContent = 'Picture from examples/.'; };
   photo.onerror = () => {
     if (current !== request) return;
     photo.hidden = true;
-    $('#simple-photo-note').textContent = 'No picture in objs/ for this model.';
+    $('#simple-photo-note').textContent = 'No picture in examples/ for this model.';
   };
   photo.src = `/api/runs/${runId}/picture`;
 
@@ -131,11 +131,12 @@ async function show(runId: string) {
     const planFile = ['plan.json'].find(has);
     if (!has('cell_manifest.json') || !planFile) { $('#simple-robot-note').textContent = 'This run has no saved robot motion.'; return; }
     const cell = await json<CellManifest>(url('cell_manifest.json'));
-    const arms: CellArmView[] = await Promise.all(cell.arms.map(async arm => ({
-      ...arm, rig: await json<RobotRig>(url(arm.robot_manifest)), url: url(arm.robot_visual),
-    })));
+    const arm: CellArmView = {
+      ...cell.arm, rig: await json<RobotRig>(url(cell.arm.robot_manifest)),
+      url: url(cell.arm.robot_visual),
+    };
     if (current !== request) return;
-    await views.robot.loadCell(arms, { url: url('geometry.glb'), world_from_build: cell.world_from_build });
+    await views.robot.loadCell(arm, { url: url('geometry.glb'), world_from_build: cell.world_from_build });
     if (current !== request) return;
     const origin = cell.world_from_build.map(row => row[3]);
     views.robot.setPlatform(origin.slice(0, 2), cell.environment.plate_top_z_m, cell.environment.table_z_m,
@@ -174,19 +175,16 @@ async function show(runId: string) {
     const draw = (time: number) => {
       time = Math.max(0, Math.min(total, time));
       seek.value = String(time);
-      for (const arm of arms) {
-        const moves = plan.actions.filter(a => a.arm === arm.id);
-        const motion = moves.find(a => a.start_s <= time && time < a.end_s);
-        const past = moves.filter(a => a.end_s <= time).at(-1);
-        views.robot.setCellArmPose(arm.id, motion ? pose(motion, time)
-          : past ? pose(past, past.end_s) : (plan.initial_positions?.[arm.id] ?? arm.initial_positions));
-      }
+      const motion = plan.actions.find(a => a.start_s <= time && time < a.end_s);
+      const past = plan.actions.filter(a => a.end_s <= time).at(-1);
+      views.robot.setCellArmPose(motion ? pose(motion, time)
+        : past ? pose(past, past.end_s) : plan.initial_positions);
       const paths: number[][][] = [];
       for (const row of rows) {
         if (row.start > time) break;
         paths.push([row.edge.tcp0_m!, row.end <= time
           ? row.edge.tcp1_m!
-          : views.robot.setCellArmPose(row.action.arm, pose(row.action, time))]);
+          : views.robot.setCellArmPose(pose(row.action, time))]);
       }
       views.robot.setDepositedPaths(paths);
       $('#simple-clock').textContent = `${minutes(time)} / ${minutes(total)}`;

@@ -24,7 +24,7 @@ from time import monotonic, perf_counter
 import numpy as np
 
 from ..curves import source_points
-from ..io import artifact, read_json, sha256, stage_update, write_json
+from ..io import artifact, asset_path, read_json, sha256, stage_update, write_json
 from .cell_motion import (
     DEFAULT_PEN_TILTS_DEG,
     DEFAULT_SETTINGS,
@@ -1259,7 +1259,7 @@ def prepare_context(build, action_budget=240.0, workers=1):
             }
     write_json(build.run / "structural_screens.json", {"screens": screens})
     model = Motions(build)
-    root = build.run / "parallel"
+    root = build.run / ".work" / "parallel"
     _CONTEXT = {
         "build": build,
         "model": model,
@@ -1302,7 +1302,7 @@ class _Workers:
     def close(self):
         for pool in self.pools:
             if pool is not None:
-                pool.shutdown(wait=False, cancel_futures=True)
+                pool.shutdown(wait=True, cancel_futures=True)
 
 
 class _Progress:
@@ -1518,6 +1518,7 @@ def run_parallel_forward(build, workers, *, stage, action_budget=240.0):
         raise ValueError("Parallel planning needs at least one worker")
     if stage not in ("geometry", "timing"):
         raise ValueError(f"Unknown planning stage: {stage}")
+    _WORKER.clear()
     started = launched = perf_counter()
     phases = {}
     build.report("PARALLEL_FORWARD_ORDER_RUNNING")
@@ -1575,6 +1576,7 @@ def run_parallel_forward(build, workers, *, stage, action_budget=240.0):
                 phases["export_0"] = perf_counter() - started
     finally:
         pool.close()
+        _WORKER.clear()
     return write_reports(
         build, coordinator, schedule, workers, phases, status, exported, rejected, lift_offs
     )
@@ -1691,10 +1693,9 @@ def export_sections(build, witnesses, returned):
         frame="world",
         units="m",
         inputs={
-            name: sha256(run / name)
+            name: sha256(asset_path(run, name))
             for name in (
                 "cell_manifest.json",
-                "cell_drawing_variants.json",
                 "construction_plan.json",
                 "stroke_graph.json",
                 "fabrication_config.json",
@@ -1708,7 +1709,8 @@ def export_sections(build, witnesses, returned):
         requested_strokes=len(build.actions),
         checked_intervals=0,
         settings_artifact=settings,
-        initial_positions={build.arm.identity: build.initial.tolist()},
+        schema_version=2,
+        initial_positions=build.initial.tolist(),
         lift_offs=getattr(build, "lift_offs", None),
         minimum_trails=getattr(build, "minimum_trails", None),
         limitations=[

@@ -1,1 +1,2 @@
-objs/** filter=lfs diff=lfs merge=lfs -text
+examples/ghost/cute_ghost.glb filter=lfs diff=lfs merge=lfs -text
+examples/ghost/reference.jpg filter=lfs diff=lfs merge=lfs -text

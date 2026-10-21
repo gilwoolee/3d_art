@@ -15,7 +15,7 @@ import numpy as np
 
 from ..cell import load_cell, load_frame_config
 from ..curves import orient_stroke, transform_points
-from ..io import read_json, sha256
+from ..io import asset_path, read_json, sha256
 from ..kinematics import inverse_candidates
 from ..timing import make_path, refine_samples
 from .clock_path import timed_path
@@ -234,24 +234,23 @@ class CellPlanner:
         self.run, self.settings, self.deadline = Path(run), settings, deadline
         if settings.get("collision_scope", "full_robot") not in {"full_robot", "pen_candidate"}:
             raise ValueError("Collision scope must be full_robot or pen_candidate")
-        self.profile, self.arms, self.obstacles = load_cell(profile)
+        self.profile, self.arm, self.obstacles = load_cell(profile)
         self.cell = read_json(self.run / "cell_manifest.json")
+        if self.cell.get("schema_version") != 2:
+            raise ValueError("Unsupported cell snapshot: run `pen-art plan-geometry` again")
         if self.profile != read_json(self.run / "cell_config.json"):
             raise ValueError("Cell configuration changed; rebuild the setup")
         for name, digest in self.cell["inputs"].items():
-            if sha256(self.run / name) != digest:
+            if sha256(asset_path(self.run, name)) != digest:
                 raise ValueError(f"Stale cell input: {name}")
-        for name, digest in read_json(self.run / "cell_drawing_variants.json")["inputs"].items():
-            if sha256(self.run / name) != digest:
-                raise ValueError(f"Stale drawing candidate input: {name}")
         construction = read_json(self.run / "construction_plan.json")
         self.actions = {a["id"]: a for a in construction["actions"]}
         self.graph = read_json(self.run / "stroke_graph.json")
         self.tasks, self.ground = tasks_from_construction(
             construction, self.graph, settings["assumed_cooling_s"]
         )
-        source = Path(read_json(self.run / "run.json")["cell_source_run"])
-        self.process = read_json(source / "fabrication_config.json")["process"]
+        source = (self.run / read_json(self.run / "run.json")["cell_source_run"]).resolve()
+        self.process = read_json(asset_path(source, "fabrication_config.json"))["process"]
         # A profile may adjust transit settings (detail drawn on the outside
         # backs away a shorter distance).
         self.transit = {
@@ -267,13 +266,13 @@ class CellPlanner:
         self._pen_spheres = None
         self.attempts = []
         self.checked_intervals = 0
-        # load_cell accepts exactly one arm.
-        ((identity, arm),) = self.arms.items()
+        arm = self.arm
+        identity = arm.identity
         # Verify live inputs used by load_cell against the stored snapshot.
         for suffix, path in (("robot.urdf", arm.urdf), ("robot.json", arm.manifest_path)):
-            if sha256(path) != sha256(self.run / f"{identity}_{suffix}"):
+            if sha256(path) != sha256(asset_path(self.run, f"{identity}_{suffix}")):
                 raise ValueError(f"Live robot changed: {identity}")
-        saved = next(a for a in self.cell["arms"] if a["id"] == identity)
+        saved = self.cell["arm"]
         if arm.tool.metadata != saved["tool_model"]:
             raise ValueError(f"Live tool changed: {identity}")
         radius = arm.tool.tip_radius_m or self.transit["virtual_tip_radius_m"]
@@ -298,7 +297,7 @@ class CellPlanner:
         self.optimize_contact_geometry = (
             not verification_raw if optimize_contact_geometry is None else optimize_contact_geometry
         )
-        self.path_certificates = PathCertificateStore(self.run / "path_certificates")
+        self.path_certificates = PathCertificateStore(self.run / ".work" / "path_certificates")
         self.verification_stats, self.verification_seconds = Counter(), Counter()
         self._path_model_contexts, self._obstacle_context_refs = {}, {}
 
@@ -312,7 +311,7 @@ class CellPlanner:
 
     def collision_arm(self, identity):
         """Select proposal geometry without replacing the retained full robot."""
-        arm = self.arms[identity]
+        arm = self.arm
         if self.collision_scope == "full_robot":
             return arm
         proposal = copy(arm)
@@ -335,7 +334,7 @@ class CellPlanner:
         frozen object, whose hash the proof store then forms only once.
         """
         context = self._path_certificate_context(identity, kinematic=kinematic, pen=pen)
-        arm = self.arms[identity]
+        arm = self.arm
         signature = (
             self.collision_scope,
             json.dumps([self.settings, self.timing, self.process, self.transit],
@@ -358,7 +357,7 @@ class CellPlanner:
             # the kinematic context, the fixed obstacles and the pen's geometry.
             from .collision_context import collision_context_hash
 
-            arm, full = self.arms[identity], self._path_certificate_context(identity)
+            arm, full = self.arm, self._path_certificate_context(identity)
             return {
                 **self._path_certificate_context(identity, kinematic=True),
                 "obstacles": full["obstacles"],
@@ -384,7 +383,7 @@ class CellPlanner:
             static_shapes,
         )
 
-        arm = self.arms[identity]
+        arm = self.arm
         model = getattr(arm.collision, "model", arm.collision)
         tip = getattr(self.tip_model, "model", self.tip_model)
         model_key = (identity, id(model), id(tip), digest(arm.tool.metadata))
@@ -429,7 +428,7 @@ class CellPlanner:
         be used as a collision-free path origin. Staging at the selected start
         is an explicit job precondition, not a fictitious transit through it.
         """
-        ((identity, arm),) = self.arms.items()
+        arm, identity = self.arm, self.arm.identity
         contacts = self.tip_model.check(arm.initial_positions, self.obstacles, self.margin)
         if not contacts:
             return {}
@@ -488,7 +487,7 @@ class CellPlanner:
         )
 
     def travel(self, identity, scene, first, second, seed=42):
-        arm = self.arms[identity]
+        arm = self.arm
         if self.edge_check(identity, scene, first, second):
             return {"status": "CONNECTED", "positions": np.asarray([first, second])}
         # A checked route via the known home posture can connect IK branches
@@ -551,7 +550,7 @@ class CellPlanner:
 
     def pen_sample_fractions(self, identity, position):
         """Fractions of an interval whose tool positions lie within the sampling distance."""
-        arm = self.arms[identity]
+        arm = self.arm
         spacing = float(self.settings.get("pen_sample_m", 0.010))
         count = 1
         while True:
@@ -570,7 +569,7 @@ class CellPlanner:
         ``marks[k]`` is the number of wire capsules present when the pen is at
         ``fractions[k]``: a member's own wire is only what it has drawn so far.
         """
-        arm = self.arms[identity]
+        arm = self.arm
         if self._pen_spheres is None:
             self._pen_spheres = PenSpheres(arm.tool.metadata)
         spheres, wires = self._pen_spheres, wire_arrays(scene)
@@ -617,7 +616,7 @@ class CellPlanner:
     def add_clock_edge(self, scene, identity, edge, name, start=None, end=None):
         start = edge.start_s if start is None else start
         end = edge.end_s if end is None else end
-        add_piece_material(scene, self.arms[identity], edge.piece(start, end), edge.radius_m, name)
+        add_piece_material(scene, self.arm, edge.piece(start, end), edge.radius_m, name)
 
     def prepare_local_drawing(self, identity, drawing):
         """Fix one drawing's joint interpolant and its untimed DRAW path, without any scene.
@@ -962,9 +961,12 @@ class CellPlanner:
         receives those material operations in order, so another process can
         rebuild the same scene before this interval's verdict exists.
         """
-        (identity,) = self.arms
+        identity = self.arm.identity
         # The arm runs one motion at a time and is parked between motions.
-        motion = {m.proposal.arm: m for m in state.active + new}.get(identity)
+        active = state.active + new
+        if len(active) > 1 or any(m.proposal.arm != identity for m in active):
+            raise ValueError("Expected one motion on the cell arm")
+        motion = active[0] if active else None
         scope = "invariant_path" if self.collision_scope == "full_robot" else "pen_invariant_path"
         proofs = None
         if motion is not None and not deposit_only and not self.verification_raw:
@@ -1024,7 +1026,7 @@ class CellPlanner:
 
     def _fixed_references(self, identity, path):
         """Each stroke's fixed pen rotation: the declared one, else the first DRAW pose's."""
-        arm = self.arms[identity]
+        arm = self.arm
         drawing_edges = [edge for edge in path.edges if edge.kind == "DRAW"]
         declared = (
             path.metadata.get("fixed_tcp_rotation")

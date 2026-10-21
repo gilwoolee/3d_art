@@ -3,7 +3,7 @@
 Plan a wire sculpture that a robot arm draws in the air with a 3D pen, from a
 mesh to a plan checked against the whole robot. Everything is simulation.
 
-![The viewer on the ghost](docs/images/viewer_ghost.png)
+![The viewer on the ghost](examples/ghost/preview.png)
 
 ## What it does
 
@@ -21,12 +21,14 @@ machine with many cores (planning uses 24 workers; pass `--workers` for fewer).
 Unset `PYTHONPATH` first if your shell sets it.
 
 ```bash
+unset PYTHONPATH
 git clone https://github.com/gilwoolee/3d_art.git && cd 3d_art
-scripts/setup_machine.sh
+./setup.sh
+source .venv/bin/activate
 ```
 
 Setup pulls the mesh, makes `.venv`, fetches the Flexiv robot description into
-`external/`, builds the robot cell and builds the viewer.
+`.cache/`, builds the robot cell and builds the viewer.
 
 ## Steps
 
@@ -34,11 +36,16 @@ Each step is one command, run in order; results go in `runs/NAME/`. A step run
 out of order, or after its inputs changed, stops and names the step to run.
 Use `--help` on any command for its options.
 
+Each object keeps its frame in `frame/`, optional detail in `detail/`, and
+selected geometry, timing and verification files in `plan/`. Shared robot
+assets are in `cell/`; retry diagnostics and worker files are under `.work/`.
+After updating, regenerate any run reported as unsupported using these steps.
+
 **`pen-art cell`** builds the robot cell from `configs/cell.yaml`: a Flexiv
 Rizon 4 arm, a 256 × 256 mm build plate on a 10 cm stand in front of it, the
 pen, and the largest object size (15 cm). Run it again after editing the file.
 
-**`pen-art frame objs/cute_ghost/cute_ghost.glb --name ghost`** slices the mesh
+**`pen-art frame examples/ghost/cute_ghost.glb --name ghost`** slices the mesh
 into horizontal loops joined by zigzags, with a crossed grid on the plate, and
 scales the object so the frame needs at most 10 m of wire. It adds short
 connector wire so the frame can be drawn in one stroke, and checks that it
@@ -68,17 +75,19 @@ robot drawing it.
 ## Code
 
 Each step's entry point is short and calls one function per stage, so you can
-read a step top to bottom. All code is in `src/pen_art/`.
+read a step top to bottom. Python code is in `src/pen_art/`; the browser viewer
+is in `viewer/`. The example mesh, reference picture and preview are together
+in `examples/ghost/`. Downloaded dependencies live in the ignored `.cache/`.
 
 | Step | Where |
 | --- | --- |
 | Commands, stage order | `cli.py`, `stages.py` |
 | `cell` | `cell.py`, `robot.py`, `planning/tool.py` |
 | `frame` | `frame.py`; loops and zigzags in `abstraction/wireprint.py`; one-stroke connector wire in `abstraction/connectors.py`; standing check in `structure.py` |
-| `detail` | `detail.py` |
-| `plan-geometry`, `plan-timing` | `planning/section_build.py` runs a round; `planning/parallel_build.py` farms the strokes out to workers; `planning/cell_planner.py` plans and checks one stroke |
-| `verify-full-robot` | `planning/cell_replay.py` |
-| `view` | `server.py`, `web/src/` |
+| `detail` | `detail.py:generate_detail` |
+| `plan-geometry`, `plan-timing` | `planning/section_build.py:build_round` runs a round; `planning/parallel_build.py` farms the strokes out to workers; `planning/cell_planner.py` plans and checks one stroke |
+| `verify-full-robot` | `planning/cell_replay.py:replay_cell` |
+| `view` | `server.py`, `viewer/src/` |
 
 Collision checking is in `planning/collision.py` (the robot), `planning/scene.py`
 (the wire laid so far) and `planning/pen_spheres.py` (the pen). Inverse
@@ -93,8 +102,8 @@ reproducible, so the saved plans can be compared too (timings, and a few
 verification counts that depend on which worker checked what, still vary).
 
 ```bash
-.venv/bin/ruff check src scripts
-(cd web && PATH=$PWD/../tools/node/bin:$PATH npm run build)
+.venv/bin/ruff check src
+(cd viewer && PATH=$PWD/../.cache/node/bin:$PATH npm run build)
 ```
 
 Settings are in `configs/`. The pen, wire and arm limits there are
@@ -102,5 +111,5 @@ assumptions, not measurements.
 
 ## License
 
-[MIT](LICENSE), including the mesh and picture in `objs/`. The Flexiv robot
-description cloned into `external/` keeps its own license.
+[MIT](LICENSE), including the mesh and picture in `examples/`. The Flexiv robot
+description cloned into `.cache/` keeps its own license.

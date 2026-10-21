@@ -147,4 +147,3 @@ def static_shapes(profile):
             ],
         },
     }
-

@@ -50,3 +50,31 @@ def stage_update(run: Path, stage: str, status: str, **values) -> None:
     state["stages"][stage] = {"status": status, "updated_at": now(), **values}
     state["updated_at"] = now()
     write_json(path, state)
+
+
+def asset_path(folder: Path, name: str) -> Path:
+    """Resolve a saved input through its explicit, object-relative asset reference."""
+    folder = Path(folder)
+    manifest = read_json(folder / "asset_manifest.json")
+    if manifest.get("schema_version") != 2:
+        raise ValueError("Unsupported asset format: run `pen-art frame` again")
+    object_root = (folder / manifest["object_root"]).resolve()
+    path = (
+        object_root / manifest["files"][name]
+        if name in manifest["files"] else folder / name
+    ).resolve()
+    if not path.is_relative_to(object_root):
+        raise ValueError(f"Asset escapes the object directory: {name}")
+    return path
+
+
+def reference_assets(source: Path, target: Path, additions=None) -> None:
+    """Write references to shared object assets; copy no mesh or robot data."""
+    source, target = Path(source), Path(target)
+    manifest = read_json(source / "asset_manifest.json")
+    object_root = (source / manifest["object_root"]).resolve()
+    files = dict(manifest["files"])
+    for name, path in (additions or {}).items():
+        files[name] = str(Path(path).resolve().relative_to(object_root))
+    manifest.update(files=files, object_root=os.path.relpath(object_root, target.resolve()))
+    write_json(target / "asset_manifest.json", manifest)

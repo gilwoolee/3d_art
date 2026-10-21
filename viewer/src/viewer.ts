@@ -41,7 +41,7 @@ export class Viewer {
   private loadGeneration = 0;
   private cellGeneration = 0;
   private cellReference: THREE.Object3D | null = null;
-  private cellArms = new Map<string,{view:CellArmView;source:THREE.Object3D;tool:THREE.Group;toolGeometry:THREE.Group;color:number}>();
+  private cellArm: {view:CellArmView;source:THREE.Object3D;tool:THREE.Group;toolGeometry:THREE.Group;color:number} | null = null;
   private extent = .15;
   private center = new THREE.Vector3(0, 0, .045);
 
@@ -194,23 +194,20 @@ export class Viewer {
 
   clearCell() {
     ++this.cellGeneration;
-    this.cellArms.clear();this.clear(this.cell);
+    this.cellArm=null;this.clear(this.cell);
     this.cellReference=null;
   }
 
-  async loadCell(arms:CellArmView[], reference?:{url:string;world_from_build:number[][]}) {
-    ++this.loadGeneration; // An older model download must not reset this cell's camera.
+  async loadCell(view:CellArmView, reference?:{url:string;world_from_build:number[][]}) {
+    ++this.loadGeneration;
     this.clearCell();const generation=this.cellGeneration;
-    const loaded=await Promise.all(arms.map(async view=>({view,gltf:await this.loader.loadAsync(view.url)})));
-    if(generation!==this.cellGeneration){for(const {gltf} of loaded)this.clear(gltf.scene);return;}
-    for(const [index,{view,gltf}] of loaded.entries()) {
-      const tool=new THREE.Group(),toolGeometry=new THREE.Group();
-      const color=index===0?0x327aa0:0xc0813f;
-      this.cell.add(gltf.scene,tool,toolGeometry);
-      this.cellArms.set(view.id,{view,source:gltf.scene,tool,toolGeometry,color});
-      this.setToolModel(view.tool_model,toolGeometry);
-      this.setCellArmPose(view.id,view.initial_positions);
-    }
+    const gltf=await this.loader.loadAsync(view.url);
+    if(generation!==this.cellGeneration){this.clear(gltf.scene);return;}
+    const tool=new THREE.Group(),toolGeometry=new THREE.Group(),color=0x327aa0;
+    this.cell.add(gltf.scene,tool,toolGeometry);
+    this.cellArm={view,source:gltf.scene,tool,toolGeometry,color};
+    this.setToolModel(view.tool_model,toolGeometry);
+    this.setCellArmPose(view.initial_positions);
     if(reference){
       const gltf=await this.loader.loadAsync(reference.url);
       if(generation!==this.cellGeneration){this.clear(gltf.scene);return;}
@@ -231,8 +228,8 @@ export class Viewer {
     this.view();
   }
 
-  setCellArmPose(identity:string,q:number[]) {
-    const row=this.cellArms.get(identity);if(!row)throw new Error(`Missing cell arm ${identity}`);
+  setCellArmPose(q:number[]) {
+    const row=this.cellArm;if(!row)throw new Error("Cell arm is not loaded");
     return this.setRobotPose(q,row.view.rig,row.view.flange_to_tcp,{...row,world_from_base:row.view.world_from_base});
   }
 
